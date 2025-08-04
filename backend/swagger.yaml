@@ -1,0 +1,690 @@
+openapi: 3.0.0
+info:
+  title: Job Platform API
+  version: 1.0.0
+  description: API para la gestión y distribución de ofertas de empleo.
+servers:
+  - url: http://localhost:3000
+paths:
+  /job-offers:
+    post:
+      summary: Crear una nueva oferta de empleo
+      description: Crea una nueva oferta de empleo en la base de datos. Todos los campos son obligatorios salvo que se indique lo contrario.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - ExternalId
+                - Title
+                - JobTitle
+                - Description
+                - CompanyName
+                - StatusId
+              properties:
+                ExternalId:
+                  type: integer
+                  description: Identificador externo único de la oferta.
+                Title:
+                  type: string
+                  description: Título visible de la oferta.
+                JobTitle:
+                  type: string
+                  description: Puesto de trabajo (puede coincidir con Title).
+                Description:
+                  type: string
+                  description: Descripción detallada de la oferta.
+                CompanyName:
+                  type: string
+                  description: Nombre de la empresa ofertante.
+                Sector:
+                  type: string
+                  description: Sector profesional.
+                Address:
+                  type: string
+                  description: Dirección física del puesto.
+                Country:
+                  type: string
+                  description: País.
+                CountryId:
+                  type: integer
+                  description: ID del país (catálogo interno).
+                Region:
+                  type: string
+                  description: Región o estado.
+                RegionId:
+                  type: integer
+                  description: ID de la región (catálogo interno).
+                City:
+                  type: string
+                  description: Ciudad.
+                CityId:
+                  type: integer
+                  description: ID de la ciudad (catálogo interno).
+                Postcode:
+                  type: string
+                  description: Código postal.
+                Latitude:
+                  type: number
+                  format: float
+                  description: Latitud geográfica.
+                Longitude:
+                  type: number
+                  format: float
+                  description: Longitud geográfica.
+                Vacancies:
+                  type: integer
+                  description: Número de vacantes.
+                SalaryMin:
+                  type: number
+                  format: float
+                  description: Salario mínimo anual.
+                SalaryMax:
+                  type: number
+                  format: float
+                  description: Salario máximo anual.
+                JobType:
+                  type: string
+                  description: Tipo de contrato.
+                  enum: ["Full-time", "Part-time", "Freelance", "Internship", "Other"]
+                ExternalUrl:
+                  type: string
+                  description: URL externa de la oferta.
+                ApplicationUrl:
+                  type: string
+                  description: URL para aplicar a la oferta.
+                Budget:
+                  type: number
+                  format: float
+                  description: Presupuesto asignado a la oferta.
+                ApplicationsGoal:
+                  type: integer
+                  description: Objetivo de aplicaciones.
+                PublicationDate:
+                  type: string
+                  format: date-time
+                  description: Fecha de publicación (ISO 8601).
+                StatusId:
+                  type: integer
+                  description: Estado de la oferta (requerido por la base de datos).
+            example:
+              ExternalId: 123
+              Title: "Desarrollador Backend"
+              JobTitle: "Backend Developer"
+              Description: "Desarrollar y mantener APIs."
+              CompanyName: "TechCorp"
+              Sector: "Tecnología"
+              Address: "Calle Falsa 123"
+              Country: "España"
+              CountryId: 34
+              Region: "Madrid"
+              RegionId: 1
+              City: "Madrid"
+              CityId: 10
+              Postcode: "28001"
+              Latitude: 40.4168
+              Longitude: -3.7038
+              Vacancies: 2
+              SalaryMin: 25000
+              SalaryMax: 35000
+              JobType: "Full-time"
+              ExternalUrl: "https://techcorp.com/oferta/123"
+              ApplicationUrl: "https://techcorp.com/apply/123"
+              Budget: 1000
+              ApplicationsGoal: 10
+              PublicationDate: "2024-06-01T10:00:00Z"
+              StatusId: 1
+      responses:
+        '201':
+          description: Oferta creada correctamente
+        '500':
+          description: Error al crear la oferta
+
+  /api/connections:
+    get:
+      summary: Listar todas las conexiones
+      description: Devuelve todas las conexiones configuradas en el sistema.
+      responses:
+        '200':
+          description: Lista de conexiones
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Connection'
+              examples:
+                ejemplo:
+                  value:
+                    - id: 1
+                      name: "Conexión XML Turijobs"
+                      type: "XML"
+                      url: "https://ejemplo.com/feed.xml"
+                      clientId: 10
+                      status: "active"
+                    - id: 2
+                      name: "Conexión API Infojobs"
+                      type: "API"
+                      url: "https://api.infojobs.net/feed"
+                      clientId: 11
+                      status: "inactive"
+        '500':
+          description: Error al obtener conexiones
+    post:
+      summary: Crear una nueva conexión
+      description: Crea una nueva conexión de tipo XML, API o Manual para importar ofertas.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ConnectionInput'
+            examples:
+              ejemplo:
+                value:
+                  name: "Conexión XML Turijobs"
+                  type: "XML"
+                  url: "https://ejemplo.com/feed.xml"
+                  frequency: "daily"
+                  clientId: 10
+      responses:
+        '201':
+          description: Conexión creada correctamente
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Connection'
+              examples:
+                ejemplo:
+                  value:
+                    id: 3
+                    name: "Conexión Manual Prueba"
+                    type: "Manual"
+                    url: "-"
+                    frequency: "manual"
+                    clientId: 12
+                    status: "active"
+        '400':
+          description: Datos inválidos
+        '500':
+          description: Error al crear la conexión
+
+  /api/connections/{id}:
+    get:
+      summary: Obtener detalles de una conexión
+      description: Devuelve los detalles de una conexión específica por su ID.
+      parameters:
+        - in: path
+          name: id
+          required: true
+          description: ID numérico de la conexión.
+          schema:
+            type: integer
+      responses:
+        '200':
+          description: Detalles de la conexión
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Connection'
+              examples:
+                ejemplo:
+                  value:
+                    id: 1
+                    name: "Conexión XML Turijobs"
+                    type: "XML"
+                    url: "https://ejemplo.com/feed.xml"
+                    clientId: 10
+                    status: "active"
+        '404':
+          description: Conexión no encontrada
+    put:
+      summary: Actualizar una conexión
+      description: Actualiza los datos de una conexión existente.
+      parameters:
+        - in: path
+          name: id
+          required: true
+          description: ID numérico de la conexión.
+          schema:
+            type: integer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ConnectionInput'
+      responses:
+        '200':
+          description: Conexión actualizada correctamente
+        '400':
+          description: Datos inválidos
+        '404':
+          description: Conexión no encontrada
+    delete:
+      summary: Eliminar una conexión
+      description: Elimina una conexión existente por su ID.
+      parameters:
+        - in: path
+          name: id
+          required: true
+          description: ID numérico de la conexión.
+          schema:
+            type: integer
+      responses:
+        '204':
+          description: Conexión eliminada correctamente
+        '404':
+          description: Conexión no encontrada
+
+  /api/connections/{id}/fields:
+    get:
+      summary: Obtener campos detectados en la fuente de datos
+      description: Analiza la fuente de datos y devuelve los campos detectados para la conexión indicada.
+      parameters:
+        - in: path
+          name: id
+          required: true
+          description: ID numérico de la conexión.
+          schema:
+            type: integer
+      responses:
+        '200':
+          description: Lista de campos detectados
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  type: string
+              examples:
+                ejemplo:
+                  value:
+                    - "Title"
+                    - "Description"
+                    - "CompanyName"
+                    - "Location"
+        '404':
+          description: Conexión no encontrada
+
+  /api/connections/{id}/mapping:
+    get:
+      summary: Obtener mapeo de campos para una conexión
+      description: Devuelve el mapeo de campos configurado para la conexión (cliente) indicada.
+      parameters:
+        - in: path
+          name: id
+          required: true
+          description: ID numérico de la conexión/cliente.
+          schema:
+            type: integer
+      responses:
+        '200':
+          description: Mapeo de campos actual
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  type: object
+                  properties:
+                    ClientId:
+                      type: integer
+                    SourceField:
+                      type: string
+                    TargetField:
+                      type: string
+                    TransformationType:
+                      type: string
+                    TransformationRule:
+                      type: string
+              examples:
+                ejemplo:
+                  value:
+                    - ClientId: 1
+                      SourceField: "title"
+                      TargetField: "Title"
+                      TransformationType: "STRING"
+                      TransformationRule: null
+        '404':
+          description: Conexión no encontrada
+    post:
+      summary: Guardar o actualizar el mapeo de campos
+      description: Guarda o actualiza el mapeo de campos para la conexión indicada.
+      parameters:
+        - in: path
+          name: id
+          required: true
+          description: ID numérico de la conexión.
+          schema:
+            type: integer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+      responses:
+        '200':
+          description: Mapeo guardado correctamente
+        '400':
+          description: Datos inválidos
+        '404':
+          description: Conexión no encontrada
+
+  /api/connections/{id}/import:
+    post:
+      summary: Lanzar la importación/sincronización de datos
+      description: Lanza el proceso de importación o sincronización de datos para la conexión indicada (API o XML). Detecta el tipo y usa el procesador adecuado.
+      parameters:
+        - in: path
+          name: id
+          required: true
+          description: ID numérico de la conexión.
+          schema:
+            type: integer
+      responses:
+        '200':
+          description: Importación lanzada correctamente
+          content:
+            application/json:
+              schema:
+                type: object
+              examples:
+                ejemplo:
+                  value:
+                    message: "Importación iniciada"
+                    importResult:
+                      processed: 120
+                      failed: 3
+        '404':
+          description: Conexión no encontrada
+        '400':
+          description: Tipo de conexión no soportado para importación
+        '500':
+          description: Error interno del servidor
+
+  /api/connections/{id}/import/status:
+    get:
+      summary: Obtener el estado de la última importación
+      description: Devuelve el estado de la última importación para la conexión indicada.
+      parameters:
+        - in: path
+          name: id
+          required: true
+          description: ID numérico de la conexión.
+          schema:
+            type: integer
+      responses:
+        '200':
+          description: Estado de la última importación
+          content:
+            application/json:
+              schema:
+                type: object
+        '404':
+          description: Conexión no encontrada
+
+  /api/connections/{id}/import/logs:
+    get:
+      summary: Obtener el historial/log de importaciones y errores
+      description: Devuelve el historial de importaciones y errores para la conexión indicada.
+      parameters:
+        - in: path
+          name: id
+          required: true
+          description: ID numérico de la conexión.
+          schema:
+            type: integer
+      responses:
+        '200':
+          description: Historial de importaciones
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  type: object
+        '404':
+          description: Conexión no encontrada
+
+  /api/connections/types:
+    get:
+      summary: Listar los tipos de conexión soportados
+      description: Devuelve los tipos de conexión soportados por el sistema (por ejemplo, XML, API, Manual).
+      responses:
+        '200':
+          description: Tipos de conexión soportados
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  type: string
+              examples:
+                ejemplo:
+                  value:
+                    - "XML"
+                    - "API"
+                    - "Manual"
+
+  /api/connections/{id}/test:
+    get:
+      summary: Probar la conexión
+      description: Prueba la conexión indicada para verificar que la fuente de datos es accesible y válida.
+      parameters:
+        - in: path
+          name: id
+          required: true
+          description: ID numérico de la conexión.
+          schema:
+            type: integer
+      responses:
+        '200':
+          description: Conexión válida
+        '400':
+          description: Conexión inválida
+        '404':
+          description: Conexión no encontrada
+
+  /api/mappings:
+    post:
+      summary: Guardar mapeo de campos
+      description: Guarda o actualiza el mapeo de campos para un cliente específico.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                mappings:
+                  type: array
+                  items:
+                    type: object
+                    required:
+                      - ClientId
+                      - SourceField
+                      - TargetField
+                      - TransformationType
+                    properties:
+                      ClientId:
+                        type: integer
+                        description: ID del cliente
+                      SourceField:
+                        type: string
+                        description: Campo en el origen (XML/API)
+                      TargetField:
+                        type: string
+                        description: Campo en la base de datos
+                      TransformationType:
+                        type: string
+                        enum: [STRING, NUMBER, DATE, BOOLEAN, ARRAY]
+                        description: Tipo de transformación a aplicar
+                      TransformationRule:
+                        type: string
+                        description: Regla de transformación opcional (ej. formato de fecha)
+            examples:
+              ejemplo:
+                value:
+                  mappings:
+                    - ClientId: 1
+                      SourceField: "title"
+                      TargetField: "Title"
+                      TransformationType: "STRING"
+                    - ClientId: 1
+                      SourceField: "content"
+                      TargetField: "Description"
+                      TransformationType: "STRING"
+                    - ClientId: 1
+                      SourceField: "publication"
+                      TargetField: "PublicationDate"
+                      TransformationType: "DATE"
+                      TransformationRule: "DD/MM/YYYY HH:mm"
+      responses:
+        '200':
+          description: Mapeo guardado correctamente
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  message:
+                    type: string
+                    example: "Mapping saved successfully"
+        '400':
+          description: Datos inválidos
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  error:
+                    type: string
+                    example: "Missing required fields: ClientId, SourceField"
+
+  /api/mappings/{clientId}:
+    get:
+      summary: Obtener mapeo de campos
+      description: Obtiene el mapeo de campos configurado para un cliente específico.
+      parameters:
+        - in: path
+          name: clientId
+          required: true
+          description: ID del cliente
+          schema:
+            type: integer
+      responses:
+        '200':
+          description: Mapeo obtenido correctamente
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  type: object
+                  properties:
+                    ClientId:
+                      type: integer
+                    SourceField:
+                      type: string
+                    TargetField:
+                      type: string
+                    TransformationType:
+                      type: string
+                    TransformationRule:
+                      type: string
+              examples:
+                ejemplo:
+                  value:
+                    - ClientId: 1
+                      SourceField: "title"
+                      TargetField: "Title"
+                      TransformationType: "STRING"
+                      TransformationRule: null
+                    - ClientId: 1
+                      SourceField: "content"
+                      TargetField: "Description"
+                      TransformationType: "STRING"
+                      TransformationRule: null
+        '400':
+          description: Error al obtener el mapeo
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  error:
+                    type: string
+                    example: "Error getting current mapping: Invalid client ID"
+
+components:
+  schemas:
+    Connection:
+      type: object
+      description: Representa una conexión a una fuente de datos externa (XML, API, Manual).
+      properties:
+        id:
+          type: integer
+          description: ID único de la conexión.
+        name:
+          type: string
+          description: Nombre descriptivo de la conexión.
+        type:
+          type: string
+          description: Tipo de conexión.
+          enum: ["XML", "API", "Manual"]
+        url:
+          type: string
+          description: URL de la fuente de datos (o '-' si es manual).
+        frequency:
+          type: string
+          description: Frecuencia de actualización (daily, hourly, manual, etc).
+        clientId:
+          type: integer
+          description: ID del cliente asociado a la conexión.
+        status:
+          type: string
+          description: Estado de la conexión (active/inactive).
+      example:
+        id: 1
+        name: "Conexión XML Turijobs"
+        type: "XML"
+        url: "https://ejemplo.com/feed.xml"
+        frequency: "daily"
+        clientId: 10
+        status: "active"
+    ConnectionInput:
+      type: object
+      description: Datos requeridos para crear o actualizar una conexión.
+      properties:
+        name:
+          type: string
+          description: Nombre descriptivo de la conexión.
+        type:
+          type: string
+          description: Tipo de conexión.
+          enum: ["XML", "API", "Manual"]
+        url:
+          type: string
+          description: URL de la fuente de datos (o '-' si es manual).
+        frequency:
+          type: string
+          description: Frecuencia de actualización (daily, hourly, manual, etc).
+        clientId:
+          type: integer
+          description: ID del cliente asociado a la conexión.
+      required:
+        - name
+        - type
+        - url
+        - frequency
+        - clientId
+      example:
+        name: "Conexión XML Turijobs"
+        type: "XML"
+        url: "https://ejemplo.com/feed.xml"
+        frequency: "daily"
+        clientId: 10 

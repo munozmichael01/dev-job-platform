@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<jobs>
+  <job>
+    <title>Desarrollador Frontend XML</title>
+    <company>XML Tech Solutions</company>
+    <description>Desarrollamos aplicaciones web modernas con XML</description>
+    <location>Madrid</location>
+    <url>https://example.com/xml-job1</url>
+    <publication_date>2024-01-15</publication_date>
+  </job>
+  <job>
+    <title>Backend Developer XML</title>
+    <company>XML Digital Corp</company>
+    <description>Node.js y bases de datos desde XML</description>
+    <location>Barcelona</location>
+    <url>https://example.com/xml-job2</url>
+    <publication_date>2024-01-16</publication_date>
+  </job>
+</jobs>
