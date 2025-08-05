@@ -203,7 +203,7 @@ class XMLProcessor {
       const result = await pool
         .request()
         .input("ConnectionId", sql.Int, this.connection.id)
-        .query("SELECT * FROM FieldMappings WHERE ConnectionId = @ConnectionId")
+        .query("SELECT * FROM ClientFieldMappings WHERE ConnectionId = @ConnectionId")
 
       console.log(`📋 Loaded ${result.recordset.length} mappings`)
       return result.recordset
@@ -218,7 +218,16 @@ class XMLProcessor {
       const url = this.connection.url || this.connection.URL || this.connection.Url
 
       if (!url) {
+        console.error("❌ No URL found in connection:", Object.keys(this.connection))
         throw new Error("URL not found in connection")
+      }
+
+      // Validar que la URL sea válida
+      try {
+        new URL(url)
+      } catch (urlError) {
+        console.error("❌ Invalid URL format:", url)
+        throw new Error(`Invalid URL format: ${url}`)
       }
 
       console.log(`🔗 Fetching XML from: ${url}`)
@@ -340,9 +349,15 @@ class XMLProcessor {
       console.log(`✅ Processing completed: ${totalProcessed} processed, ${totalFailed} failed`)
 
       // 8. Generar mapeo automático SIEMPRE que se procesen ofertas exitosamente
+      console.log(`🚀 CLAUDE DEBUG: totalProcessed = ${totalProcessed}, offers.length = ${offers.length}`)
       if (totalProcessed > 0) {
         console.log("🔄 Generating/updating automatic mapping...")
         await this.generateAutomaticMapping(offers[0])
+      } else if (offers.length > 0) {
+        console.log("🚀 CLAUDE DEBUG: totalProcessed is 0 but offers exist, generating mapping anyway...")
+        await this.generateAutomaticMapping(offers[0])
+      } else {
+        console.log("🚀 CLAUDE DEBUG: No offers to generate mapping from")
       }
 
       return {
@@ -651,36 +666,44 @@ class XMLProcessor {
   // ✅ GENERAR MAPEO AUTOMÁTICO
   async generateAutomaticMapping(sampleOffer) {
     try {
+      console.log("🚀 CLAUDE DEBUG: generateAutomaticMapping XML CALLED WITH NEW CODE!")
+      console.log("🚀 CLAUDE DEBUG: Sample offer keys:", Object.keys(sampleOffer))
       console.log("🔄 Generating automatic field mappings...")
 
       const mappings = []
       const offerFields = Object.keys(sampleOffer)
 
-      // Mapeo estándar básico
+      // ✅ MAPEO ESTÁNDAR CORREGIDO - Usar nombres que coincidan con el frontend
       const standardMappings = {
-        'id': 'ExternalId',
-        'title': 'Title',
-        'jobtitle': 'JobTitle',
-        'content': 'Description',
-        'description': 'Description',
-        'company': 'CompanyName',
-        'category': 'Sector',
-        'address': 'Address',
-        'location': 'Address',
-        'city': 'City',
-        'region': 'Region',
-        'country': 'Country',
-        'pais': 'Country',
-        'postcode': 'Postcode',
-        'url': 'ExternalUrl',
-        'url_apply': 'ApplicationUrl',
-        'publication': 'PublicationDate',
-        'salary': 'SalaryMin',
-        'salary_min': 'SalaryMin',
-        'salary_max': 'SalaryMax',
-        'jobtype': 'JobType',
-        'vacancies': 'Vacancies',
-        'num_vacancies': 'Vacancies'
+        'id': 'apply_url',           // ID -> campo temporal 
+        'title': 'title',            // Título
+        'jobtitle': 'title',         
+        'content': 'description',    // Descripción
+        'description': 'description',
+        'company': 'company',        // Empresa
+        'category': 'sector',        // Sector
+        'address': 'location',       // Ubicación
+        'location': 'location',
+        'city': 'location',
+        'region': 'location',
+        'country': 'location',
+        'pais': 'location',
+        'postcode': 'location',
+        'url': 'apply_url',          // URL de aplicación
+        'url_apply': 'apply_url',
+        'application_url': 'apply_url',
+        'apply_url': 'apply_url',
+        'publication': 'published_at', // Fecha de publicación
+        'publication_date': 'published_at',
+        'date': 'published_at',
+        'salary': 'salary_min',      // Salario
+        'salary_min': 'salary_min',
+        'salary_max': 'salary_max',
+        'jobtype': 'contract_type',  // Tipo de contrato
+        'job_type': 'contract_type',
+        'tipo': 'contract_type',
+        'vacancies': 'contract_type', // temporal
+        'num_vacancies': 'contract_type'
       }
 
       // Crear mapeos automáticos
@@ -691,6 +714,7 @@ class XMLProcessor {
         if (targetField) {
           mappings.push({
             ConnectionId: this.connection.id,
+            ClientId: this.connection.clientId,
             SourceField: sourceField,
             TargetField: targetField,
             TransformationType: this.detectMappingType(sourceField, sampleOffer[sourceField]),
@@ -700,28 +724,37 @@ class XMLProcessor {
       }
 
       // Guardar mapeos en la base de datos
+      console.log(`🚀 CLAUDE DEBUG: Inserting ${mappings.length} mappings to ClientFieldMappings...`)
       for (const mapping of mappings) {
-        await pool
-          .request()
-          .input("ConnectionId", sql.Int, mapping.ConnectionId)
-          .input("SourceField", sql.NVarChar(255), mapping.SourceField)
-          .input("TargetField", sql.NVarChar(255), mapping.TargetField)
-          .input("TransformationType", sql.NVarChar(50), mapping.TransformationType)
-          .input("TransformationRule", sql.NVarChar(sql.MAX), mapping.TransformationRule)
-          .query(`
-            MERGE INTO ClientFieldMappings WITH (HOLDLOCK) AS Target
-            USING (SELECT @ConnectionId AS ConnectionId, @SourceField AS SourceField, @TargetField AS TargetField) AS Source
-            ON Target.ConnectionId = Source.ConnectionId 
-            AND Target.SourceField = Source.SourceField
-            AND Target.TargetField = Source.TargetField
-            WHEN MATCHED THEN
-                UPDATE SET 
-                    TransformationType = @TransformationType,
-                    TransformationRule = @TransformationRule
-            WHEN NOT MATCHED THEN
-                INSERT (ConnectionId, SourceField, TargetField, TransformationType, TransformationRule)
-                VALUES (@ConnectionId, @SourceField, @TargetField, @TransformationType, @TransformationRule);
-          `)
+        console.log(`🚀 CLAUDE DEBUG: Inserting mapping: ${mapping.SourceField} → ${mapping.TargetField}`)
+        
+        try {
+          await pool
+            .request()
+            .input("ConnectionId", sql.Int, mapping.ConnectionId)
+            .input("ClientId", sql.Int, mapping.ClientId)
+            .input("SourceField", sql.NVarChar(255), mapping.SourceField)
+            .input("TargetField", sql.NVarChar(255), mapping.TargetField)
+            .input("TransformationType", sql.NVarChar(50), mapping.TransformationType)
+            .input("TransformationRule", sql.NVarChar(sql.MAX), mapping.TransformationRule)
+            .query(`
+              MERGE INTO ClientFieldMappings WITH (HOLDLOCK) AS Target
+              USING (SELECT @ConnectionId AS ConnectionId, @ClientId AS ClientId, @SourceField AS SourceField, @TargetField AS TargetField) AS Source
+              ON Target.ConnectionId = Source.ConnectionId 
+              AND Target.SourceField = Source.SourceField
+              AND Target.TargetField = Source.TargetField
+              WHEN MATCHED THEN
+                  UPDATE SET 
+                      TransformationType = @TransformationType,
+                      TransformationRule = @TransformationRule
+              WHEN NOT MATCHED THEN
+                  INSERT (ConnectionId, ClientId, SourceField, TargetField, TransformationType, TransformationRule)
+                  VALUES (@ConnectionId, @ClientId, @SourceField, @TargetField, @TransformationType, @TransformationRule);
+            `)
+          console.log(`✅ Successfully inserted mapping: ${mapping.SourceField} → ${mapping.TargetField}`)
+        } catch (insertError) {
+          console.error(`❌ Error inserting mapping ${mapping.SourceField} → ${mapping.TargetField}:`, insertError.message)
+        }
       }
 
       console.log(`✅ Generated ${mappings.length} automatic mappings`)

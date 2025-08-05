@@ -6,10 +6,47 @@ const mappingsRouter = require('./src/routes/mappings');
 const swaggerUi = require('swagger-ui-express');
 const YAML = require('yamljs');
 const path = require('path');
+const fs = require('fs');
 require('dotenv').config();
 const cors = require('cors');
 const fileUpload = require('express-fileupload');
 // require('./scheduler'); // Temporarily disabled for debugging
+
+// ✅ SETUP LOGGING TO FILE
+const originalConsoleLog = console.log;
+const originalConsoleError = console.error;
+
+console.log = function(...args) {
+  const timestamp = new Date().toISOString();
+  const message = args.map(arg => typeof arg === 'object' ? JSON.stringify(arg) : arg).join(' ');
+  const logEntry = `${timestamp} - ${message}\n`;
+  
+  // Write to file
+  try {
+    fs.appendFileSync(path.join(__dirname, 'debug.log'), logEntry);
+  } catch (err) {
+    originalConsoleLog('Failed to write to debug.log:', err);
+  }
+  
+  // ALWAYS show in console (CLAUDE DEBUG FIX)
+  originalConsoleLog(...args);
+};
+
+console.error = function(...args) {
+  const timestamp = new Date().toISOString();
+  const message = args.map(arg => typeof arg === 'object' ? JSON.stringify(arg) : arg).join(' ');
+  const logEntry = `${timestamp} - ERROR: ${message}\n`;
+  
+  // Write to file
+  try {
+    fs.appendFileSync(path.join(__dirname, 'debug.log'), logEntry);
+  } catch (err) {
+    originalConsoleLog('Failed to write error to debug.log:', err);
+  }
+  
+  // ALWAYS show in console (CLAUDE DEBUG FIX)
+  originalConsoleError(...args);
+};
 
 const app = express();
 // Manual CORS middleware to ensure headers are set correctly
@@ -146,12 +183,32 @@ app.post('/job-offers', async (req, res) => {
 });
 
 const PORT = process.env.PORT || 3002;
-app.listen(PORT, () => {
+
+// ✅ AGREGAR MANEJO DE ERRORES NO CAPTURADOS
+process.on('uncaughtException', (err) => {
+  console.error('🚀 CLAUDE DEBUG: UNCAUGHT EXCEPTION!', err);
+  console.error('Stack:', err.stack);
+});
+
+process.on('unhandledRejection', (reason, promise) => {
+  console.error('🚀 CLAUDE DEBUG: UNHANDLED REJECTION!', reason);
+  console.error('Promise:', promise);
+});
+
+const server = app.listen(PORT, () => {
   console.log(`✅ API running on http://localhost:${PORT}`);
   console.log('📊 Available endpoints:');
   console.log(`  - GET http://localhost:${PORT}/`);
   console.log(`  - GET http://localhost:${PORT}/swagger`);
   console.log(`  - GET http://localhost:${PORT}/api/connections`);
-});// Force restart
+  console.log('🚀 🚀 🚀 CLAUDE DEBUG: NEW VERSION WITH DEBUG LOGS LOADED! 🚀 🚀 🚀');
+});
+
+server.on('error', (err) => {
+  console.error('🚀 CLAUDE DEBUG: SERVER ERROR!', err);
+});
+
+// ✅ MANTENER EL PROCESO VIVO
+console.log('🚀 CLAUDE DEBUG: Process should remain alive...');// Force restart
 
 // CORS fix applied

@@ -16,7 +16,10 @@
       "Bash(npm run build:*)",
       "Bash(rmdir:*)",
       "Bash(rm:*)",
-      "Bash(powershell:*)"
+      "Bash(powershell:*)",
+      "Bash(ls:*)",
+      "Bash(cat:*)",
+      "Bash(npm run start:*)"
     ],
     "deny": []
   }

@@ -273,6 +273,8 @@ router.delete("/:id", async (req, res) => {
 
 // POST /api/connections/:id/import - Importar ofertas de una conexión
 router.post("/:id/import", async (req, res) => {
+  console.log("🚀 CLAUDE DEBUG: /import ENDPOINT CALLED!")
+  console.log("🚀 CLAUDE DEBUG: Request params:", JSON.stringify(req.params))
   // CORS Headers
   const origin = req.headers.origin;
   const allowedOrigins = ['http://localhost:3007', 'http://127.0.0.1:3007', 'http://localhost:3004', 'http://127.0.0.1:3004', 'http://localhost:3006', 'http://127.0.0.1:3006'];
@@ -326,8 +328,20 @@ router.post("/:id/import", async (req, res) => {
     let processor
     try {
       if (connectionType.toLowerCase() === "xml") {
+        console.log("🚀 CLAUDE DEBUG: CREATING XML PROCESSOR FOR FEED!")
+        console.log("🚀 CLAUDE DEBUG: Connection URL:", connectionUrl)
+        
+        if (!connectionUrl) {
+          console.error("❌ URL no definida para conexión XML:", connection)
+          return res.status(400).json({
+            error: "URL no definida para conexión XML",
+            connectionData: connection
+          })
+        }
+        
         const XMLProcessor = require("../processors/xmlProcessor")
         processor = new XMLProcessor(connection)
+        console.log("🚀 CLAUDE DEBUG: XML PROCESSOR CREATED, ABOUT TO CALL process()")
       } else if (connectionType.toLowerCase() === "api") {
         const APIProcessor = require("../processors/apiProcessor")
         processor = new APIProcessor(connection)
@@ -361,7 +375,9 @@ router.post("/:id/import", async (req, res) => {
     console.log("🔄 Iniciando importación...")
 
     // Ejecutar importación
+    console.log("🚀 CLAUDE DEBUG: About to call processor.process()")
     const result = await processor.process()
+    console.log("🚀 CLAUDE DEBUG: Processor result:", JSON.stringify(result, null, 2))
 
     console.log("✅ Importación completada:", result)
 
@@ -389,6 +405,9 @@ router.post("/:id/import", async (req, res) => {
       result: result,
     })
   } catch (error) {
+    console.error("🚀 CLAUDE DEBUG: ERROR EN IMPORTACIÓN!")
+    console.error("🚀 CLAUDE DEBUG: Error details:", error.message)
+    console.error("🚀 CLAUDE DEBUG: Error stack:", error.stack)
     console.error("❌ Error en importación:", error)
 
     // Actualizar estado a 'error'
@@ -991,6 +1010,7 @@ router.get("/:id/mapping", async (req, res) => {
 // GET /api/connections/:id/mappings - Obtener mapeos de campos
 router.get("/:id/mappings", async (req, res) => {
   const { id } = req.params
+  console.log(`🚀 CLAUDE DEBUG: GET /mappings endpoint called for connection ${id}`)
   console.log(`🔍 GET /api/connections/:id/mappings - ID: ${id}`)
 
   try {
@@ -1010,6 +1030,8 @@ router.get("/:id/mappings", async (req, res) => {
         ORDER BY TargetField
       `)
 
+    console.log(`🚀 CLAUDE DEBUG: Found ${result.recordset.length} mappings in ClientFieldMappings`)
+    console.log(`🚀 CLAUDE DEBUG: Mappings:`, JSON.stringify(result.recordset.slice(0, 3), null, 2))
     console.log(`✅ Encontrados ${result.recordset.length} mapeos`)
     res.json(result.recordset)
   } catch (error) {
@@ -1026,7 +1048,7 @@ router.post("/:id/mappings", async (req, res) => {
   const { id } = req.params
   const { mappings } = req.body
 
-  console.log(`🔍 POST /api/connections/:id/mappings - ID: ${id}`, mappings)
+  console.log(`🔍 POST /api/connections/:id/mappings - ID: ${id}`, JSON.stringify(mappings, null, 2))
 
   try {
     if (!Array.isArray(mappings)) {

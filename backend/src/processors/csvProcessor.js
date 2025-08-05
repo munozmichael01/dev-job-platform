@@ -299,19 +299,160 @@ class CSVProcessor {
   }
 
   async parseCSV(filePath) {
-    return new Promise((resolve, reject) => {
-      const offers = []
+    console.log("🚀 CLAUDE DEBUG: parseCSV FUNCTION CALLED WITH NEW CODE!")
+    console.log(`🚀 CLAUDE DEBUG: FilePath: ${filePath}`)
+    return new Promise(async (resolve, reject) => {
+      try {
+        // ✅ DETECTAR AUTOMÁTICAMENTE SI HAY HEADERS
+        console.log("🚀 CLAUDE DEBUG: About to detect headers...")
+        const hasHeaders = await this.detectHeaders(filePath)
+        console.log(`🚀 CLAUDE DEBUG: Headers detected: ${hasHeaders}`)
+        
+        const offers = []
+        let isFirstRow = true
+        let headerRow = null
+        
+        // ✅ CONFIGURAR CSV PARSER FLEXIBLE
+        const csvOptions = {
+          headers: false, // Manejar headers manualmente
+          skipEmptyLines: true,
+          quote: '"',
+          escape: '"',
+          raw: false,
+          strictColumnHandling: false,
+          maxRowBytes: 100000,
+          skipLinesWithError: false
+        }
+        
+        fs.createReadStream(filePath)
+          .pipe(csv(csvOptions))
+          .on('data', (row) => {
+            try {
+              if (isFirstRow && hasHeaders) {
+                // Guardar headers y saltar esta fila
+                headerRow = row
+                isFirstRow = false
+                console.log(`📋 Headers found:`, headerRow.slice(0, 10))
+                return
+              }
+              
+              isFirstRow = false
+              
+              // ✅ CONVERTIR ARRAY A OBJETO
+              const offerObject = {}
+              
+              if (hasHeaders && headerRow) {
+                // ✅ USAR HEADERS COMO NOMBRES DE CAMPO
+                for (let i = 0; i < row.length; i++) {
+                  let value = row[i] || ""
+                  
+                  // ✅ LIMPIAR HTML EMBEBIDO Y CARACTERES ESPECIALES
+                  if (typeof value === 'string') {
+                    value = value
+                      .replace(/&lt;/g, '<')
+                      .replace(/&gt;/g, '>')
+                      .replace(/&amp;/g, '&')
+                      .replace(/&quot;/g, '"')
+                      .replace(/&#39;/g, "'")
+                      .replace(/&nbsp;/g, ' ')
+                      .trim()
+                  }
+                  
+                  const fieldName = headerRow[i] || `col_${i}`
+                  offerObject[fieldName] = value
+                  offerObject[`col_${i}`] = value // También mantener posición
+                }
+              } else {
+                // ✅ SIN HEADERS - USAR POSICIONES
+                for (let i = 0; i < row.length; i++) {
+                  let value = row[i] || ""
+                  
+                  if (typeof value === 'string') {
+                    value = value
+                      .replace(/&lt;/g, '<')
+                      .replace(/&gt;/g, '>')
+                      .replace(/&amp;/g, '&')
+                      .replace(/&quot;/g, '"')
+                      .replace(/&#39;/g, "'")
+                      .replace(/&nbsp;/g, ' ')
+                      .trim()
+                  }
+                  
+                  offerObject[`col_${i}`] = value
+                }
+                
+                // Mapeo específico para CSV sin headers
+                offerObject.id = offerObject.col_0
+                offerObject.title = offerObject.col_24
+                offerObject.location = offerObject.col_26
+              }
+              
+              offers.push(offerObject)
+            } catch (rowError) {
+              console.warn(`⚠️ Error processing CSV row: ${rowError.message}`)
+            }
+          })
+          .on('end', () => {
+            console.log(`✅ CSV parsed successfully, ${offers.length} rows`)
+            if (offers.length > 0) {
+              console.log(`✅ First offer structure:`, Object.keys(offers[0]).slice(0, 10))
+              console.log(`✅ Sample values:`, {
+                firstKey: Object.keys(offers[0])[0],
+                firstValue: offers[0][Object.keys(offers[0])[0]],
+                hasId: !!offers[0].id,
+                hasTitle: !!offers[0].title
+              })
+            }
+            resolve(offers)
+          })
+          .on('error', reject)
+      } catch (error) {
+        reject(error)
+      }
+    })
+  }
+
+  // ✅ DETECTAR SI LA PRIMERA FILA CONTIENE HEADERS
+  async detectHeaders(filePath) {
+    return new Promise((resolve) => {
+      let firstRow = null
       
       fs.createReadStream(filePath)
-        .pipe(csv())
+        .pipe(csv({ headers: false }))
         .on('data', (row) => {
-          offers.push(row)
+          if (!firstRow) {
+            firstRow = row
+            
+            // ✅ HEURÍSTICAS PARA DETECTAR HEADERS
+            let headerScore = 0
+            let totalFields = Math.min(row.length, 10) // Analizar primeros 10 campos
+            
+            for (let i = 0; i < totalFields; i++) {
+              const value = String(row[i] || "").trim()
+              
+              if (value) {
+                // Headers típicos: contienen texto, no solo números
+                if (isNaN(Number(value))) headerScore++
+                
+                // Headers comunes
+                if (/^(id|title|name|company|city|location|url|date|publication|salary|description|content)$/i.test(value)) {
+                  headerScore += 2
+                }
+                
+                // Headers en español
+                if (/^(titulo|empresa|ciudad|ubicacion|fecha|salario|descripcion|contenido|puesto)$/i.test(value)) {
+                  headerScore += 2
+                }
+              }
+            }
+            
+            // Si más del 50% parecen headers, asumir que tiene headers
+            const hasHeaders = headerScore > (totalFields * 0.5)
+            console.log(`🔍 Header detection - Score: ${headerScore}/${totalFields}, Has headers: ${hasHeaders}`)
+            resolve(hasHeaders)
+          }
         })
-        .on('end', () => {
-          console.log(`✅ CSV parsed successfully, ${offers.length} rows`)
-          resolve(offers)
-        })
-        .on('error', reject)
+        .on('error', () => resolve(false))
     })
   }
 
@@ -674,17 +815,26 @@ class CSVProcessor {
   // ✅ GENERAR MAPEO AUTOMÁTICO
   async generateAutomaticMapping(sampleOffer) {
     try {
+      console.log("🚀 CLAUDE DEBUG: generateAutomaticMapping CSV CALLED WITH NEW CODE!")
+      console.log("🚀 CLAUDE DEBUG: Sample offer keys:", Object.keys(sampleOffer))
       console.log("🔄 Generating automatic field mappings...")
       console.log("🔍 MAPPING DEBUG: generateAutomaticMapping called with fields:", Object.keys(sampleOffer))
 
       const mappings = []
       const offerFields = Object.keys(sampleOffer)
 
-      // ✅ MAPEO ESTÁNDAR CORREGIDO - Usar nombres que coincidan con el frontend
+      // ✅ MAPEO ESTÁNDAR CORREGIDO - Incluir mapeos por posición de columna Y por nombre
       const standardMappings = {
-        'id': 'apply_url',  // temporal - el ID puede ir a cualquier campo
+        // Mapeos por posición de columna (para CSV sin headers)
+        'col_0': 'apply_url',    // ID de la oferta -> campo temporal
+        'col_24': 'title',       // Título de la oferta
+        'col_26': 'location',    // Ciudad/ubicación
+        'id': 'apply_url',       // ID mapeado
+        'title': 'title',        // Título mapeado
+        'location': 'location',  // Ubicación mapeada
+        
+        // Mapeos tradicionales por nombre (para compatibilidad)
         'codigo': 'apply_url',
-        'title': 'title',
         'titulo': 'title',
         'puesto': 'title',
         'jobtitle': 'title',
@@ -700,7 +850,6 @@ class CSVProcessor {
         'sector': 'sector',
         'address': 'location',
         'direccion': 'location',
-        'location': 'location',
         'ubicacion': 'location',
         'city': 'location',
         'ciudad': 'location',
