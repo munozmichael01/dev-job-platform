@@ -1021,6 +1021,7 @@ router.get("/:id/mappings", async (req, res) => {
       .query(`
         SELECT 
           ConnectionId,
+          ClientId,
           SourceField,
           TargetField,
           TransformationType,

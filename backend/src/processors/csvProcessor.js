@@ -528,7 +528,26 @@ class CSVProcessor {
       }
     } else {
       // Mapeo automático por defecto - adaptado para CSV en español
-      standardOffer.ExternalId = String(offer.id || offer.ID || offer.Id || offer.codigo || offer.identifier || offer.externalId || Math.random().toString(36).substr(2, 9))
+      // ✅ ARREGLAR: Generar ExternalId numérico válido para SQL Server INT (max 2,147,483,647)
+      let externalId = offer.id || offer.ID || offer.Id || offer.codigo || offer.identifier || offer.externalId
+      if (!externalId || isNaN(Number(externalId))) {
+        // Generar ID numérico que no exceda el límite INT de SQL Server
+        // Usar timestamp truncado + índice para evitar overflow
+        const timestamp = Date.now() % 1000000000 // Últimos 9 dígitos del timestamp
+        const randomPart = Math.floor(Math.random() * 999) // 3 dígitos máximo
+        externalId = timestamp * 1000 + randomPart // Total máximo ~1,000,000,000,999 que excede INT
+        
+        // Si aún es muy grande, usar solo timestamp modulo + random pequeño
+        if (externalId > 2147483647) {
+          externalId = (timestamp % 2000000) + Math.floor(Math.random() * 147483)
+        }
+      }
+      // Asegurar que no exceda el límite INT
+      const numericId = Number(externalId)
+      if (numericId > 2147483647) {
+        externalId = Math.floor(Math.random() * 2147483647)
+      }
+      standardOffer.ExternalId = String(externalId)
       standardOffer.Title = String(offer.title || offer.titulo || offer.puesto || offer.jobtitle || offer.job_title || "")
       standardOffer.JobTitle = String(offer.jobtitle || offer.puesto || offer.job_title || offer.title || offer.titulo || "")
       standardOffer.Description = String(offer.content || offer.description || offer.descripcion || offer.job_description || "")
@@ -563,7 +582,7 @@ class CSVProcessor {
 
     // ✅ VALIDACIÓN MEJORADA - Asegurar campos requeridos no vacíos
     if (!standardOffer.ExternalId || standardOffer.ExternalId.trim() === '') {
-      standardOffer.ExternalId = `csv_${Date.now()}_${Math.random().toString(36).substr(2, 5)}`
+      standardOffer.ExternalId = Date.now().toString() + Math.floor(Math.random() * 1000).toString()
     }
     if (!standardOffer.Title || standardOffer.Title.trim() === '') {
       standardOffer.Title = 'Oferta de trabajo'
@@ -677,7 +696,7 @@ class CSVProcessor {
 
       const result = await pool
         .request()
-        .input("ExternalId", sql.NVarChar(255), String(offer.ExternalId))
+        .input("ExternalId", sql.Int, Number(offer.ExternalId))
         .input("Title", sql.NVarChar(255), offer.Title || "")
         .input("JobTitle", sql.NVarChar(255), offer.JobTitle || offer.Title || "")
         .input("Description", sql.NVarChar(sql.MAX), offer.Description)
@@ -823,84 +842,109 @@ class CSVProcessor {
       const mappings = []
       const offerFields = Object.keys(sampleOffer)
 
-      // ✅ MAPEO ESTÁNDAR CORREGIDO - Incluir mapeos por posición de columna Y por nombre
+      // ✅ MAPEO ESTÁNDAR SINCRONIZADO con PRIORIDADES INTELIGENTES (igual que XML Feed)
       const standardMappings = {
         // Mapeos por posición de columna (para CSV sin headers)
         'col_0': 'apply_url',    // ID de la oferta -> campo temporal
-        'col_24': 'title',       // Título de la oferta
-        'col_26': 'location',    // Ciudad/ubicación
-        'id': 'apply_url',       // ID mapeado
-        'title': 'title',        // Título mapeado
-        'location': 'location',  // Ubicación mapeada
+        'col_24': 'title',       // Título de la oferta  
+        'col_26': 'location',    // Ciudad/ubicación (caso especial por posición)
         
-        // Mapeos tradicionales por nombre (para compatibilidad)
+        // Mapeos estándar básicos
+        'id': 'apply_url',           // ID -> campo temporal 
         'codigo': 'apply_url',
+        'title': 'title',            // Título
         'titulo': 'title',
         'puesto': 'title',
-        'jobtitle': 'title',
+        'jobtitle': 'title',         
         'job_title': 'title',
-        'content': 'description',
+        'content': 'description',    // Descripción
         'description': 'description',
         'descripcion': 'description',
-        'company': 'company',
+        'company': 'company',        // Empresa
         'empresa': 'company',
         'company_name': 'company',
-        'category': 'sector',
+        'category': 'sector',        // Sector
         'categoria': 'sector',
         'sector': 'sector',
-        'address': 'location',
-        'direccion': 'location',
-        'ubicacion': 'location',
-        'city': 'location',
-        'ciudad': 'location',
-        'localidad': 'location',
-        'municipio': 'location',
-        'region': 'location',
-        'provincia': 'location',
-        'comunidad': 'location',
-        'country': 'location',
-        'pais': 'location',
-        'país': 'location',
-        'postcode': 'location',
-        'codigo_postal': 'location',
-        'cp': 'location',
-        'postal_code': 'location',
-        'url': 'apply_url',
+        'url': 'apply_url',          // URL de aplicación
         'enlace': 'apply_url',
         'external_url': 'apply_url',
         'url_apply': 'apply_url',
         'url_aplicacion': 'apply_url',
         'application_url': 'apply_url',
         'apply_url': 'apply_url',
-        'publication': 'published_at',
+        'publication': 'published_at', // Fecha de publicación
         'fecha': 'published_at',
         'publication_date': 'published_at',
         'date': 'published_at',
         'fecha_publicacion': 'published_at',
-        'salary': 'salary_min',
+        'salary': 'salary_min',      // Salario
         'salario': 'salary_min',
         'salary_min': 'salary_min',
         'salario_min': 'salary_min',
         'salary_max': 'salary_max',
         'salario_max': 'salary_max',
-        'jobtype': 'contract_type',
+        'jobtype': 'contract_type',  // Tipo de contrato
         'tipo_contrato': 'contract_type',
         'job_type': 'contract_type',
         'tipo': 'contract_type',
-        'vacancies': 'contract_type',  // temporal
+        'vacancies': 'contract_type', // temporal
         'vacantes': 'contract_type',
         'num_vacancies': 'contract_type',
         'numero_vacantes': 'contract_type'
       }
 
-      // Crear mapeos automáticos
+      // ✅ SISTEMA DE PRIORIDADES PARA UBICACIÓN: city > region > country > location > address > postcode
+      const locationPriorities = [
+        // Prioridad 1: CITY (más específica)
+        'city', 'ciudad', 'localidad', 'municipio',
+        // Prioridad 2: REGION  
+        'region', 'provincia', 'comunidad',
+        // Prioridad 3: COUNTRY
+        'country', 'pais', 'país',
+        // Prioridad 4: LOCATION (genérico)
+        'location', 'ubicacion',
+        // Prioridad 5: ADDRESS
+        'address', 'direccion',
+        // Prioridad 6: POSTCODE (menos específica)
+        'postcode', 'codigo_postal', 'cp', 'postal_code'
+      ]
+
+      // Crear mapeos automáticos con manejo inteligente de ubicación
+      let locationMappingCreated = false
+
+      // Primero, buscar el campo de ubicación con mayor prioridad
+      for (const priorityField of locationPriorities) {
+        const foundField = offerFields.find(field => field.toLowerCase() === priorityField)
+        if (foundField && !locationMappingCreated) {
+          mappings.push({
+            ConnectionId: this.connection.id,
+            ClientId: this.connection.clientId,
+            SourceField: foundField,
+            TargetField: 'location',
+            TransformationType: this.detectMappingType(foundField, sampleOffer[foundField]),
+            TransformationRule: null
+          })
+          locationMappingCreated = true
+          console.log(`🎯 CSV PRIORITY MAPPING: ${foundField} → location (priority: ${locationPriorities.indexOf(priorityField) + 1})`)
+          break
+        }
+      }
+
+      // Luego, crear mapeos para todos los otros campos (excepto ubicación)
       for (const sourceField of offerFields) {
         const lowerField = sourceField.toLowerCase()
-        const targetField = standardMappings[lowerField]
+        
+        // Skip si es un campo de ubicación (ya procesado arriba)
+        if (locationPriorities.includes(lowerField)) {
+          continue
+        }
 
+        const targetField = standardMappings[lowerField]
         if (targetField) {
           mappings.push({
             ConnectionId: this.connection.id,
+            ClientId: this.connection.clientId,
             SourceField: sourceField,
             TargetField: targetField,
             TransformationType: this.detectMappingType(sourceField, sampleOffer[sourceField]),
@@ -918,13 +962,14 @@ class CSVProcessor {
           await pool
             .request()
             .input("ConnectionId", sql.Int, mapping.ConnectionId)
+            .input("ClientId", sql.Int, mapping.ClientId)
             .input("SourceField", sql.NVarChar(255), mapping.SourceField)
             .input("TargetField", sql.NVarChar(255), mapping.TargetField)
             .input("TransformationType", sql.NVarChar(50), mapping.TransformationType)
             .input("TransformationRule", sql.NVarChar(sql.MAX), mapping.TransformationRule)
             .query(`
               MERGE INTO ClientFieldMappings WITH (HOLDLOCK) AS Target
-              USING (SELECT @ConnectionId AS ConnectionId, @SourceField AS SourceField, @TargetField AS TargetField) AS Source
+              USING (SELECT @ConnectionId AS ConnectionId, @ClientId AS ClientId, @SourceField AS SourceField, @TargetField AS TargetField) AS Source
               ON Target.ConnectionId = Source.ConnectionId 
               AND Target.SourceField = Source.SourceField
               AND Target.TargetField = Source.TargetField
@@ -933,8 +978,8 @@ class CSVProcessor {
                       TransformationType = @TransformationType,
                       TransformationRule = @TransformationRule
               WHEN NOT MATCHED THEN
-                  INSERT (ConnectionId, SourceField, TargetField, TransformationType, TransformationRule)
-                  VALUES (@ConnectionId, @SourceField, @TargetField, @TransformationType, @TransformationRule);
+                  INSERT (ConnectionId, ClientId, SourceField, TargetField, TransformationType, TransformationRule)
+                  VALUES (@ConnectionId, @ClientId, @SourceField, @TargetField, @TransformationType, @TransformationRule);
             `)
           console.log(`✅ Mapeo insertado exitosamente: ${mapping.SourceField} → ${mapping.TargetField}`)
         } catch (insertError) {

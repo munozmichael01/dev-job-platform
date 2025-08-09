@@ -766,6 +766,7 @@ class APIProcessor {
         if (targetField) {
           mappings.push({
             ConnectionId: this.connection.id,
+            ClientId: this.connection.clientId,
             SourceField: sourceField,
             TargetField: targetField,
             TransformationType: this.detectMappingType(sourceField, sampleOffer[sourceField]),
@@ -779,13 +780,14 @@ class APIProcessor {
         await pool
           .request()
           .input("ConnectionId", sql.Int, mapping.ConnectionId)
+          .input("ClientId", sql.Int, mapping.ClientId)
           .input("SourceField", sql.NVarChar(255), mapping.SourceField)
           .input("TargetField", sql.NVarChar(255), mapping.TargetField)
           .input("TransformationType", sql.NVarChar(50), mapping.TransformationType)
           .input("TransformationRule", sql.NVarChar(sql.MAX), mapping.TransformationRule)
           .query(`
             MERGE INTO ClientFieldMappings WITH (HOLDLOCK) AS Target
-            USING (SELECT @ConnectionId AS ConnectionId, @SourceField AS SourceField, @TargetField AS TargetField) AS Source
+            USING (SELECT @ConnectionId AS ConnectionId, @ClientId AS ClientId, @SourceField AS SourceField, @TargetField AS TargetField) AS Source
             ON Target.ConnectionId = Source.ConnectionId 
             AND Target.SourceField = Source.SourceField
             AND Target.TargetField = Source.TargetField
@@ -794,8 +796,8 @@ class APIProcessor {
                     TransformationType = @TransformationType,
                     TransformationRule = @TransformationRule
             WHEN NOT MATCHED THEN
-                INSERT (ConnectionId, SourceField, TargetField, TransformationType, TransformationRule)
-                VALUES (@ConnectionId, @SourceField, @TargetField, @TransformationType, @TransformationRule);
+                INSERT (ConnectionId, ClientId, SourceField, TargetField, TransformationType, TransformationRule)
+                VALUES (@ConnectionId, @ClientId, @SourceField, @TargetField, @TransformationType, @TransformationRule);
           `)
       }
 

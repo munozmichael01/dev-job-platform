@@ -647,41 +647,77 @@ class XMLFileProcessor {
       const mappings = []
       const offerFields = Object.keys(sampleOffer)
 
-      // ✅ MAPEO ESTÁNDAR CORREGIDO - Usar nombres que coincidan con el frontend
+      // ✅ MAPEO ESTÁNDAR SINCRONIZADO con PRIORIDADES INTELIGENTES (igual que XML Feed)
       const standardMappings = {
-        'id': 'apply_url',
-        'title': 'title',
-        'jobtitle': 'title',
-        'content': 'description',
+        'id': 'apply_url',           // ID -> campo temporal 
+        'title': 'title',            // Título
+        'jobtitle': 'title',         
+        'content': 'description',    // Descripción
         'description': 'description',
-        'company': 'company',
-        'category': 'sector',
-        'address': 'location',
-        'location': 'location',
-        'city': 'location',
-        'region': 'location',
-        'country': 'location',
-        'pais': 'location',
-        'postcode': 'location',
-        'url': 'apply_url',
+        'company': 'company',        // Empresa
+        'category': 'sector',        // Sector
+        'url': 'apply_url',          // URL de aplicación
         'url_apply': 'apply_url',
-        'publication': 'published_at',
-        'salary': 'salary_min',
+        'application_url': 'apply_url',
+        'apply_url': 'apply_url',
+        'publication': 'published_at', // Fecha de publicación
+        'publication_date': 'published_at',
+        'date': 'published_at',
+        'salary': 'salary_min',      // Salario
         'salary_min': 'salary_min',
         'salary_max': 'salary_max',
-        'jobtype': 'contract_type',
-        'vacancies': 'contract_type',
+        'jobtype': 'contract_type',  // Tipo de contrato
+        'job_type': 'contract_type',
+        'tipo': 'contract_type',
+        'vacancies': 'contract_type', // temporal
         'num_vacancies': 'contract_type'
       }
 
-      // Crear mapeos automáticos
+      // ✅ SISTEMA DE PRIORIDADES PARA UBICACIÓN: city > region > country > location > address > postcode
+      const locationPriorities = [
+        'city',      // Prioridad 1 (más específica)
+        'region',    // Prioridad 2
+        'country',   // Prioridad 3
+        'location',  // Prioridad 4
+        'address',   // Prioridad 5
+        'postcode'   // Prioridad 6 (menos específica)
+      ]
+
+      // Crear mapeos automáticos con manejo inteligente de ubicación
+      let locationMappingCreated = false
+
+      // Primero, buscar el campo de ubicación con mayor prioridad
+      for (const priorityField of locationPriorities) {
+        const foundField = offerFields.find(field => field.toLowerCase() === priorityField)
+        if (foundField && !locationMappingCreated) {
+          mappings.push({
+            ConnectionId: this.connection.id,
+            ClientId: this.connection.clientId,
+            SourceField: foundField,
+            TargetField: 'location',
+            TransformationType: this.detectMappingType(foundField, sampleOffer[foundField]),
+            TransformationRule: null
+          })
+          locationMappingCreated = true
+          console.log(`🎯 XML MANUAL PRIORITY MAPPING: ${foundField} → location (priority: ${locationPriorities.indexOf(priorityField) + 1})`)
+          break
+        }
+      }
+
+      // Luego, crear mapeos para todos los otros campos (excepto ubicación)
       for (const sourceField of offerFields) {
         const lowerField = sourceField.toLowerCase()
-        const targetField = standardMappings[lowerField]
+        
+        // Skip si es un campo de ubicación (ya procesado arriba)
+        if (locationPriorities.includes(lowerField)) {
+          continue
+        }
 
+        const targetField = standardMappings[lowerField]
         if (targetField) {
           mappings.push({
             ConnectionId: this.connection.id,
+            ClientId: this.connection.clientId,
             SourceField: sourceField,
             TargetField: targetField,
             TransformationType: this.detectMappingType(sourceField, sampleOffer[sourceField]),
@@ -695,13 +731,14 @@ class XMLFileProcessor {
         await pool
           .request()
           .input("ConnectionId", sql.Int, mapping.ConnectionId)
+          .input("ClientId", sql.Int, mapping.ClientId)
           .input("SourceField", sql.NVarChar(255), mapping.SourceField)
           .input("TargetField", sql.NVarChar(255), mapping.TargetField)
           .input("TransformationType", sql.NVarChar(50), mapping.TransformationType)
           .input("TransformationRule", sql.NVarChar(sql.MAX), mapping.TransformationRule)
           .query(`
             MERGE INTO ClientFieldMappings WITH (HOLDLOCK) AS Target
-            USING (SELECT @ConnectionId AS ConnectionId, @SourceField AS SourceField, @TargetField AS TargetField) AS Source
+            USING (SELECT @ConnectionId AS ConnectionId, @ClientId AS ClientId, @SourceField AS SourceField, @TargetField AS TargetField) AS Source
             ON Target.ConnectionId = Source.ConnectionId 
             AND Target.SourceField = Source.SourceField
             AND Target.TargetField = Source.TargetField
@@ -710,8 +747,8 @@ class XMLFileProcessor {
                     TransformationType = @TransformationType,
                     TransformationRule = @TransformationRule
             WHEN NOT MATCHED THEN
-                INSERT (ConnectionId, SourceField, TargetField, TransformationType, TransformationRule)
-                VALUES (@ConnectionId, @SourceField, @TargetField, @TransformationType, @TransformationRule);
+                INSERT (ConnectionId, ClientId, SourceField, TargetField, TransformationType, TransformationRule)
+                VALUES (@ConnectionId, @ClientId, @SourceField, @TargetField, @TransformationType, @TransformationRule);
           `)
       }
 

@@ -143,10 +143,12 @@ export default function ConexionesPage() {
         description: `La conexión "${newConnection.name}" ha sido creada.`,
       })
 
-      // ✅ IMPORTACIÓN AUTOMÁTICA INMEDIATA (solo para XML y API)
+      // ✅ PROCESAMIENTO AUTOMÁTICO DESPUÉS DE CREAR LA CONEXIÓN
       console.log(`🔍 Tipo de conexión: ${newConnection.type}`)
+      
       if (newConnection.type !== "Manual") {
-        console.log("🚀 Iniciando proceso de sincronización automática...")
+        // Para XML y API feeds: usar importConnection
+        console.log("🚀 Iniciando proceso de sincronización automática para XML/API feed...")
         
         // Mostrar toast inmediato de procesamiento
         toast({
@@ -163,7 +165,7 @@ export default function ConexionesPage() {
 
             toast({
               title: "Sincronización completada",
-              description: `Se importaron ${importResult.processed || 0} ofertas automáticamente`,
+              description: `Se importaron ${importResult.result?.imported || importResult.imported || 0} ofertas automáticamente`,
             })
           } catch (importError) {
             console.error("❌ Error en importación automática:", importError)
@@ -176,14 +178,46 @@ export default function ConexionesPage() {
 
           // Refrescar lista después de la importación
           await fetchConexiones()
-        }, 2000) // Aumentado a 2 segundos para dar tiempo al backend
+        }, 2000)
       } else {
-        // Para conexiones manuales, solo mostrar mensaje de éxito
-        console.log("📁 Conexión manual creada - no se requiere sincronización automática")
-        toast({
-          title: "Conexión manual creada",
-          description: "La conexión manual ha sido creada exitosamente. Usa el botón de sincronización para procesar el archivo.",
-        })
+        // Para conexiones manuales: procesar archivo si se seleccionó uno
+        console.log("📁 Conexión manual creada")
+        
+        if (selectedFile) {
+          console.log("📁 Archivo seleccionado, procesando automáticamente...")
+          toast({
+            title: "Procesando archivo",
+            description: `Subiendo ${selectedFile.name}...`,
+          })
+          
+          setTimeout(async () => {
+            try {
+              console.log(`📁 Subiendo archivo para conexión manual ${createdConnection.id}...`)
+              const uploadResult = await uploadFile(createdConnection.id, selectedFile)
+              console.log("✅ Upload automático completado:", uploadResult)
+
+              toast({
+                title: "Archivo procesado exitosamente",
+                description: `Se procesaron ${uploadResult.processed || 0} ofertas del archivo ${uploadResult.filename}`,
+              })
+            } catch (uploadError) {
+              console.error("❌ Error en upload automático:", uploadError)
+              toast({
+                title: "Conexión creada",
+                description: "La conexión fue creada. El procesamiento del archivo falló, puedes subir el archivo manualmente.",
+                variant: "destructive",
+              })
+            }
+
+            // Refrescar lista después del upload
+            await fetchConexiones()
+          }, 1000)
+        } else {
+          toast({
+            title: "Conexión manual creada",
+            description: "La conexión manual ha sido creada exitosamente. Usa el botón de subida para procesar archivos.",
+          })
+        }
       }
 
       // Limpiar formulario y cerrar dialog
@@ -351,7 +385,7 @@ export default function ConexionesPage() {
               ...conn,
               status: "active",
               lastSync: new Date().toISOString(),
-              importedOffers: (conn.importedOffers || 0) + (result.processed || 0),
+              importedOffers: (conn.importedOffers || 0) + (result.result?.imported || result.imported || 0),
               errorCount: result.errors || 0
             }
           : conn
@@ -359,7 +393,7 @@ export default function ConexionesPage() {
 
       toast({
         title: "Sincronización exitosa",
-        description: result.message || `Se importaron ${result.processed || 0} ofertas correctamente`,
+        description: result.message || `Se importaron ${result.result?.imported || result.imported || 0} ofertas correctamente`,
       })
 
       // Refrescar lista desde servidor para confirmar

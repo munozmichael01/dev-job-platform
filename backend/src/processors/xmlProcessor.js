@@ -673,7 +673,7 @@ class XMLProcessor {
       const mappings = []
       const offerFields = Object.keys(sampleOffer)
 
-      // ✅ MAPEO ESTÁNDAR CORREGIDO - Usar nombres que coincidan con el frontend
+      // ✅ MAPEO ESTÁNDAR CORREGIDO con PRIORIDADES INTELIGENTES
       const standardMappings = {
         'id': 'apply_url',           // ID -> campo temporal 
         'title': 'title',            // Título
@@ -682,13 +682,6 @@ class XMLProcessor {
         'description': 'description',
         'company': 'company',        // Empresa
         'category': 'sector',        // Sector
-        'address': 'location',       // Ubicación
-        'location': 'location',
-        'city': 'location',
-        'region': 'location',
-        'country': 'location',
-        'pais': 'location',
-        'postcode': 'location',
         'url': 'apply_url',          // URL de aplicación
         'url_apply': 'apply_url',
         'application_url': 'apply_url',
@@ -706,11 +699,48 @@ class XMLProcessor {
         'num_vacancies': 'contract_type'
       }
 
-      // Crear mapeos automáticos
+      // ✅ SISTEMA DE PRIORIDADES PARA UBICACIÓN: city > region > country > location > address > postcode
+      const locationPriorities = [
+        'city',      // Prioridad 1 (más específica)
+        'region',    // Prioridad 2
+        'country',   // Prioridad 3
+        'location',  // Prioridad 4
+        'address',   // Prioridad 5
+        'postcode'   // Prioridad 6 (menos específica)
+      ]
+
+      // Crear mapeos automáticos con manejo inteligente de ubicación
+      const locationFieldFound = new Set()
+      let locationMappingCreated = false
+
+      // Primero, buscar el campo de ubicación con mayor prioridad
+      for (const priorityField of locationPriorities) {
+        const foundField = offerFields.find(field => field.toLowerCase() === priorityField)
+        if (foundField && !locationMappingCreated) {
+          mappings.push({
+            ConnectionId: this.connection.id,
+            ClientId: this.connection.clientId,
+            SourceField: foundField,
+            TargetField: 'location',
+            TransformationType: this.detectMappingType(foundField, sampleOffer[foundField]),
+            TransformationRule: null
+          })
+          locationMappingCreated = true
+          console.log(`🎯 PRIORITY MAPPING: ${foundField} → location (priority: ${locationPriorities.indexOf(priorityField) + 1})`)
+          break
+        }
+      }
+
+      // Luego, crear mapeos para todos los otros campos (excepto ubicación)
       for (const sourceField of offerFields) {
         const lowerField = sourceField.toLowerCase()
-        const targetField = standardMappings[lowerField]
+        
+        // Skip si es un campo de ubicación (ya procesado arriba)
+        if (locationPriorities.includes(lowerField)) {
+          continue
+        }
 
+        const targetField = standardMappings[lowerField]
         if (targetField) {
           mappings.push({
             ConnectionId: this.connection.id,

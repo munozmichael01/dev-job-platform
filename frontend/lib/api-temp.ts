@@ -3,7 +3,17 @@ const API_URL = 'http://localhost:3002';
 
 export async function fetchConnections() {
   console.log("🔍 fetchConnections using URL:", API_URL);
-  const res = await fetch(`${API_URL}/api/connections`);
+  const res = await fetch(`${API_URL}/api/connections`, {
+    method: 'GET',
+    headers: {
+      'Cache-Control': 'no-cache, no-store, must-revalidate',
+      'Pragma': 'no-cache',
+      'Expires': '0',
+      'Accept': 'application/json',
+      'Content-Type': 'application/json'
+    },
+    cache: 'no-store'
+  });
   if (!res.ok) throw new Error('Error al obtener conexiones');
   return res.json();
 }
@@ -12,7 +22,10 @@ export async function createConnection(data: any) {
   console.log("🔍 createConnection using URL:", API_URL, "data:", data);
   const res = await fetch(`${API_URL}/api/connections`, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: { 
+      'Content-Type': 'application/json',
+      'Accept': 'application/json'
+    },
     body: JSON.stringify(data),
   });
   if (!res.ok) {
@@ -27,7 +40,10 @@ export async function importConnection(connectionId: number) {
   console.log("🔍 importConnection using URL:", API_URL, "ID:", connectionId);
   const res = await fetch(`${API_URL}/api/connections/${connectionId}/import`, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: { 
+      'Content-Type': 'application/json',
+      'Accept': 'application/json'
+    },
   });
   if (!res.ok) {
     const errorText = await res.text();
