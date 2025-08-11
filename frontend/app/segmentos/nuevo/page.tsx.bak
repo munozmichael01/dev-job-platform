@@ -20,6 +20,7 @@ export default function NuevoSegmentoPage() {
   const { toast } = useToast()
   const router = useRouter()
 
+  // Datos del formulario (títulos opcional; contractTypes no requerido y no se usa)
   const [formData, setFormData] = useState({
     name: "",
     description: "",
@@ -28,16 +29,16 @@ export default function NuevoSegmentoPage() {
     sectors: [] as string[],
     companies: [] as string[],
     experienceLevels: [] as string[],
-    contractTypes: [] as string[], // sin uso
+    contractTypes: [] as string[], // sin uso por ahora
   })
 
-  // Listas reales
+  // Listas reales desde backend
   const [locationsList, setLocationsList] = useState<string[]>([])
   const [sectorsList, setSectorsList] = useState<string[]>([])
   const [companiesList, setCompaniesList] = useState<string[]>([])
   const [loadingLists, setLoadingLists] = useState<boolean>(true)
 
-  // Auxiliares
+  // Campos auxiliares UI
   const [newJobTitle, setNewJobTitle] = useState("")
   const [newLocation, setNewLocation] = useState("")
 
@@ -54,7 +55,8 @@ export default function NuevoSegmentoPage() {
         setLocationsList(loc?.data || [])
         setSectorsList(sec?.data || [])
         setCompaniesList(comp?.data || [])
-      } catch {
+      } catch (e) {
+        console.error("❌ Error cargando listas:", e)
         setLocationsList([]); setSectorsList([]); setCompaniesList([])
       } finally {
         setLoadingLists(false)
@@ -65,37 +67,54 @@ export default function NuevoSegmentoPage() {
   // Handlers
   const addJobTitle = () => {
     if (newJobTitle.trim() && !formData.jobTitles.includes(newJobTitle.trim())) {
-      setFormData((p) => ({ ...p, jobTitles: [...p.jobTitles, newJobTitle.trim()] }))
+      setFormData((prev) => ({ ...prev, jobTitles: [...prev.jobTitles, newJobTitle.trim()] }))
       setNewJobTitle("")
     }
   }
-  const removeJobTitle = (t: string) => setFormData((p) => ({ ...p, jobTitles: p.jobTitles.filter((x) => x !== t) }))
+  const removeJobTitle = (title: string) =>
+    setFormData((prev) => ({ ...prev, jobTitles: prev.jobTitles.filter((t) => t !== title) }))
+
   const addLocation = () => {
     if (newLocation && !formData.locations.includes(newLocation)) {
-      setFormData((p) => ({ ...p, locations: [...p.locations, newLocation] }))
+      setFormData((prev) => ({ ...prev, locations: [...prev.locations, newLocation] }))
       setNewLocation("")
     }
   }
-  const removeLocation = (loc: string) => setFormData((p) => ({ ...p, locations: p.locations.filter((x) => x !== loc) }))
-  const toggleSector = (s: string) =>
-    setFormData((p) => ({ ...p, sectors: p.sectors.includes(s) ? p.sectors.filter((x) => x !== s) : [...p.sectors, s] }))
-  const toggleCompany = (c: string) =>
-    setFormData((p) => ({ ...p, companies: p.companies.includes(c) ? p.companies.filter((x) => x !== c) : [...p.companies, c] }))
-  const toggleExperience = (e: string) =>
-    setFormData((p) => ({
-      ...p,
-      experienceLevels: p.experienceLevels.includes(e) ? p.experienceLevels.filter((x) => x !== e) : [...p.experienceLevels, e],
+  const removeLocation = (loc: string) =>
+    setFormData((prev) => ({ ...prev, locations: prev.locations.filter((l) => l !== loc) }))
+
+  const toggleSector = (sector: string) =>
+    setFormData((prev) => ({
+      ...prev,
+      sectors: prev.sectors.includes(sector) ? prev.sectors.filter((s) => s !== sector) : [...prev.sectors, sector],
     }))
 
-  // Estimación REAL (solo activas): title opcional, locations, sectors, companies
+  const toggleCompany = (company: string) =>
+    setFormData((prev) => ({
+      ...prev,
+      companies: prev.companies.includes(company)
+        ? prev.companies.filter((c) => c !== company)
+        : [...prev.companies, company],
+    }))
+
+  const toggleExperience = (level: string) =>
+    setFormData((prev) => ({
+      ...prev,
+      experienceLevels: prev.experienceLevels.includes(level)
+        ? prev.experienceLevels.filter((e) => e !== level)
+        : [...prev.experienceLevels, level],
+    }))
+
+  // Estimación REAL (solo activas) con mapeo: jobTitles + locations + sectors + companies
   const recalcEstimate = async () => {
     setEstimating(true)
     try {
       const { success, count } = await estimateSegmentPreview({
-        jobTitles: formData.jobTitles,
-        locations: formData.locations,
-        sectors: formData.sectors,
-        companies: formData.companies,
+        jobTitles: formData.jobTitles,   // coincidencia de texto; OPCIONAL
+        locations: formData.locations,   // City/Region combinadas
+        sectors: formData.sectors,       // Sector
+        companies: formData.companies,   // CompanyName
+        // experienceLevels/contractTypes: sin efecto por ahora
       } as any)
       setEstimatedOffers(success ? Number(count) || 0 : 0)
     } catch {
@@ -105,11 +124,19 @@ export default function NuevoSegmentoPage() {
     }
   }
 
+  // Debounce al cambiar filtros relevantes
   useEffect(() => {
     const t = setTimeout(() => { void recalcEstimate() }, 500)
     return () => clearTimeout(t)
-  }, [formData.jobTitles.join("|"), formData.locations.join("|"), formData.sectors.join("|"), formData.companies.join("|")])
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [
+    formData.jobTitles.join("|"),
+    formData.locations.join("|"),
+    formData.sectors.join("|"),
+    formData.companies.join("|"),
+  ])
 
+  // Guardar (name requerido; títulos opcional)
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
     if (!formData.name.trim()) {
@@ -137,7 +164,10 @@ export default function NuevoSegmentoPage() {
       <div className="flex items-center gap-4">
         <SidebarTrigger />
         <Button variant="outline" size="sm" asChild>
-          <Link href="/segmentos"><ArrowLeft className="h-4 w-4 mr-2" />Volver</Link>
+          <Link href="/segmentos">
+            <ArrowLeft className="h-4 w-4 mr-2" />
+            Volver
+          </Link>
         </Button>
         <div>
           <h1 className="text-3xl font-bold">Nuevo Segmento</h1>
@@ -149,40 +179,34 @@ export default function NuevoSegmentoPage() {
         <div className="grid gap-6 lg:grid-cols-3">
           {/* Columna principal */}
           <div className="lg:col-span-2 space-y-6">
-            {/* Información básica (restaurado) */}
-            <Card>
-              <CardHeader>
-                <CardTitle>Información Básica</CardTitle>
-                <CardDescription>Define el nombre y descripción del segmento</CardDescription>
-              </CardHeader>
-              <CardContent className="space-y-4">
-                <div className="space-y-2">
-                  <Label htmlFor="name">Nombre del Segmento *</Label>
-                  <Input id="name" value={formData.name} onChange={(e) => setFormData((p) => ({ ...p, name: e.target.value }))} placeholder="Ej: Desarrolladores Frontend Madrid" />
-                </div>
-                <div className="space-y-2">
-                  <Label htmlFor="description">Descripción</Label>
-                  <Textarea id="description" value={formData.description} onChange={(e) => setFormData((p) => ({ ...p, description: e.target.value }))} placeholder="Describe brevemente" rows={3} />
-                </div>
-              </CardContent>
-            </Card>
-
             {/* Títulos (opcional) */}
             <Card>
               <CardHeader>
-                <CardTitle className="flex items-center gap-2"><Briefcase className="h-5 w-5" />Títulos de Trabajo (opcional)</CardTitle>
+                <CardTitle className="flex items-center gap-2">
+                  <Briefcase className="h-5 w-5" />
+                  Títulos de Trabajo (opcional)
+                </CardTitle>
                 <CardDescription>Coincidencia de texto con el título de la oferta (LIKE)</CardDescription>
               </CardHeader>
               <CardContent className="space-y-4">
                 <div className="flex gap-2">
-                  <Input value={newJobTitle} onChange={(e) => setNewJobTitle(e.target.value)} placeholder="Ej: Desarrollador, Frontend, React..." onKeyPress={(e) => e.key === "Enter" && (e.preventDefault(), addJobTitle())} />
-                  <Button type="button" onClick={addJobTitle}><Plus className="h-4 w-4" /></Button>
+                  <Input
+                    value={newJobTitle}
+                    onChange={(e) => setNewJobTitle(e.target.value)}
+                    placeholder="Ej: Desarrollador, Frontend, React..."
+                    onKeyPress={(e) => e.key === "Enter" && (e.preventDefault(), addJobTitle())}
+                  />
+                  <Button type="button" onClick={addJobTitle}>
+                    <Plus className="h-4 w-4" />
+                  </Button>
                 </div>
                 <div className="flex flex-wrap gap-2">
                   {formData.jobTitles.map((title, index) => (
                     <Badge key={index} variant="secondary" className="flex items-center gap-1">
                       {title}
-                      <button type="button" onClick={() => removeJobTitle(title)} className="ml-1 hover:text-red-600"><X className="h-3 w-3" /></button>
+                      <button type="button" onClick={() => removeJobTitle(title)} className="ml-1 hover:text-red-600">
+                        <X className="h-3 w-3" />
+                      </button>
                     </Badge>
                   ))}
                 </div>
@@ -192,26 +216,39 @@ export default function NuevoSegmentoPage() {
             {/* Ubicaciones (lista real) */}
             <Card>
               <CardHeader>
-                <CardTitle className="flex items-center gap-2"><MapPin className="h-5 w-5" />Ubicaciones</CardTitle>
+                <CardTitle className="flex items-center gap-2">
+                  <MapPin className="h-5 w-5" />
+                  Ubicaciones
+                </CardTitle>
                 <CardDescription>Selecciona las ubicaciones donde buscar ofertas</CardDescription>
               </CardHeader>
               <CardContent className="space-y-4">
                 <div className="flex gap-2">
                   <Select value={newLocation} onValueChange={setNewLocation} disabled={loadingLists}>
-                    <SelectTrigger><SelectValue placeholder="Selecciona una ubicación" /></SelectTrigger>
+                    <SelectTrigger>
+                      <SelectValue placeholder="Selecciona una ubicación" />
+                    </SelectTrigger>
                     <SelectContent>
-                      {locationsList.filter((loc) => !formData.locations.includes(loc)).map((location) => (
-                        <SelectItem key={location} value={location}>{location}</SelectItem>
-                      ))}
+                      {locationsList
+                        .filter((loc) => !formData.locations.includes(loc))
+                        .map((location) => (
+                          <SelectItem key={location} value={location}>
+                            {location}
+                          </SelectItem>
+                        ))}
                     </SelectContent>
                   </Select>
-                  <Button type="button" onClick={addLocation} disabled={!newLocation}><Plus className="h-4 w-4" /></Button>
+                  <Button type="button" onClick={addLocation} disabled={!newLocation}>
+                    <Plus className="h-4 w-4" />
+                  </Button>
                 </div>
                 <div className="flex flex-wrap gap-2">
                   {formData.locations.map((location, index) => (
                     <Badge key={index} variant="secondary" className="flex items-center gap-1">
                       {location}
-                      <button type="button" onClick={() => removeLocation(location)} className="ml-1 hover:text-red-600"><X className="h-3 w-3" /></button>
+                      <button type="button" onClick={() => removeLocation(location)} className="ml-1 hover:text-red-600">
+                        <X className="h-3 w-3" />
+                      </button>
                     </Badge>
                   ))}
                 </div>
@@ -220,13 +257,24 @@ export default function NuevoSegmentoPage() {
 
             {/* Sectores (lista real) */}
             <Card>
-              <CardHeader><CardTitle className="flex items-center gap-2"><Building2 className="h-5 w-5" />Sectores</CardTitle></CardHeader>
+              <CardHeader>
+                <CardTitle className="flex items-center gap-2">
+                  <Building2 className="h-5 w-5" />
+                  Sectores
+                </CardTitle>
+              </CardHeader>
               <CardContent>
                 <div className="grid grid-cols-2 gap-3">
                   {sectorsList.map((sector) => (
                     <div key={sector} className="flex items-center space-x-2">
-                      <Checkbox id={sector} checked={formData.sectors.includes(sector)} onCheckedChange={() => toggleSector(sector)} />
-                      <Label htmlFor={sector} className="text-sm">{sector}</Label>
+                      <Checkbox
+                        id={sector}
+                        checked={formData.sectors.includes(sector)}
+                        onCheckedChange={() => toggleSector(sector)}
+                      />
+                      <Label htmlFor={sector} className="text-sm">
+                        {sector}
+                      </Label>
                     </div>
                   ))}
                 </div>
@@ -236,33 +284,51 @@ export default function NuevoSegmentoPage() {
             {/* Empresas (lista real) */}
             <Card>
               <CardHeader>
-                <CardTitle className="flex items-center gap-2"><Briefcase className="h-5 w-5" />Empresas</CardTitle>
+                <CardTitle className="flex items-center gap-2">
+                  <Briefcase className="h-5 w-5" />
+                  Empresas
+                </CardTitle>
                 <CardDescription>Filtra por CompanyName de ofertas activas</CardDescription>
               </CardHeader>
               <CardContent>
                 <div className="grid grid-cols-2 gap-3">
                   {companiesList.map((company) => (
                     <div key={company} className="flex items-center space-x-2">
-                      <Checkbox id={company} checked={formData.companies.includes(company)} onCheckedChange={() => toggleCompany(company)} />
-                      <Label htmlFor={company} className="text-sm">{company}</Label>
+                      <Checkbox
+                        id={company}
+                        checked={formData.companies.includes(company)}
+                        onCheckedChange={() => toggleCompany(company)}
+                      />
+                      <Label htmlFor={company} className="text-sm">
+                        {company}
+                      </Label>
                     </div>
                   ))}
                 </div>
               </CardContent>
             </Card>
 
-            {/* Nivel de experiencia (informativo) */}
+            {/* Nivel de experiencia (no afecta búsqueda aún) */}
             <Card>
               <CardHeader>
-                <CardTitle className="flex items-center gap-2"><Star className="h-5 w-5" />Nivel de Experiencia</CardTitle>
+                <CardTitle className="flex items-center gap-2">
+                  <Star className="h-5 w-5" />
+                  Nivel de Experiencia
+                </CardTitle>
                 <CardDescription>Filtro informativo (no aplicado aún)</CardDescription>
               </CardHeader>
               <CardContent>
                 <div className="grid grid-cols-1 gap-3">
                   {["Sin experiencia","Junior (1-2 años)","Senior (3-5 años)","Expert (5+ años)","Directivo"].map((level) => (
                     <div key={level} className="flex items-center space-x-2">
-                      <Checkbox id={level} checked={formData.experienceLevels.includes(level)} onCheckedChange={() => toggleExperience(level)} />
-                      <Label htmlFor={level} className="text-sm">{level}</Label>
+                      <Checkbox
+                        id={level}
+                        checked={formData.experienceLevels.includes(level)}
+                        onCheckedChange={() => toggleExperience(level)}
+                      />
+                      <Label htmlFor={level} className="text-sm">
+                        {level}
+                      </Label>
                     </div>
                   ))}
                 </div>
@@ -275,50 +341,91 @@ export default function NuevoSegmentoPage() {
                 <CardTitle>Tipo de Contrato</CardTitle>
                 <CardDescription>Bloque pendiente (no requerido)</CardDescription>
               </CardHeader>
-              <CardContent><p className="text-sm text-muted-foreground">Sin campos por ahora.</p></CardContent>
+              <CardContent>
+                <p className="text-sm text-muted-foreground">Sin campos por ahora.</p>
+              </CardContent>
             </Card>
           </div>
 
           {/* Columna lateral */}
           <div className="space-y-6">
             <Card>
-              <CardHeader><CardTitle>Resumen</CardTitle><CardDescription>Vista previa del segmento</CardDescription></CardHeader>
+              <CardHeader>
+                <CardTitle>Resumen</CardTitle>
+                <CardDescription>Vista previa del segmento</CardDescription>
+              </CardHeader>
               <CardContent className="space-y-4">
-                <div><Label className="text-sm font-medium">Nombre</Label><p className="text-sm text-muted-foreground">{formData.name || "Sin nombre"}</p></div>
-                <div><Label className="text-sm font-medium">Títulos ({formData.jobTitles.length})</Label>
+                <div>
+                  <Label className="text-sm font-medium">Nombre</Label>
+                  <p className="text-sm text-muted-foreground">{formData.name || "Sin nombre"}</p>
+                </div>
+                <div>
+                  <Label className="text-sm font-medium">Títulos ({formData.jobTitles.length})</Label>
                   <div className="flex flex-wrap gap-1 mt-1">
-                    {formData.jobTitles.slice(0,3).map((t,i)=>(<Badge key={i} variant="outline" className="text-xs">{t}</Badge>))}
-                    {formData.jobTitles.length>3 && (<Badge variant="outline" className="text-xs">+{formData.jobTitles.length-3} más</Badge>)}
+                    {formData.jobTitles.slice(0, 3).map((title, index) => (
+                      <Badge key={index} variant="outline" className="text-xs">
+                        {title}
+                      </Badge>
+                    ))}
+                    {formData.jobTitles.length > 3 && (
+                      <Badge variant="outline" className="text-xs">+{formData.jobTitles.length - 3} más</Badge>
+                    )}
                   </div>
                 </div>
-                <div><Label className="text-sm font-medium">Ubicaciones ({formData.locations.length})</Label>
+                <div>
+                  <Label className="text-sm font-medium">Ubicaciones ({formData.locations.length})</Label>
                   <div className="flex flex-wrap gap-1 mt-1">
-                    {formData.locations.slice(0,2).map((l,i)=>(<Badge key={i} variant="outline" className="text-xs">{l}</Badge>))}
-                    {formData.locations.length>2 && (<Badge variant="outline" className="text-xs">+{formData.locations.length-2} más</Badge>)}
+                    {formData.locations.slice(0, 2).map((location, index) => (
+                      <Badge key={index} variant="outline" className="text-xs">
+                        {location}
+                      </Badge>
+                    ))}
+                    {formData.locations.length > 2 && (
+                      <Badge variant="outline" className="text-xs">+{formData.locations.length - 2} más</Badge>
+                    )}
                   </div>
                 </div>
-                <div><Label className="text-sm font-medium">Sectores ({formData.sectors.length})</Label>
+                <div>
+                  <Label className="text-sm font-medium">Sectores ({formData.sectors.length})</Label>
                   <div className="flex flex-wrap gap-1 mt-1">
-                    {formData.sectors.slice(0,2).map((s,i)=>(<Badge key={i} variant="outline" className="text-xs">{s}</Badge>))}
-                    {formData.sectors.length>2 && (<Badge variant="outline" className="text-xs">+{formData.sectors.length-2} más</Badge>)}
+                    {formData.sectors.slice(0, 2).map((sector, index) => (
+                      <Badge key={index} variant="outline" className="text-xs">
+                        {sector}
+                      </Badge>
+                    ))}
+                    {formData.sectors.length > 2 && (
+                      <Badge variant="outline" className="text-xs">+{formData.sectors.length - 2} más</Badge>
+                    )}
                   </div>
                 </div>
-                <div><Label className="text-sm font-medium">Empresas ({formData.companies.length})</Label>
+                <div>
+                  <Label className="text-sm font-medium">Empresas ({formData.companies.length})</Label>
                   <div className="flex flex-wrap gap-1 mt-1">
-                    {formData.companies.slice(0,3).map((c,i)=>(<Badge key={i} variant="outline" className="text-xs">{c}</Badge>))}
-                    {formData.companies.length>3 && (<Badge variant="outline" className="text-xs">+{formData.companies.length-3} más</Badge>)}
+                    {formData.companies.slice(0, 3).map((c, i) => (
+                      <Badge key={i} variant="outline" className="text-xs">
+                        {c}
+                      </Badge>
+                    ))}
+                    {formData.companies.length > 3 && (
+                      <Badge variant="outline" className="text-xs">+{formData.companies.length - 3} más</Badge>
+                    )}
                   </div>
                 </div>
               </CardContent>
             </Card>
 
             <Card>
-              <CardHeader><CardTitle>Ofertas Estimadas (activas)</CardTitle><CardDescription>Cálculo automático según filtros</CardDescription></CardHeader>
+              <CardHeader>
+                <CardTitle>Ofertas Estimadas (activas)</CardTitle>
+                <CardDescription>Cálculo automático según filtros</CardDescription>
+              </CardHeader>
               <CardContent>
                 <div className="flex items-center gap-2">
                   <div className="text-3xl font-bold text-green-600">{estimatedOffers}</div>
                   {estimating && <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />}
-                  <Button variant="outline" size="sm" onClick={() => recalcEstimate()} className="ml-2">Recalcular</Button>
+                  <Button variant="outline" size="sm" onClick={() => recalcEstimate()} className="ml-2">
+                    Recalcular
+                  </Button>
                 </div>
                 <p className="text-sm text-muted-foreground mt-1">solo ofertas con estado activo</p>
               </CardContent>
@@ -326,7 +433,8 @@ export default function NuevoSegmentoPage() {
 
             <div className="flex gap-2">
               <Button type="submit" className="flex-1" onClick={(e) => { e.preventDefault(); handleSubmit(e) }}>
-                <Save className="h-4 w-4 mr-2" />Crear Segmento
+                <Save className="h-4 w-4 mr-2" />
+                Crear Segmento
               </Button>
             </div>
           </div>

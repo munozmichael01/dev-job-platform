@@ -429,14 +429,12 @@ router.post("/:id/import", async (req, res) => {
 })
 
 // POST /api/connections/:id/test-upload - Test endpoint 
-console.log("🔧 Registrando ruta: /:id/test-upload")
 router.post("/:id/test-upload", async (req, res) => {
   console.log("🎯 TEST UPLOAD endpoint hit!")
   res.json({ message: "Test upload endpoint works!", id: req.params.id })
 })
 
 // POST /api/connections/:id/upload - Upload file for manual connections
-console.log("🔧 Registrando ruta: /:id/upload")
 router.post("/:id/upload", async (req, res) => {
   // CORS Headers
   const origin = req.headers.origin;

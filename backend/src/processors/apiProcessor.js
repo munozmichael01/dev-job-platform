@@ -601,7 +601,8 @@ class APIProcessor {
               ApplicationsReceived = @ApplicationsReceived,
               StatusId = @StatusId,
               Source = @Source,
-              PublicationDate = @PublicationDate
+              PublicationDate = @PublicationDate,
+              UpdatedAt = GETDATE()
           WHEN NOT MATCHED THEN
             INSERT (
               ExternalId, Title, JobTitle, Description, CompanyName, Sector, Address,

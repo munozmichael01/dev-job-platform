@@ -59,104 +59,20 @@ export async function createOffer(data: any) {
   if (!res.ok) throw new Error('Error al crear oferta');
   return res.json();
 }
-// FILTROS DEPENDIENTES - Funciones con soporte para parámetros de filtro
-
-export interface FilterParams {
-  status?: string
-  location?: string
-  sector?: string
-  externalId?: string
-  q?: string
+export async function fetchLocations() {
+  const res = await fetch(`${API_URL}/job-offers/locations`, { cache: 'no-store' });
+  if (!res.ok) throw new Error('Error al obtener ubicaciones');
+  return res.json(); // { success, data }
 }
-
-export async function fetchLocations(filters: FilterParams = {}) {
-  console.log("🔍 fetchLocations con filtros:", filters);
-  
-  const params = new URLSearchParams();
-  if (filters.status && filters.status !== 'all') params.append('status', filters.status);
-  if (filters.sector && filters.sector !== 'all') params.append('sector', filters.sector);
-  if (filters.externalId && filters.externalId !== 'all') params.append('externalId', filters.externalId);
-  if (filters.q && filters.q.trim()) params.append('q', filters.q.trim());
-
-  const url = `${API_URL}/job-offers/locations${params.toString() ? '?' + params.toString() : ''}`;
-  console.log("🔍 fetchLocations URL:", url);
-
-  const res = await fetch(url, {
-    method: 'GET',
-    headers: {
-      'Cache-Control': 'no-cache, no-store, must-revalidate',
-      'Pragma': 'no-cache',
-      'Expires': '0',
-      'Accept': 'application/json',
-      'Content-Type': 'application/json'
-    },
-    cache: 'no-store'
-  })
-  if (!res.ok) {
-    const errorText = await res.text()
-    throw new Error(`Error al obtener ubicaciones: ${res.status} ${errorText}`)
-  }
-  return res.json()
+export async function fetchSectors() {
+  const res = await fetch(`${API_URL}/job-offers/sectors`, { cache: 'no-store' });
+  if (!res.ok) throw new Error('Error al obtener sectores');
+  return res.json(); // { success, data }
 }
-
-export async function fetchSectors(filters: FilterParams = {}) {
-  console.log("🔍 fetchSectors con filtros:", filters);
-  
-  const params = new URLSearchParams();
-  if (filters.status && filters.status !== 'all') params.append('status', filters.status);
-  if (filters.location && filters.location !== 'all') params.append('location', filters.location);
-  if (filters.externalId && filters.externalId !== 'all') params.append('externalId', filters.externalId);
-  if (filters.q && filters.q.trim()) params.append('q', filters.q.trim());
-
-  const url = `${API_URL}/job-offers/sectors${params.toString() ? '?' + params.toString() : ''}`;
-  console.log("🔍 fetchSectors URL:", url);
-
-  const res = await fetch(url, {
-    method: 'GET',
-    headers: {
-      'Cache-Control': 'no-cache, no-store, must-revalidate',
-      'Pragma': 'no-cache',
-      'Expires': '0',
-      'Accept': 'application/json',
-      'Content-Type': 'application/json'
-    },
-    cache: 'no-store'
-  })
-  if (!res.ok) {
-    const errorText = await res.text()
-    throw new Error(`Error al obtener sectores: ${res.status} ${errorText}`)
-  }
-  return res.json()
-}
-
-export async function fetchExternalIds(filters: FilterParams = {}) {
-  console.log("🔍 fetchExternalIds con filtros:", filters);
-  
-  const params = new URLSearchParams();
-  if (filters.status && filters.status !== 'all') params.append('status', filters.status);
-  if (filters.location && filters.location !== 'all') params.append('location', filters.location);
-  if (filters.sector && filters.sector !== 'all') params.append('sector', filters.sector);
-  if (filters.q && filters.q.trim()) params.append('q', filters.q.trim());
-
-  const url = `${API_URL}/job-offers/external-ids${params.toString() ? '?' + params.toString() : ''}`;
-  console.log("🔍 fetchExternalIds URL:", url);
-
-  const res = await fetch(url, {
-    method: 'GET',
-    headers: {
-      'Cache-Control': 'no-cache, no-store, must-revalidate',
-      'Pragma': 'no-cache',
-      'Expires': '0',
-      'Accept': 'application/json',
-      'Content-Type': 'application/json'
-    },
-    cache: 'no-store'
-  })
-  if (!res.ok) {
-    const errorText = await res.text()
-    throw new Error(`Error al obtener IDs externos: ${res.status} ${errorText}`)
-  }
-  return res.json()
+export async function fetchExternalIds() {
+  const res = await fetch(`${API_URL}/job-offers/external-ids`, { cache: 'no-store' });
+  if (!res.ok) throw new Error('Error al obtener IDs externos');
+  return res.json(); // { success, data }
 }
 export async function fetchJobTypes() {
   const res = await fetch(`${API_URL}/job-offers/job-types`, { cache: 'no-store' });
@@ -204,22 +120,6 @@ export async function estimateSegmentPreview(filters: {
   if (!res.ok) throw new Error('Error al estimar segmento (preview)');
   return res.json(); // { success, count }
 }
-export async function recalculateSegment(id: number) {
-  const res = await fetch(`${API_URL}/api/segments/${id}/recalculate`, {
-    method: 'POST', headers: { 'Content-Type': 'application/json' }
-  });
-  if (!res.ok) throw new Error('Error al recalcular segmento');
-  return res.json(); // { success, message, data }
-}
-export async function duplicateSegment(id: number, name?: string) {
-  const res = await fetch(`${API_URL}/api/segments/${id}/duplicate`, {
-    method: 'POST', 
-    headers: { 'Content-Type': 'application/json' }, 
-    body: JSON.stringify(name ? { name } : {})
-  });
-  if (!res.ok) throw new Error('Error al duplicar segmento');
-  return res.json(); // { success, message, data }
-}
 
 // -------- Campañas --------
 export async function fetchCampaigns() {
@@ -260,14 +160,4 @@ export async function resumeCampaign(id: number) {
   const res = await fetch(`${API_URL}/api/campaigns/${id}/resume`, { method: 'POST' });
   if (!res.ok) throw new Error('Error al reanudar campaña');
   return res.json();
-}
-
-export async function fetchCompanies() {
-  const res = await fetch(`${API_URL}/job-offers/companies`, {
-    method: 'GET',
-    headers: { 'Accept': 'application/json', 'Content-Type': 'application/json' },
-    cache: 'no-store'
-  });
-  if (!res.ok) throw new Error('Error al obtener empresas');
-  return res.json(); // { success, data }
 }

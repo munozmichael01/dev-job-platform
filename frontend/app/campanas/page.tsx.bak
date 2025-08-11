@@ -1,70 +1,125 @@
 "use client"
-import { useEffect, useState } from "react"
+
+import { useState } from "react"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
 import { Progress } from "@/components/ui/progress"
 import { SidebarTrigger } from "@/components/ui/sidebar"
-import { Plus, Megaphone, Edit, Pause, Play, Eye, Calendar, DollarSign, Target, Users, AlertTriangle } from "lucide-react"
+import {
+  Plus,
+  Megaphone,
+  Edit,
+  Pause,
+  Play,
+  Eye,
+  Calendar,
+  DollarSign,
+  Target,
+  Users,
+  AlertTriangle,
+} from "lucide-react"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import Link from "next/link"
 import { useToast } from "@/hooks/use-toast"
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
-import { fetchCampaigns } from "@/lib/api-temp"
-
-type ApiCampaign = {
-  Id: number
-  Name: string
-  SegmentId: number
-  Budget?: number
-  TargetApplications?: number
-  MaxCPA?: number
-  Channels?: string[] | null
-  Status: string
-  DistributionType: string
-  StartDate?: string
-  EndDate?: string
-}
 
 export default function CampanasPage() {
   const [statusFilter, setStatusFilter] = useState("all")
   const { toast } = useToast()
-  const [campanas, setCampanas] = useState<any[]>([])
-  const [loading, setLoading] = useState(true)
-  const [error, setError] = useState<string | null>(null)
 
-  useEffect(() => {
-    ;(async () => {
-      try {
-        const data: ApiCampaign[] = await fetchCampaigns()
-        setCampanas(
-          data.map((c) => ({
-            id: c.Id,
-            name: c.Name,
-            segment: `Segmento #${c.SegmentId}`,
-            offers: 0,
-            budget: Number(c.Budget ?? 0),
-            spent: 0,
-            applications: 0,
-            target: c.TargetApplications ?? 0,
-            status: c.Status,
-            mode: c.DistributionType,
-            startDate: c.StartDate,
-            endDate: c.EndDate,
-            channels: Array.isArray(c.Channels) ? c.Channels : [],
-            cpa: c.MaxCPA ?? 0,
-            conversionRate: 0,
-          })),
-        )
-      } catch (e: any) {
-        setError(e.message || "Error al cargar campañas")
-      } finally {
-        setLoading(false)
-      }
-    })()
-  }, [])
+  const campanas = [
+    {
+      id: 1,
+      name: "Desarrolladores Frontend Q1",
+      segment: "Desarrolladores Frontend",
+      offers: 45,
+      budget: 2500,
+      spent: 1200,
+      applications: 89,
+      target: 150,
+      status: "active",
+      mode: "automatic",
+      startDate: "2024-01-01",
+      endDate: "2024-03-31",
+      channels: ["InfoJobs", "LinkedIn", "Indeed"],
+      cpa: 13.48,
+      conversionRate: 2.1,
+    },
+    {
+      id: 2,
+      name: "Hostelería Madrid Verano",
+      segment: "Hostelería Madrid",
+      offers: 23,
+      budget: 800,
+      spent: 650,
+      applications: 156,
+      target: 200,
+      status: "active",
+      mode: "manual",
+      startDate: "2024-01-15",
+      endDate: "2024-04-15",
+      channels: ["Turijobs", "InfoJobs"],
+      cpa: 4.17,
+      conversionRate: 6.8,
+    },
+    {
+      id: 3,
+      name: "Comerciales Senior B2B",
+      segment: "Comerciales Senior",
+      offers: 12,
+      budget: 1500,
+      spent: 1450,
+      applications: 67,
+      target: 80,
+      status: "warning",
+      mode: "automatic",
+      startDate: "2024-01-10",
+      endDate: "2024-02-28",
+      channels: ["LinkedIn", "InfoJobs"],
+      cpa: 21.64,
+      conversionRate: 5.6,
+    },
+    {
+      id: 4,
+      name: "Trabajos Remotos Tech",
+      segment: "Trabajos Remotos Tech",
+      offers: 67,
+      budget: 3000,
+      spent: 890,
+      applications: 234,
+      target: 400,
+      status: "active",
+      mode: "automatic",
+      startDate: "2024-01-05",
+      endDate: "2024-06-30",
+      channels: ["LinkedIn", "RemoteOK", "AngelList"],
+      cpa: 3.8,
+      conversionRate: 3.5,
+    },
+    {
+      id: 5,
+      name: "Prácticas Universitarias",
+      segment: "Prácticas Universitarias",
+      offers: 8,
+      budget: 400,
+      spent: 400,
+      applications: 45,
+      target: 60,
+      status: "completed",
+      mode: "manual",
+      startDate: "2023-12-01",
+      endDate: "2024-01-31",
+      channels: ["InfoJobs", "Universidad"],
+      cpa: 8.89,
+      conversionRate: 5.6,
+    },
+  ]
 
-  const filteredCampanas = campanas.filter((campana) => (statusFilter === "all" ? true : campana.status === statusFilter))
+  const filteredCampanas = campanas.filter((campana) => {
+    if (statusFilter === "all") return true
+    return campana.status === statusFilter
+  })
 
   const getStatusBadge = (status: string) => {
     switch (status) {
@@ -81,13 +136,30 @@ export default function CampanasPage() {
     }
   }
 
-  const getModeBadge = (mode: string) => (mode === "automatic" ? <Badge variant="outline">Automático</Badge> : <Badge variant="secondary">Manual</Badge>)
-  const formatDate = (d?: string) => (d ? new Date(d).toLocaleDateString("es-ES", { day: "2-digit", month: "2-digit", year: "numeric" }) : "-")
-  const calculateProgress = (spent: number, budget: number) => (budget ? Math.round((spent / budget) * 100) : 0)
-  const calculateApplicationProgress = (applications: number, target: number) => (target ? Math.round((applications / target) * 100) : 0)
+  const getModeBadge = (mode: string) => {
+    return mode === "automatic" ? (
+      <Badge variant="outline">Automático</Badge>
+    ) : (
+      <Badge variant="secondary">Manual</Badge>
+    )
+  }
 
-  if (loading) return <div className="p-6">Cargando campañas...</div>
-  if (error) return <div className="p-6 text-red-600">Error: {error}</div>
+  const formatDate = (dateString: string) => {
+    const date = new Date(dateString)
+    return date.toLocaleDateString("es-ES", {
+      day: "2-digit",
+      month: "2-digit",
+      year: "numeric",
+    })
+  }
+
+  const calculateProgress = (spent: number, budget: number) => {
+    return Math.round((spent / budget) * 100)
+  }
+
+  const calculateApplicationProgress = (applications: number, target: number) => {
+    return Math.round((applications / target) * 100)
+  }
 
   return (
     <div className="flex flex-col gap-6 p-6">
@@ -107,6 +179,7 @@ export default function CampanasPage() {
         </Button>
       </div>
 
+      {/* Estadísticas rápidas */}
       <div className="grid gap-4 md:grid-cols-4">
         <Card>
           <CardHeader className="pb-2">
@@ -121,7 +194,9 @@ export default function CampanasPage() {
             <CardTitle className="text-sm font-medium">Campañas Activas</CardTitle>
           </CardHeader>
           <CardContent>
-            <div className="text-2xl font-bold text-green-600">{campanas.filter((c) => c.status === "active").length}</div>
+            <div className="text-2xl font-bold text-green-600">
+              {campanas.filter((c) => c.status === "active").length}
+            </div>
           </CardContent>
         </Card>
         <Card>
@@ -129,7 +204,7 @@ export default function CampanasPage() {
             <CardTitle className="text-sm font-medium">Presupuesto Total</CardTitle>
           </CardHeader>
           <CardContent>
-            <div className="text-2xl font-bold">€{campanas.reduce((sum, c) => sum + (c.budget || 0), 0).toLocaleString()}</div>
+            <div className="text-2xl font-bold">€{campanas.reduce((sum, c) => sum + c.budget, 0).toLocaleString()}</div>
           </CardContent>
         </Card>
         <Card>
@@ -137,11 +212,12 @@ export default function CampanasPage() {
             <CardTitle className="text-sm font-medium">Aplicaciones Totales</CardTitle>
           </CardHeader>
           <CardContent>
-            <div className="text-2xl font-bold">{campanas.reduce((sum, c) => sum + (c.applications || 0), 0)}</div>
+            <div className="text-2xl font-bold">{campanas.reduce((sum, c) => sum + c.applications, 0)}</div>
           </CardContent>
         </Card>
       </div>
 
+      {/* Filtros */}
       <Card>
         <CardHeader>
           <CardTitle>Filtros</CardTitle>
@@ -164,6 +240,7 @@ export default function CampanasPage() {
         </CardContent>
       </Card>
 
+      {/* Lista de campañas */}
       <Card>
         <CardHeader>
           <CardTitle className="flex items-center gap-2">
@@ -206,7 +283,7 @@ export default function CampanasPage() {
                         {campana.offers} ofertas
                       </div>
                       <div className="flex flex-wrap gap-1">
-                        {campana.channels.slice(0, 2).map((channel: string, index: number) => (
+                        {campana.channels.slice(0, 2).map((channel, index) => (
                           <Badge key={index} variant="outline" className="text-xs">
                             {channel}
                           </Badge>
@@ -223,10 +300,14 @@ export default function CampanasPage() {
                     <div className="space-y-2">
                       <div className="flex items-center gap-1">
                         <DollarSign className="h-3 w-3" />
-                        <span className="text-sm">€{(campana.spent || 0).toLocaleString()} / €{(campana.budget || 0).toLocaleString()}</span>
+                        <span className="text-sm">
+                          €{campana.spent.toLocaleString()} / €{campana.budget.toLocaleString()}
+                        </span>
                       </div>
-                      <Progress value={calculateProgress(campana.spent || 0, campana.budget || 0)} className="h-2" />
-                      <div className="text-xs text-muted-foreground">{calculateProgress(campana.spent || 0, campana.budget || 0)}% gastado</div>
+                      <Progress value={calculateProgress(campana.spent, campana.budget)} className="h-2" />
+                      <div className="text-xs text-muted-foreground">
+                        {calculateProgress(campana.spent, campana.budget)}% gastado
+                      </div>
                     </div>
                   </TableCell>
                   <TableCell>
@@ -234,22 +315,25 @@ export default function CampanasPage() {
                       <div className="flex items-center gap-1">
                         <Target className="h-3 w-3" />
                         <span className="text-sm">
-                          {campana.applications || 0} / {campana.target || 0}
+                          {campana.applications} / {campana.target}
                         </span>
                       </div>
-                      <Progress value={calculateApplicationProgress(campana.applications || 0, campana.target || 0)} className="h-2" />
+                      <Progress
+                        value={calculateApplicationProgress(campana.applications, campana.target)}
+                        className="h-2"
+                      />
                       <div className="text-xs text-muted-foreground">
-                        {calculateApplicationProgress(campana.applications || 0, campana.target || 0)}% del objetivo
+                        {calculateApplicationProgress(campana.applications, campana.target)}% del objetivo
                       </div>
                     </div>
                   </TableCell>
                   <TableCell>
                     <div className="space-y-1">
                       <div className="text-sm">
-                        <span className="font-medium">CPA:</span> €{campana.cpa || 0}
+                        <span className="font-medium">CPA:</span> €{campana.cpa}
                       </div>
                       <div className="text-sm">
-                        <span className="font-medium">Conv:</span> {campana.conversionRate || 0}%
+                        <span className="font-medium">Conv:</span> {campana.conversionRate}%
                       </div>
                     </div>
                   </TableCell>
@@ -269,14 +353,24 @@ export default function CampanasPage() {
                       <Button
                         variant="outline"
                         size="sm"
-                        onClick={() => toast({ title: "Ver campaña", description: `Abriendo "${campana.name}"` })}
+                        onClick={() => {
+                          toast({
+                            title: "Ver campaña",
+                            description: `Abriendo detalles de "${campana.name}"`,
+                          })
+                        }}
                       >
                         <Eye className="h-4 w-4" />
                       </Button>
                       <Button
                         variant="outline"
                         size="sm"
-                        onClick={() => toast({ title: "Editando campaña", description: `Editando "${campana.name}"` })}
+                        onClick={() => {
+                          toast({
+                            title: "Editando campaña",
+                            description: `Abriendo editor para "${campana.name}"`,
+                          })
+                        }}
                       >
                         <Edit className="h-4 w-4" />
                       </Button>
@@ -285,7 +379,12 @@ export default function CampanasPage() {
                           variant="outline"
                           size="sm"
                           className="text-orange-600"
-                          onClick={() => toast({ title: "Pausar", description: "Implementar acción en siguiente iteración" })}
+                          onClick={() => {
+                            toast({
+                              title: "Campaña pausada",
+                              description: `La campaña "${campana.name}" ha sido pausada`,
+                            })
+                          }}
                         >
                           <Pause className="h-4 w-4" />
                         </Button>
@@ -294,7 +393,12 @@ export default function CampanasPage() {
                           variant="outline"
                           size="sm"
                           className="text-green-600"
-                          onClick={() => toast({ title: "Reanudar", description: "Implementar acción en siguiente iteración" })}
+                          onClick={() => {
+                            toast({
+                              title: "Campaña reanudada",
+                              description: `La campaña "${campana.name}" ha sido reanudada`,
+                            })
+                          }}
                         >
                           <Play className="h-4 w-4" />
                         </Button>

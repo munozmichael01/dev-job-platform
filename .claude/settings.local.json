@@ -19,7 +19,10 @@
       "Bash(powershell:*)",
       "Bash(ls:*)",
       "Bash(cat:*)",
-      "Bash(npm run start:*)"
+      "Bash(npm run start:*)",
+      "Bash(npx tsc:*)",
+      "Bash(npx next build:*)",
+      "Bash(npx kill-port:*)"
     ],
     "deny": []
   }

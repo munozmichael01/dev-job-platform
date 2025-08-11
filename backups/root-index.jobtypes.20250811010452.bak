@@ -1,0 +1,24 @@
+
+// GET /job-offers/job-types - Tipos de contrato (JobType) de ofertas ACTIVAS
+app.get('/job-offers/job-types', async (req, res) => {
+  const origin = req.headers.origin;
+  const allowedOrigins = ['http://localhost:3007', 'http://127.0.0.1:3007', 'http://localhost:3004', 'http://127.0.0.1:3004', 'http://localhost:3006', 'http://127.0.0.1:3006'];
+  if (allowedOrigins.includes(origin)) res.setHeader('Access-Control-Allow-Origin', origin);
+  res.setHeader('Access-Control-Allow-Credentials', 'true');
+
+  try {
+    await poolConnect;
+    const query = `
+      SELECT DISTINCT JobType
+      FROM JobOffers
+      WHERE JobType IS NOT NULL AND JobType != '' AND StatusId = 1
+      ORDER BY JobType
+    `;
+    const result = await pool.request().query(query);
+    const types = result.recordset.map(r => r.JobType);
+    res.json({ success: true, data: types });
+  } catch (error) {
+    console.error('Error getting job types:', error);
+    res.status(500).json({ success: false, error: 'Error interno del servidor', details: error.message });
+  }
+});
