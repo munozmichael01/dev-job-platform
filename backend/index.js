@@ -150,8 +150,8 @@ app.get('/job-offers/locations', async (req, res) => {
     await poolConnect;
     
     // Parámetros de filtro para filtros dependientes
-    const { status, sector, externalId, q } = req.query;
-    console.log('🔍 /locations con filtros:', { status, sector, externalId, q });
+    const { status, sector, company, externalId, q } = req.query;
+    console.log('🔍 /locations con filtros:', { status, sector, company, externalId, q });
     
     let whereConditions = ['(City IS NOT NULL OR Region IS NOT NULL)', 'StatusId = 1'];
     const request = pool.request();
@@ -179,6 +179,13 @@ app.get('/job-offers/locations', async (req, res) => {
       whereConditions.push('(ExternalId = @externalIdExact OR ExternalId LIKE @externalId)');
       request.input('externalIdExact', sql.NVarChar, cleanExternalId);
       request.input('externalId', sql.NVarChar, `%${cleanExternalId}%`);
+    }
+
+    if (company && company !== 'all') {
+      const cleanCompany = company.trim();
+      whereConditions.push('(CompanyName = @companyExact OR CompanyName LIKE @company)');
+      request.input('companyExact', sql.NVarChar, cleanCompany);
+      request.input('company', sql.NVarChar, `%${cleanCompany}%`);
     }
 
     if (q && q.trim()) {
@@ -238,8 +245,8 @@ app.get('/job-offers/sectors', async (req, res) => {
     await poolConnect;
     
     // Parámetros de filtro para filtros dependientes
-    const { status, location, externalId, q } = req.query;
-    console.log('🔍 /sectors con filtros:', { status, location, externalId, q });
+    const { status, location, company, externalId, q } = req.query;
+    console.log('🔍 /sectors con filtros:', { status, location, company, externalId, q });
     
     let whereConditions = ['Sector IS NOT NULL', 'Sector != \'\'', 'StatusId = 1'];
     const request = pool.request();
@@ -268,6 +275,13 @@ app.get('/job-offers/sectors', async (req, res) => {
       whereConditions.push('(ExternalId = @externalIdExact OR ExternalId LIKE @externalId)');
       request.input('externalIdExact', sql.NVarChar, cleanExternalId);
       request.input('externalId', sql.NVarChar, `%${cleanExternalId}%`);
+    }
+
+    if (company && company !== 'all') {
+      const cleanCompany = company.trim();
+      whereConditions.push('(CompanyName = @companyExact OR CompanyName LIKE @company)');
+      request.input('companyExact', sql.NVarChar, cleanCompany);
+      request.input('company', sql.NVarChar, `%${cleanCompany}%`);
     }
 
     if (q && q.trim()) {
@@ -318,8 +332,8 @@ app.get('/job-offers/external-ids', async (req, res) => {
     await poolConnect;
     
     // Parámetros de filtro para filtros dependientes
-    const { status, location, sector, q } = req.query;
-    console.log('🔍 /external-ids con filtros:', { status, location, sector, q });
+    const { status, location, sector, company, q } = req.query;
+    console.log('🔍 /external-ids con filtros:', { status, location, sector, company, q });
     
     let whereConditions = ['ExternalId IS NOT NULL', 'ExternalId != \'\'', 'StatusId = 1'];
     const request = pool.request();
@@ -346,6 +360,13 @@ app.get('/job-offers/external-ids', async (req, res) => {
     if (sector && sector !== 'all') {
       whereConditions.push('Sector = @sector');
       request.input('sector', sql.NVarChar, sector);
+    }
+
+    if (company && company !== 'all') {
+      const cleanCompany = company.trim();
+      whereConditions.push('(CompanyName = @companyExact OR CompanyName LIKE @company)');
+      request.input('companyExact', sql.NVarChar, cleanCompany);
+      request.input('company', sql.NVarChar, `%${cleanCompany}%`);
     }
 
     if (q && q.trim()) {
@@ -482,6 +503,7 @@ app.get('/job-offers', async (req, res) => {
       status, 
       location, 
       sector,
+      company,            // Nuevo filtro por empresa
       externalId,         // Nuevo filtro por ExternalId
       sortBy = 'CreatedAt', // Campo de ordenamiento
       sortOrder = 'DESC',   // Dirección de ordenamiento
@@ -496,6 +518,7 @@ app.get('/job-offers', async (req, res) => {
     const cleanStatus = status && status !== 'all' ? status : null;
     const cleanLocation = location && location !== 'all' ? location.trim() : null;
     const cleanSector = sector && sector !== 'all' ? sector.trim() : null;
+    const cleanCompany = company && company !== 'all' ? company.trim() : null;
     const cleanExternalId = externalId && externalId !== 'all' ? externalId.trim() : null;
     
     // Validar límites (evitar queries masivas)
@@ -503,11 +526,13 @@ app.get('/job-offers', async (req, res) => {
     const validatedPage = Math.max(parseInt(page) || 1, 1);
     const offset = (validatedPage - 1) * validatedLimit;
 
-    console.log(`📊 Filtros aplicados - Search: ${cleanSearch}, Status: ${cleanStatus}, Location: ${cleanLocation}, Sector: ${cleanSector}, ExternalId: ${cleanExternalId}, Page: ${validatedPage}, Limit: ${validatedLimit}`);
+    console.log(`📊 Filtros aplicados - Search: ${cleanSearch}, Status: ${cleanStatus}, Location: ${cleanLocation}, Sector: ${cleanSector}, Company: ${cleanCompany}, ExternalId: ${cleanExternalId}, Page: ${validatedPage}, Limit: ${validatedLimit}`);
     console.log(`🔍 CURSOR DEBUG - lastCreatedAt: ${lastCreatedAt}, lastId: ${lastId}`);
+    console.log(`🔍 CURSOR DEBUG - lastCreatedAt type: ${typeof lastCreatedAt}, truthy: ${!!lastCreatedAt}`);
+    console.log(`🔍 CURSOR DEBUG - lastId type: ${typeof lastId}, truthy: ${!!lastId}`);
 
-    // Keyset pagination (cursor-based)
-    const usingKeysetPagination = lastCreatedAt || lastId;
+    // Re-habilitado keyset pagination tras eliminar LEFT JOINs complejos  
+    const usingKeysetPagination = Boolean(lastCreatedAt && lastId);
     console.log(`🔍 CURSOR DEBUG - usingKeysetPagination: ${usingKeysetPagination}`);
     
     // Construir query SQL dinámico OPTIMIZADO
@@ -636,6 +661,13 @@ app.get('/job-offers', async (req, res) => {
       queryParams.push({ name: 'sector', type: sql.NVarChar, value: `%${cleanSector}%` });
     }
 
+    // Filtro por empresa OPTIMIZADO
+    if (cleanCompany) {
+      whereConditions.push('(CompanyName = @companyExact OR CompanyName LIKE @company)');
+      queryParams.push({ name: 'companyExact', type: sql.NVarChar, value: cleanCompany });
+      queryParams.push({ name: 'company', type: sql.NVarChar, value: `%${cleanCompany}%` });
+    }
+
     // Filtro por ExternalId OPTIMIZADO
     if (cleanExternalId) {
       whereConditions.push('(ExternalId = @externalIdExact OR ExternalId LIKE @externalId)');
@@ -670,54 +702,139 @@ app.get('/job-offers', async (req, res) => {
         END,`;
     }
 
-    const mainQuery = `
+    // SOLUCIÓN TEMPORAL: Deshabilitar subconsultas complejas en paginación keyset
+    const useComplexSubqueries = !usingKeysetPagination;
+    
+    let mainQuery;
+    
+    if (usingKeysetPagination) {
+      // Query simplificada para paginación keyset (sin subconsultas que causen ambigüedad)
+      mainQuery = `
       SELECT
-        Id as id,
-        ExternalId,
-        Title as title,
-        CompanyName as company,
-        Sector as sector,
-        City,
-        Region,
+        jo.Id as id,
+        jo.ExternalId,
+        jo.Title as title,
+        jo.CompanyName as company,
+        jo.Sector as sector,
+        jo.City,
+        jo.Region,
         CASE 
-          WHEN City IS NOT NULL AND Region IS NOT NULL AND Region != '' 
-          THEN CONCAT(City, ', ', Region)
-          WHEN City IS NOT NULL 
-          THEN City
-          ELSE Region
+          WHEN jo.City IS NOT NULL AND jo.Region IS NOT NULL AND jo.Region != '' 
+          THEN CONCAT(jo.City, ', ', jo.Region)
+          WHEN jo.City IS NOT NULL 
+          THEN jo.City
+          ELSE jo.Region
         END as location,
-        SalaryMin,
-        SalaryMax,
+        jo.SalaryMin,
+        jo.SalaryMax,
         CASE 
-          WHEN SalaryMin IS NOT NULL AND SalaryMax IS NOT NULL THEN 
-            CONCAT(FORMAT(SalaryMin, 'N0'), '-', FORMAT(SalaryMax, 'N0'), '€')
-          WHEN SalaryMin IS NOT NULL THEN 
-            CONCAT('Desde ', FORMAT(SalaryMin, 'N0'), '€')
-          WHEN SalaryMax IS NOT NULL THEN 
-            CONCAT('Hasta ', FORMAT(SalaryMax, 'N0'), '€')
+          WHEN jo.SalaryMin IS NOT NULL AND jo.SalaryMax IS NOT NULL AND jo.SalaryMin > 0 AND jo.SalaryMax > 0
+          THEN CONCAT(FORMAT(jo.SalaryMin, 'N0'), '-', FORMAT(jo.SalaryMax, 'N0'), '€')
+          WHEN jo.SalaryMin IS NOT NULL AND jo.SalaryMin > 0 
+          THEN CONCAT('Desde ', FORMAT(jo.SalaryMin, 'N0'), '€')
+          WHEN jo.SalaryMax IS NOT NULL AND jo.SalaryMax > 0 
+          THEN CONCAT('Hasta ', FORMAT(jo.SalaryMax, 'N0'), '€')
           ELSE 'No especificado'
         END as salary,
-        JobType as type,
-        PublicationDate as publishDate,
-        CreatedAt,
-        StatusId,
-        CASE StatusId
-          WHEN 1 THEN 'active'
-          WHEN 2 THEN 'paused'
-          WHEN 3 THEN 'pending'
-          WHEN 4 THEN 'archived'
-          ELSE 'unknown'
-        END as status
-      FROM JobOffers WITH (READPAST${USE_INDEX_HINTS ? ', INDEX(IX_JobOffers_Covering_Main)' : ''})
+        CASE 
+          WHEN jo.JobType IS NOT NULL AND jo.JobType != '' 
+          THEN jo.JobType
+          WHEN jo.Vacancies = 1 
+          THEN 'Tiempo completo'
+          ELSE 'No especificado'
+        END as type,
+        jo.PublicationDate as publishDate,
+        jo.CreatedAt,
+        jo.StatusId,
+        CASE 
+          WHEN jo.StatusId = 1 THEN 'active'
+          WHEN jo.StatusId = 2 THEN 'paused'
+          WHEN jo.StatusId = 3 THEN 'archived'
+          ELSE 'pending'
+        END as status,
+        -- COLUMNAS SIMPLIFICADAS SIN SUBCONSULTAS
+        0 as campaignCount,
+        0 as segmentCount,
+        'No promocionada' as promotion,
+        NULL as campaigns,
+        NULL as segments,
+        0 as totalBudget,
+        0 as budgetSpent,
+        0 as targetApplications,
+        0 as applicationsReceived,
+        'Sin datos' as performance
+      FROM JobOffers jo WITH (READPAST${USE_INDEX_HINTS ? ', INDEX(IX_JobOffers_Covering_Main)' : ''})
       ${whereClause}
       ORDER BY 
         ${searchOrderBy}
-        ${validSortBy} ${validSortOrder}${usingKeysetPagination ? ', Id DESC' : ''}
-      ${usingKeysetPagination ? 
-        `OFFSET 0 ROWS FETCH NEXT @limit ROWS ONLY` : 
-        `OFFSET @offset ROWS FETCH NEXT @limit ROWS ONLY`
-      }
+        ${validSortBy} ${validSortOrder}, jo.Id DESC
+      OFFSET 0 ROWS FETCH NEXT @limit ROWS ONLY
     `;
+    } else {
+      // Query completa con subconsultas para primera página
+      mainQuery = `
+      SELECT
+        jo.Id as id,
+        jo.ExternalId,
+        jo.Title as title,
+        jo.CompanyName as company,
+        jo.Sector as sector,
+        jo.City,
+        jo.Region,
+        CASE 
+          WHEN jo.City IS NOT NULL AND jo.Region IS NOT NULL AND jo.Region != '' 
+          THEN CONCAT(jo.City, ', ', jo.Region)
+          WHEN jo.City IS NOT NULL 
+          THEN jo.City
+          ELSE jo.Region
+        END as location,
+        jo.SalaryMin,
+        jo.SalaryMax,
+        CASE 
+          WHEN jo.SalaryMin IS NOT NULL AND jo.SalaryMax IS NOT NULL THEN 
+            CONCAT(FORMAT(jo.SalaryMin, 'N0'), '-', FORMAT(jo.SalaryMax, 'N0'), '€')
+          WHEN jo.SalaryMin IS NOT NULL THEN 
+            CONCAT('Desde ', FORMAT(jo.SalaryMin, 'N0'), '€')
+          WHEN jo.SalaryMax IS NOT NULL THEN 
+            CONCAT('Hasta ', FORMAT(jo.SalaryMax, 'N0'), '€')
+          ELSE 'No especificado'
+        END as salary,
+        jo.JobType as type,
+        jo.PublicationDate as publishDate,
+        jo.CreatedAt,
+        jo.StatusId,
+        CASE jo.StatusId
+          WHEN 1 THEN 'active'
+          WHEN 2 THEN 'paused'
+          WHEN 3 THEN 'archived'
+          WHEN 4 THEN 'pending'
+          ELSE 'unknown'
+        END as status,
+        -- PROMOCIÓN SIMPLIFICADA (sin LEFT JOIN complejo)
+        0 as campaignCount,
+        0 as segmentCount,
+        'No promocionada' as promotion,
+        CAST(NULL as NVARCHAR(MAX)) as campaigns,
+        CAST(NULL as NVARCHAR(MAX)) as segments,
+        -- PERFORMANCE BASADA EN DATOS DIRECTOS (más eficiente)
+        COALESCE(jo.Budget, 10) as totalBudget,
+        COALESCE(jo.BudgetSpent, 0) as budgetSpent,
+        COALESCE(jo.ApplicationsGoal, 50) as targetApplications,
+        COALESCE(jo.ApplicationsReceived, 0) as applicationsReceived,
+        CASE 
+          WHEN jo.Budget > 0 THEN 
+            CONCAT('€', FORMAT(jo.BudgetSpent, 'N0'), '/', FORMAT(jo.Budget, 'N0'), ', ', 
+                   jo.ApplicationsReceived, '/', jo.ApplicationsGoal, ' inscr.')
+          ELSE 'Sin datos'
+        END as performance
+      FROM JobOffers jo WITH (READPAST${USE_INDEX_HINTS ? ', INDEX(IX_JobOffers_Covering_Main)' : ''})
+      ${whereClause}
+      ORDER BY 
+        ${searchOrderBy}
+        ${validSortBy} ${validSortOrder}
+      OFFSET @offset ROWS FETCH NEXT @limit ROWS ONLY
+    `;
+    }
 
     // Query para contar total SÚPER-OPTIMIZADA con límite dinámico
     let totalCount = 0;
@@ -858,6 +975,97 @@ app.get('/job-offers', async (req, res) => {
   }
 });
 
+// ✅ ENDPOINT PARA CAMBIAR ESTADO DE OFERTAS
+app.put('/job-offers/:id/status', async (req, res) => {
+  const origin = req.headers.origin;
+  console.log(`🔄 PUT /job-offers/:id/status - ID: ${req.params.id} from origin:`, origin);
+  
+  // CORS Headers
+  const allowedOrigins = ['http://localhost:3007', 'http://127.0.0.1:3007', 'http://localhost:3004', 'http://127.0.0.1:3004', 'http://localhost:3006', 'http://127.0.0.1:3006'];
+  if (allowedOrigins.includes(origin)) {
+    res.setHeader('Access-Control-Allow-Origin', origin);
+  }
+  res.setHeader('Access-Control-Allow-Credentials', 'true');
+  res.setHeader('Access-Control-Allow-Methods', 'PUT, OPTIONS');
+  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
+
+  if (req.method === 'OPTIONS') {
+    return res.status(200).end();
+  }
+
+  try {
+    const { id } = req.params;
+    const { status } = req.body;
+
+    // Validar ID
+    const offerId = parseInt(id);
+    if (!offerId || isNaN(offerId)) {
+      return res.status(400).json({ 
+        success: false, 
+        error: 'ID de oferta inválido' 
+      });
+    }
+
+    // Validar status
+    const validStatuses = [1, 2, 3]; // 1=activa, 2=pausada, 3=archivada
+    const newStatus = parseInt(status);
+    if (!validStatuses.includes(newStatus)) {
+      return res.status(400).json({ 
+        success: false, 
+        error: 'Estado inválido. Use: 1=activa, 2=pausada, 3=archivada' 
+      });
+    }
+
+    // Verificar que la oferta existe
+    const checkResult = await pool.request()
+      .input('Id', sql.Int, offerId)
+      .query('SELECT Id, Title, StatusId FROM JobOffers WHERE Id = @Id');
+
+    if (checkResult.recordset.length === 0) {
+      return res.status(404).json({
+        success: false,
+        error: 'Oferta no encontrada'
+      });
+    }
+
+    const currentOffer = checkResult.recordset[0];
+
+    // Actualizar estado
+    await pool.request()
+      .input('Id', sql.Int, offerId)
+      .input('StatusId', sql.Int, newStatus)
+      .query(`
+        UPDATE JobOffers 
+        SET StatusId = @StatusId, UpdatedAt = GETDATE()
+        WHERE Id = @Id
+      `);
+
+    const statusNames = { 1: 'activada', 2: 'pausada', 3: 'archivada' };
+    const statusMessage = `Oferta "${currentOffer.Title}" ${statusNames[newStatus]} correctamente`;
+
+    console.log(`✅ ${statusMessage}`);
+
+    res.json({
+      success: true,
+      message: statusMessage,
+      data: {
+        id: offerId,
+        previousStatus: currentOffer.StatusId,
+        newStatus: newStatus,
+        title: currentOffer.Title
+      }
+    });
+
+  } catch (error) {
+    console.error('❌ Error al cambiar estado de oferta:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Error interno del servidor',
+      details: error.message
+    });
+  }
+});
+
 // Endpoint para insertar ofertas (ya lo usas en /job-offers)
 app.post('/job-offers', async (req, res) => {
   await poolConnect;
@@ -973,22 +1181,80 @@ app.get('/job-offers/job-types', async (req, res) => {
   }
 });
 
-// GET /job-offers/companies - Empresas (CompanyName) de ofertas ACTIVAS
+// GET /job-offers/companies - Empresas (CompanyName) de ofertas ACTIVAS con filtros
 app.get('/job-offers/companies', async (req, res) => {
   const origin = req.headers.origin;
   const allowedOrigins = ['http://localhost:3007','http://127.0.0.1:3007','http://localhost:3004','http://127.0.0.1:3004','http://localhost:3006','http://127.0.0.1:3006'];
   if (allowedOrigins.includes(origin)) res.setHeader('Access-Control-Allow-Origin', origin);
   res.setHeader('Access-Control-Allow-Credentials', 'true');
+
+  const { status, location, sector, externalId, q } = req.query;
+  console.log('🔍 /companies con filtros:', {
+    status,
+    location,
+    sector,
+    externalId,
+    q
+  });
+
   try {
     await poolConnect;
-    const q = `
+    
+    const whereConditions = ['CompanyName IS NOT NULL', "CompanyName != ''", 'StatusId = 1'];
+    const request = pool.request();
+
+    // Filtros aplicados
+    const cleanStatus = status && status !== 'all' ? status : null;
+    const cleanLocation = location && location !== 'all' ? location : null;
+    const cleanSector = sector && sector !== 'all' ? sector : null;
+    const cleanExternalId = externalId && externalId !== 'all' ? externalId : null;
+
+    if (cleanStatus) {
+      const statusMap = { 'active': 1, 'pending': 3, 'paused': 2, 'archived': 4 };
+      if (statusMap[cleanStatus]) {
+        whereConditions.push('StatusId = @statusFilter');
+        request.input('statusFilter', sql.Int, statusMap[cleanStatus]);
+      }
+    }
+
+    if (cleanLocation) {
+      whereConditions.push('(City LIKE @location OR Region LIKE @location OR CONCAT(City, \', \', Region) LIKE @location)');
+      request.input('location', sql.NVarChar, `%${cleanLocation}%`);
+    }
+
+    if (cleanSector) {
+      whereConditions.push('Sector LIKE @sector');
+      request.input('sector', sql.NVarChar, `%${cleanSector}%`);
+    }
+
+    if (cleanExternalId) {
+      whereConditions.push('ExternalId LIKE @externalId');
+      request.input('externalId', sql.NVarChar, `%${cleanExternalId}%`);
+    }
+
+    if (q && q.trim()) {
+      const searchTerm = q.trim();
+      whereConditions.push('(Title LIKE @search OR CompanyName LIKE @search OR Description LIKE @search)');
+      request.input('search', sql.NVarChar, `%${searchTerm}%`);
+    }
+    
+    const companyQuery = `
       SELECT DISTINCT CompanyName
-      FROM JobOffers
-      WHERE CompanyName IS NOT NULL AND CompanyName != '' AND StatusId = 1
+      FROM JobOffers 
+      WHERE ${whereConditions.join(' AND ')}
       ORDER BY CompanyName
     `;
-    const r = await pool.request().query(q);
-    res.json({ success: true, data: r.recordset.map(x => x.CompanyName) });
+
+    console.log('🔍 Company query:', companyQuery);
+    const result = await request.query(companyQuery);
+    const companies = result.recordset.map(row => row.CompanyName);
+
+    console.log(`✅ Companies con filtros: ${companies.length} encontradas`);
+
+    res.json({
+      success: true,
+      data: companies
+    });
   } catch (e) {
     console.error('Error getting companies:', e);
     res.status(500).json({ success: false, error: 'Error interno del servidor', details: e.message });

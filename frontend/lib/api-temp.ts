@@ -65,16 +65,19 @@ export interface FilterParams {
   status?: string
   location?: string
   sector?: string
+  company?: string
   externalId?: string
   q?: string
 }
 
 export async function fetchLocations(filters: FilterParams = {}) {
   console.log("🔍 fetchLocations con filtros:", filters);
+  console.log("🔍 DEBUG: fetchLocations incluye company:", filters.company);
   
   const params = new URLSearchParams();
   if (filters.status && filters.status !== 'all') params.append('status', filters.status);
   if (filters.sector && filters.sector !== 'all') params.append('sector', filters.sector);
+  if (filters.company && filters.company !== 'all') params.append('company', filters.company);
   if (filters.externalId && filters.externalId !== 'all') params.append('externalId', filters.externalId);
   if (filters.q && filters.q.trim()) params.append('q', filters.q.trim());
 
@@ -101,10 +104,12 @@ export async function fetchLocations(filters: FilterParams = {}) {
 
 export async function fetchSectors(filters: FilterParams = {}) {
   console.log("🔍 fetchSectors con filtros:", filters);
+  console.log("🔍 DEBUG: fetchSectors incluye company:", filters.company);
   
   const params = new URLSearchParams();
   if (filters.status && filters.status !== 'all') params.append('status', filters.status);
   if (filters.location && filters.location !== 'all') params.append('location', filters.location);
+  if (filters.company && filters.company !== 'all') params.append('company', filters.company);
   if (filters.externalId && filters.externalId !== 'all') params.append('externalId', filters.externalId);
   if (filters.q && filters.q.trim()) params.append('q', filters.q.trim());
 
@@ -136,6 +141,7 @@ export async function fetchExternalIds(filters: FilterParams = {}) {
   if (filters.status && filters.status !== 'all') params.append('status', filters.status);
   if (filters.location && filters.location !== 'all') params.append('location', filters.location);
   if (filters.sector && filters.sector !== 'all') params.append('sector', filters.sector);
+  if (filters.company && filters.company !== 'all') params.append('company', filters.company);
   if (filters.q && filters.q.trim()) params.append('q', filters.q.trim());
 
   const url = `${API_URL}/job-offers/external-ids${params.toString() ? '?' + params.toString() : ''}`;
@@ -262,12 +268,33 @@ export async function resumeCampaign(id: number) {
   return res.json();
 }
 
-export async function fetchCompanies() {
-  const res = await fetch(`${API_URL}/job-offers/companies`, {
+export async function fetchCompanies(filters: FilterParams = {}) {
+  console.log("🔍 fetchCompanies con filtros:", filters);
+  
+  const params = new URLSearchParams();
+  if (filters.status && filters.status !== 'all') params.append('status', filters.status);
+  if (filters.location && filters.location !== 'all') params.append('location', filters.location);
+  if (filters.sector && filters.sector !== 'all') params.append('sector', filters.sector);
+  if (filters.externalId && filters.externalId !== 'all') params.append('externalId', filters.externalId);
+  if (filters.q && filters.q.trim()) params.append('q', filters.q.trim());
+
+  const url = `${API_URL}/job-offers/companies${params.toString() ? '?' + params.toString() : ''}`;
+  console.log("🔍 fetchCompanies URL:", url);
+
+  const res = await fetch(url, {
     method: 'GET',
-    headers: { 'Accept': 'application/json', 'Content-Type': 'application/json' },
+    headers: {
+      'Cache-Control': 'no-cache, no-store, must-revalidate',
+      'Pragma': 'no-cache',
+      'Expires': '0',
+      'Accept': 'application/json',
+      'Content-Type': 'application/json'
+    },
     cache: 'no-store'
-  });
-  if (!res.ok) throw new Error('Error al obtener empresas');
-  return res.json(); // { success, data }
+  })
+  if (!res.ok) {
+    const errorText = await res.text()
+    throw new Error(`Error al obtener empresas: ${res.status} ${errorText}`)
+  }
+  return res.json()
 }

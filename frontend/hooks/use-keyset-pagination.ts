@@ -344,7 +344,7 @@ export function useKeysetPagination(options: KeysetPaginationOptions) {
         
         const newState = {
           ...prev,
-          items: newItems, // Reemplazar, no agregar
+          items: newItems, // Para paginación tradicional: reemplazar página actual
           isLoadingMore: false,
           error: null,
           total,
@@ -358,13 +358,15 @@ export function useKeysetPagination(options: KeysetPaginationOptions) {
           cursor: newState.cursor
         });
         
-        console.log('📊 Page loaded:', { items: newItems.length, hasMore, total });
+        console.log('📊 Page loaded:', { items: newItems.length, hasMore, total, page: currentPageRef.current });
         
         return newState;
       });
       
-      // Guardar cursor en historia para "anterior"
-      if (next) {
+      // Guardar cursor en historia para "anterior" solo si es nueva página
+      if (next && !cursorHistoryRef.current.some(c => 
+        c?.lastCreatedAt === next.lastCreatedAt && c?.lastId === next.lastId
+      )) {
         cursorHistoryRef.current.push(next);
         currentPageRef.current++;
         console.log(`📖 Historia guardada - Página ${currentPageRef.current}, Historia: ${cursorHistoryRef.current.length}`);
@@ -409,16 +411,14 @@ export function useKeysetPagination(options: KeysetPaginationOptions) {
    * Cargar página anterior - usa cursor history
    */
   const loadPrevious = useCallback(async () => {
-    if (loadingRef.current || cursorHistoryRef.current.length <= 1) {
+    if (loadingRef.current || currentPageRef.current <= 1) {
       console.log('🚫 LoadPrevious: No hay página anterior o ya cargando');
       return;
     }
     
-    // Remover cursor actual y usar el anterior
-    cursorHistoryRef.current.pop(); // Remover cursor actual
+    // Decrementar página y obtener cursor anterior
     currentPageRef.current--;
-    
-    const previousCursor = cursorHistoryRef.current[cursorHistoryRef.current.length - 1];
+    const previousCursor = cursorHistoryRef.current[currentPageRef.current - 1]; // Index base 0
     cursorRef.current = previousCursor;
     
     console.log(`⬅️ Cargando página anterior ${currentPageRef.current}, cursor:`, previousCursor);
@@ -459,6 +459,10 @@ export function useKeysetPagination(options: KeysetPaginationOptions) {
         isLoadingMore: false,
         error: error.message || 'Error loading previous page',
       }));
+      
+      // Revertir cambio de página en caso de error
+      currentPageRef.current++;
+      cursorRef.current = cursorHistoryRef.current[currentPageRef.current - 1];
     } finally {
       loadingRef.current = false;
     }
@@ -498,7 +502,7 @@ export function useKeysetPagination(options: KeysetPaginationOptions) {
     totalLoaded: state.items.length,
     cursor: state.cursor, // También disponible en state para debug
     currentPage: currentPageRef.current,
-    canGoPrevious: cursorHistoryRef.current.length > 1,
+    canGoPrevious: currentPageRef.current > 1,
     
     // Acciones
     loadMore,

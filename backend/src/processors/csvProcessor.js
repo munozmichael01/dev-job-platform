@@ -2,6 +2,7 @@ const { pool, sql } = require("../db/db")
 const csv = require('csv-parser')
 const fs = require('fs')
 const path = require('path')
+const { updateOfferStatusByGoals } = require("../utils/statusUpdater")
 
 class CSVProcessor {
   constructor(connection, filePath = null) {
@@ -275,7 +276,13 @@ class CSVProcessor {
 
       console.log(`✅ Processing completed: ${totalProcessed} processed, ${totalFailed} failed`)
 
-      // 6. Generar mapeo automático SIEMPRE que se procesen ofertas exitosamente
+      // 6. Actualizar estados automáticos por presupuesto/objetivos
+      if (totalProcessed > 0) {
+        console.log("🎯 Updating automatic status based on budget/goals...")
+        await updateOfferStatusByGoals(this.connection.id)
+      }
+
+      // 7. Generar mapeo automático SIEMPRE que se procesen ofertas exitosamente
       if (totalProcessed > 0) {
         console.log("🔄 Generating/updating automatic mapping...")
         console.log("🔍 MAPPING DEBUG: Sample offer fields:", Object.keys(offers[0]))
@@ -758,7 +765,13 @@ class CSVProcessor {
               BudgetSpent = @BudgetSpent,
               ApplicationsGoal = @ApplicationsGoal,
               ApplicationsReceived = @ApplicationsReceived,
-              StatusId = @StatusId,
+              StatusId = CASE 
+                WHEN Target.StatusId = 2 THEN 2  -- Mantener pausadas manuales
+                WHEN Target.StatusId = 5 THEN 5  -- Mantener archivadas manuales
+                WHEN Target.StatusId = 3 THEN 3  -- Mantener objetivos completados
+                WHEN Target.StatusId = 4 THEN 4  -- Mantener presupuestos completados
+                ELSE @StatusId  -- Actualizar las demás (recibidas en CSV)
+              END,
               Source = @Source,
               PublicationDate = @PublicationDate,
               UpdatedAt = GETDATE()
@@ -818,9 +831,10 @@ class CSVProcessor {
 
         await request.query(`
           UPDATE JobOffers
-          SET StatusId = 2
+          SET StatusId = 5  -- ARCHIVADA (no pausada)
           WHERE ConnectionId = @ConnectionId
           AND Source = 'CSV'
+          AND StatusId NOT IN (2, 3, 4)  -- NO tocar pausadas, objetivos o presupuestos completados
           AND ExternalId NOT IN (${placeholders})
         `)
       }

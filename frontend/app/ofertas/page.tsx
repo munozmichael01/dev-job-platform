@@ -6,17 +6,18 @@ import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Badge } from "@/components/ui/badge"
 import { SidebarTrigger } from "@/components/ui/sidebar"
-import { Search, Filter, Eye, MapPin, Calendar, Building2, DollarSign, AlertCircle, CheckCircle, RefreshCw, Loader2, X, Trash2 } from "lucide-react"
+import { Search, Filter, Eye, MapPin, Calendar, Building2, DollarSign, AlertCircle, CheckCircle, RefreshCw, Loader2, X, Trash2, Play, Pause, Archive, TrendingUp, BarChart3 } from "lucide-react"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { SearchableSelect } from "@/components/ui/searchable-select"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip"
 import { useToast } from "@/hooks/use-toast"
 import Link from "next/link"
 import { useKeysetPagination } from "@/hooks/use-keyset-pagination"
 // Removed infinite scroll - using simple pagination
 import { ResultsCounter } from "@/components/ui/infinite-loader"
 import { ErrorMessage } from "@/components/ui/error-message"
-import { fetchLocations, fetchSectors, fetchExternalIds, type FilterParams } from "@/lib/api-temp"
+import { fetchLocations, fetchSectors, fetchCompanies, fetchExternalIds, type FilterParams } from "@/lib/api-temp"
 
 // Tipos TypeScript actualizados para keyset pagination
 interface Oferta {
@@ -32,9 +33,21 @@ interface Oferta {
   publishDate: string;
   CreatedAt: string; // Para keyset pagination
   status: 'active' | 'pending' | 'paused' | 'archived';
+  StatusId: number; // 1=active, 2=paused, 3=archived
   applications?: number;
   channels?: string[];
   validated?: boolean;
+  // NUEVAS COLUMNAS
+  campaignCount?: number;
+  segmentCount?: number;
+  promotion?: string;
+  campaigns?: string;
+  segments?: string;
+  totalBudget?: number;
+  budgetSpent?: number;
+  targetApplications?: number;
+  applicationsReceived?: number;
+  performance?: string;
 }
 
 // NOTA: API call ahora manejada internamente por el hook useKeysetPagination
@@ -45,11 +58,13 @@ export default function OfertasPage() {
   const [statusFilter, setStatusFilter] = useState<string>("all")
   const [locationFilter, setLocationFilter] = useState<string>("all")
   const [sectorFilter, setSectorFilter] = useState<string>("all")
+  const [companyFilter, setCompanyFilter] = useState<string>("all")
   const [externalIdFilter, setExternalIdFilter] = useState<string>("all")
   
   // Estados para opciones de dropdowns
   const [locations, setLocations] = useState<string[]>([])
   const [sectors, setSectors] = useState<string[]>([])
+  const [companies, setCompanies] = useState<string[]>([])
   const [externalIds, setExternalIds] = useState<(string | number)[]>([])
   const [loadingOptions, setLoadingOptions] = useState(false)
   
@@ -69,6 +84,44 @@ export default function OfertasPage() {
   const [searchType, setSearchType] = useState<string>('')
 
   const { toast } = useToast()
+
+  // Función para cambiar estado de ofertas
+  const handleOfferStatusChange = async (offerId: number, newStatus: number) => {
+    try {
+      const response = await fetch(`http://localhost:3002/job-offers/${offerId}/status`, {
+        method: 'PUT',
+        headers: { 
+          'Content-Type': 'application/json',
+          'Origin': 'http://localhost:3006'
+        },
+        body: JSON.stringify({ status: newStatus })
+      })
+      
+      const result = await response.json()
+      
+      if (result.success) {
+        toast({
+          title: "Estado actualizado",
+          description: result.message
+        })
+        // Recargar datos
+        reset(getCleanFilters())
+      } else {
+        toast({
+          title: "Error",
+          description: result.error || 'Error al cambiar estado',
+          variant: "destructive"
+        })
+      }
+    } catch (error) {
+      console.error('Error al cambiar estado:', error)
+      toast({
+        title: "Error de conexión",
+        description: 'No se pudo conectar con el servidor',
+        variant: "destructive"
+      })
+    }
+  }
 
   // Debounced search optimizado - solo busca a partir del 3er carácter
   const [debouncedSearchTerm, setDebouncedSearchTerm] = useState(searchTerm)
@@ -102,9 +155,10 @@ export default function OfertasPage() {
       ...(statusFilter && statusFilter !== 'all' ? { status: statusFilter } : {}),
       ...(locationFilter && locationFilter !== 'all' ? { location: locationFilter } : {}),
       ...(sectorFilter && sectorFilter !== 'all' ? { sector: sectorFilter } : {}),
+      ...(companyFilter && companyFilter !== 'all' ? { company: companyFilter } : {}),
       ...(externalIdFilter && externalIdFilter !== 'all' ? { externalId: externalIdFilter } : {}),
     }
-  }, [debouncedSearchTerm, statusFilter, locationFilter, sectorFilter, externalIdFilter])
+  }, [debouncedSearchTerm, statusFilter, locationFilter, sectorFilter, companyFilter, externalIdFilter])
 
   // Hash para detectar cambios en filtros
   const filtersHash = useMemo(() => {
@@ -159,22 +213,32 @@ export default function OfertasPage() {
           status: statusFilter !== 'all' ? statusFilter : undefined,
           location: locationFilter !== 'all' ? locationFilter : undefined,
           sector: sectorFilter !== 'all' ? sectorFilter : undefined,
+          company: companyFilter !== 'all' ? companyFilter : undefined,
           externalId: externalIdFilter !== 'all' ? externalIdFilter : undefined,
           q: debouncedSearchTerm || undefined
         }
 
         console.log('🔍 Cargando opciones con filtros dependientes:', currentFilters)
 
-        const [locationsResult, sectorsResult, externalIdsResult] = await Promise.all([
+        const [locationsResult, sectorsResult, companiesResult, externalIdsResult] = await Promise.all([
           fetchLocations({
             status: currentFilters.status,
             sector: currentFilters.sector,
+            company: currentFilters.company,
             externalId: currentFilters.externalId,
             q: currentFilters.q
           }),
           fetchSectors({
             status: currentFilters.status,
             location: currentFilters.location,
+            company: currentFilters.company,
+            externalId: currentFilters.externalId,
+            q: currentFilters.q
+          }),
+          fetchCompanies({
+            status: currentFilters.status,
+            location: currentFilters.location,
+            sector: currentFilters.sector,
             externalId: currentFilters.externalId,
             q: currentFilters.q
           }),
@@ -182,6 +246,7 @@ export default function OfertasPage() {
             status: currentFilters.status,
             location: currentFilters.location,
             sector: currentFilters.sector,
+            company: currentFilters.company,
             q: currentFilters.q
           })
         ])
@@ -194,6 +259,11 @@ export default function OfertasPage() {
         if (sectorsResult.success) {
           setSectors(sectorsResult.data || [])
           console.log(`✅ Sectors actualizados: ${sectorsResult.data?.length || 0} opciones`)
+        }
+        
+        if (companiesResult.success) {
+          setCompanies(companiesResult.data || [])
+          console.log(`✅ Companies actualizadas: ${companiesResult.data?.length || 0} opciones`)
         }
         
         if (externalIdsResult.success) {
@@ -209,7 +279,7 @@ export default function OfertasPage() {
     }
     
     loadDropdownOptions()
-  }, [statusFilter, locationFilter, sectorFilter, externalIdFilter, debouncedSearchTerm]) // Recargar cuando cambien los filtros
+  }, [statusFilter, locationFilter, sectorFilter, companyFilter, externalIdFilter, debouncedSearchTerm]) // Recargar cuando cambien los filtros
 
   // NOTA: La carga inicial se maneja en el efecto de abajo con reset()
 
@@ -218,7 +288,7 @@ export default function OfertasPage() {
     setSearchTerm(value)
   }, [])
 
-  const handleStatusChange = useCallback((value: string) => {
+  const handleStatusFilterChange = useCallback((value: string) => {
     setStatusFilter(value)
   }, [])
 
@@ -230,6 +300,10 @@ export default function OfertasPage() {
     setSectorFilter(value)
   }, [])
 
+  const handleCompanyChange = useCallback((value: string) => {
+    setCompanyFilter(value)
+  }, [])
+
   const handleExternalIdChange = useCallback((value: string) => {
     setExternalIdFilter(value)
   }, [])
@@ -239,6 +313,7 @@ export default function OfertasPage() {
     setStatusFilter("all")
     setLocationFilter("all")
     setSectorFilter("all")
+    setCompanyFilter("all")
     setExternalIdFilter("all")
   }, [])
 
@@ -249,6 +324,7 @@ export default function OfertasPage() {
   // Usar opciones de filtros desde la API (todos los datos, no solo ofertas cargadas)
   const uniqueLocations = locations
   const uniqueSectors = sectors
+  const uniqueCompanies = companies
   const uniqueExternalIds = externalIds
 
   const formatDate = (dateString: string) => {
@@ -290,6 +366,153 @@ export default function OfertasPage() {
       case 'archived': return 'Archivada'
       default: return status
     }
+  }
+
+  // Componente para columna de Promoción
+  const PromotionColumn = ({ oferta }: { oferta: Oferta }) => {
+    if (!oferta.campaignCount || oferta.campaignCount === 0) {
+      return <span className="text-gray-400 text-sm">No promocionada</span>
+    }
+    
+    return (
+      <TooltipProvider>
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <div className="cursor-help">
+              <div className="flex items-center gap-1 text-sm">
+                <TrendingUp className="h-4 w-4 text-blue-500" />
+                <span className="font-medium">{oferta.promotion}</span>
+              </div>
+            </div>
+          </TooltipTrigger>
+          <TooltipContent className="max-w-64">
+            <div className="space-y-2">
+              <div>
+                <strong>Campañas activas:</strong>
+                <div className="text-sm text-muted-foreground">
+                  {oferta.campaigns || 'Sin detalles de campañas'}
+                </div>
+              </div>
+              <div>
+                <strong>Segmentos:</strong>
+                <div className="text-sm text-muted-foreground">
+                  {oferta.segments || 'Sin detalles de segmentos'}
+                </div>
+              </div>
+            </div>
+          </TooltipContent>
+        </Tooltip>
+      </TooltipProvider>
+    )
+  }
+
+  // Componente para columna de Performance
+  const PerformanceColumn = ({ oferta }: { oferta: Oferta }) => {
+    if (!oferta.totalBudget || oferta.totalBudget === 0) {
+      return <span className="text-gray-400 text-sm">Sin datos</span>
+    }
+
+    const spent = oferta.budgetSpent || 0
+    const budget = oferta.totalBudget || 0
+    const inscriptions = oferta.applicationsReceived || 0
+    const target = oferta.targetApplications || 0
+    const cpi = inscriptions > 0 ? (spent / inscriptions).toFixed(2) : '0'
+    const budgetPercentage = budget > 0 ? ((spent / budget) * 100).toFixed(1) : '0'
+    const inscriptionsPercentage = target > 0 ? ((inscriptions / target) * 100).toFixed(1) : '0'
+
+    return (
+      <TooltipProvider>
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <div className="cursor-help">
+              <div className="flex items-center gap-1 text-sm">
+                <BarChart3 className="h-4 w-4 text-green-500" />
+                <span className="font-medium">{oferta.performance}</span>
+              </div>
+            </div>
+          </TooltipTrigger>
+          <TooltipContent className="max-w-64">
+            <div className="space-y-2">
+              <div>
+                <strong>Presupuesto:</strong>
+                <div className="text-sm text-muted-foreground">
+                  €{spent.toLocaleString()} gastados de €{budget.toLocaleString()} ({budgetPercentage}%)
+                </div>
+              </div>
+              <div>
+                <strong>Inscripciones:</strong>
+                <div className="text-sm text-muted-foreground">
+                  {inscriptions} logradas de {target} objetivo ({inscriptionsPercentage}%)
+                </div>
+              </div>
+              <div>
+                <strong>CPI (Costo Por Inscripción):</strong>
+                <div className="text-sm text-muted-foreground">€{cpi}</div>
+              </div>
+            </div>
+          </TooltipContent>
+        </Tooltip>
+      </TooltipProvider>
+    )
+  }
+
+  // Componente para botones de acciones contextuales
+  const ActionButtons = ({ oferta, onStatusChange }: { oferta: Oferta; onStatusChange: (id: number, status: number) => void }) => {
+    const getActions = (statusId: number) => {
+      switch(statusId) {
+        case 1: // ACTIVA
+          return [
+            { label: 'Pausar', action: 'pause', status: 2, color: 'bg-yellow-100 hover:bg-yellow-200 text-yellow-800', icon: <Pause className="h-3 w-3" /> },
+            { label: 'Archivar', action: 'archive', status: 3, color: 'bg-red-100 hover:bg-red-200 text-red-800', icon: <Archive className="h-3 w-3" /> }
+          ]
+        case 2: // PAUSADA
+          return [
+            { label: 'Activar', action: 'activate', status: 1, color: 'bg-green-100 hover:bg-green-200 text-green-800', icon: <Play className="h-3 w-3" /> },
+            { label: 'Archivar', action: 'archive', status: 3, color: 'bg-red-100 hover:bg-red-200 text-red-800', icon: <Archive className="h-3 w-3" /> }
+          ]
+        case 3: // ARCHIVADA
+          return [
+            { label: 'Activar', action: 'activate', status: 1, color: 'bg-green-100 hover:bg-green-200 text-green-800', icon: <Play className="h-3 w-3" /> }
+          ]
+        default:
+          return []
+      }
+    }
+
+    const handleAction = async (action: string, newStatus: number) => {
+      const confirmMessages = {
+        pause: '¿Pausar oferta temporalmente?',
+        archive: '¿Archivar oferta definitivamente?',
+        activate: oferta.StatusId === 3 ? '¿Reactivar esta oferta archivada?' : '¿Activar oferta nuevamente?'
+      }
+      
+      // Validar si está en campañas activas
+      if ((action === 'pause' || action === 'archive') && oferta.campaignCount && oferta.campaignCount > 0) {
+        const extraWarning = '\n\n⚠️ Esta oferta está en campañas activas. Esto afectará su promoción.'
+        if (!confirm(confirmMessages[action as keyof typeof confirmMessages] + extraWarning)) return
+      } else {
+        if (!confirm(confirmMessages[action as keyof typeof confirmMessages])) return
+      }
+      
+      await onStatusChange(oferta.id || oferta.Id, newStatus)
+    }
+
+    return (
+      <div className="flex gap-1">
+        {getActions(oferta.StatusId).map(action => (
+          <Button
+            key={action.action}
+            onClick={() => handleAction(action.action, action.status)}
+            size="sm"
+            variant="ghost"
+            className={`h-7 px-2 text-xs ${action.color}`}
+          >
+            {action.icon}
+            <span className="ml-1">{action.label}</span>
+          </Button>
+        ))}
+      </div>
+    )
   }
 
   return (
@@ -392,7 +615,7 @@ export default function OfertasPage() {
             
             <div className="space-y-2">
               <label className="text-sm font-medium">Estado</label>
-              <Select value={statusFilter} onValueChange={handleStatusChange}>
+              <Select value={statusFilter} onValueChange={handleStatusFilterChange}>
                 <SelectTrigger>
                   <SelectValue placeholder="Todos los estados" />
                 </SelectTrigger>
@@ -428,6 +651,19 @@ export default function OfertasPage() {
                 placeholder="Todos los sectores"
                 searchPlaceholder="Buscar sector..."
                 emptyMessage="No se encontraron sectores"
+                loading={loadingOptions}
+              />
+            </div>
+
+            <div className="space-y-2">
+              <label className="text-sm font-medium">Empresa</label>
+              <SearchableSelect
+                options={uniqueCompanies}
+                value={companyFilter}
+                onValueChange={handleCompanyChange}
+                placeholder="Todas las empresas"
+                searchPlaceholder="Buscar empresa..."
+                emptyMessage="No se encontraron empresas"
                 loading={loadingOptions}
               />
             </div>
@@ -512,6 +748,8 @@ export default function OfertasPage() {
                 <TableHead>Ubicación</TableHead>
                     <TableHead>Sector</TableHead>
                 <TableHead>Salario</TableHead>
+                <TableHead>Promoción</TableHead>
+                <TableHead>Performance</TableHead>
                 <TableHead>Estado</TableHead>
                     <TableHead>Fecha</TableHead>
                 <TableHead>Acciones</TableHead>
@@ -535,6 +773,12 @@ export default function OfertasPage() {
                       <TableCell>{oferta.sector || 'General'}</TableCell>
                       <TableCell>{oferta.salary || 'No especificado'}</TableCell>
                       <TableCell>
+                        <PromotionColumn oferta={oferta} />
+                      </TableCell>
+                      <TableCell>
+                        <PerformanceColumn oferta={oferta} />
+                      </TableCell>
+                      <TableCell>
                         <Badge variant={getStatusBadgeVariant(oferta.status)} className="flex items-center gap-1">
                           {getStatusIcon(oferta.status)}
                           {getStatusText(oferta.status)}
@@ -547,9 +791,7 @@ export default function OfertasPage() {
                     </div>
                   </TableCell>
                   <TableCell>
-                        <Button variant="ghost" size="sm">
-                        <Eye className="h-4 w-4" />
-                    </Button>
+                        <ActionButtons oferta={oferta} onStatusChange={handleOfferStatusChange} />
                   </TableCell>
                 </TableRow>
                     );

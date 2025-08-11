@@ -1,6 +1,7 @@
 const axios = require("axios")
 const xml2js = require("xml2js")
 const { pool, sql } = require("../db/db")
+const { updateOfferStatusByGoals } = require("../utils/statusUpdater")
 
 class XMLProcessor {
   constructor(connection) {
@@ -348,7 +349,13 @@ class XMLProcessor {
 
       console.log(`✅ Processing completed: ${totalProcessed} processed, ${totalFailed} failed`)
 
-      // 8. Generar mapeo automático SIEMPRE que se procesen ofertas exitosamente
+      // 8. Actualizar estados automáticos por presupuesto/objetivos
+      if (totalProcessed > 0) {
+        console.log("🎯 Updating automatic status based on budget/goals...")
+        await updateOfferStatusByGoals(this.connection.id)
+      }
+
+      // 9. Generar mapeo automático SIEMPRE que se procesen ofertas exitosamente
       console.log(`🚀 CLAUDE DEBUG: totalProcessed = ${totalProcessed}, offers.length = ${offers.length}`)
       if (totalProcessed > 0) {
         console.log("🔄 Generating/updating automatic mapping...")
@@ -595,7 +602,11 @@ class XMLProcessor {
               BudgetSpent = @BudgetSpent,
               ApplicationsGoal = @ApplicationsGoal,
               ApplicationsReceived = @ApplicationsReceived,
-              StatusId = @StatusId,
+              StatusId = CASE 
+                WHEN Target.StatusId = 2 THEN 2  -- Mantener pausadas manuales
+                WHEN Target.StatusId = 5 THEN 5  -- Mantener archivadas manuales
+                ELSE 1  -- Activar las demás (recibidas en XML)
+              END,
               Source = @Source,
               PublicationDate = @PublicationDate,
               UpdatedAt = GETDATE()
@@ -650,9 +661,10 @@ class XMLProcessor {
 
         await request.query(`
           UPDATE JobOffers
-          SET StatusId = 2
+          SET StatusId = 5  -- ARCHIVADA (no pausada)
           WHERE ConnectionId = @ConnectionId
           AND Source = 'XML'
+          AND StatusId NOT IN (2, 3, 4)  -- NO tocar pausadas, objetivos o presupuestos completados
           AND ExternalId NOT IN (${placeholders})
         `)
       }

@@ -1,7 +1,7 @@
 "use client"
 import type React from "react"
 import { useEffect, useState } from "react"
-import { useRouter } from "next/navigation"
+import { useRouter, useParams } from "next/navigation"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
@@ -15,12 +15,15 @@ import { Checkbox } from "@/components/ui/checkbox"
 import { MultiSelect, type MultiSelectOption } from "@/components/ui/multi-select"
 import Link from "next/link"
 import { useToast } from "@/hooks/use-toast"
-import { createSegment, estimateSegmentPreview, fetchLocations, fetchSectors, fetchCompanies } from "@/lib/api-temp"
+import { updateSegment, getSegment, estimateSegmentPreview, fetchLocations, fetchSectors, fetchCompanies } from "@/lib/api-temp"
 
-export default function NuevoSegmentoPage() {
+export default function EditarSegmentoPage() {
   const { toast } = useToast()
   const router = useRouter()
+  const params = useParams()
+  const id = parseInt(params.id as string)
 
+  const [loading, setLoading] = useState(true)
   const [formData, setFormData] = useState({
     name: "",
     description: "",
@@ -29,7 +32,7 @@ export default function NuevoSegmentoPage() {
     sectors: [] as string[],
     companies: [] as string[],
     experienceLevels: [] as string[],
-    contractTypes: [] as string[], // sin uso
+    contractTypes: [] as string[],
   })
 
   // Listas reales
@@ -45,6 +48,37 @@ export default function NuevoSegmentoPage() {
   // Estimación
   const [estimatedOffers, setEstimatedOffers] = useState<number>(0)
   const [estimating, setEstimating] = useState<boolean>(false)
+
+  // Cargar segmento existente
+  useEffect(() => {
+    if (!id) return
+    ;(async () => {
+      try {
+        setLoading(true)
+        const segment = await getSegment(id)
+        const filters = segment.Filters || {}
+        setFormData({
+          name: segment.Name || "",
+          description: segment.Description || "",
+          jobTitles: filters.jobTitles || [],
+          locations: filters.locations || [],
+          sectors: filters.sectors || [],
+          companies: filters.companies || [],
+          experienceLevels: filters.experienceLevels || [],
+          contractTypes: filters.contractTypes || [],
+        })
+      } catch (e: any) {
+        toast({
+          title: "Error al cargar segmento",
+          description: e.message,
+          variant: "destructive"
+        })
+        router.push("/segmentos")
+      } finally {
+        setLoading(false)
+      }
+    })()
+  }, [id])
 
   // Cargar listas reales
   useEffect(() => {
@@ -63,6 +97,10 @@ export default function NuevoSegmentoPage() {
     })()
   }, [])
 
+  // Convert arrays to MultiSelect options
+  const sectorsOptions: MultiSelectOption[] = sectorsList.map(sector => ({ label: sector, value: sector }))
+  const companiesOptions: MultiSelectOption[] = companiesList.map(company => ({ label: company, value: company }))
+
   // Handlers
   const addJobTitle = () => {
     if (newJobTitle.trim() && !formData.jobTitles.includes(newJobTitle.trim())) {
@@ -78,14 +116,6 @@ export default function NuevoSegmentoPage() {
     }
   }
   const removeLocation = (loc: string) => setFormData((p) => ({ ...p, locations: p.locations.filter((x) => x !== loc) }))
-  const toggleSector = (s: string) =>
-    setFormData((p) => ({ ...p, sectors: p.sectors.includes(s) ? p.sectors.filter((x) => x !== s) : [...p.sectors, s] }))
-  const toggleCompany = (c: string) =>
-    setFormData((p) => ({ ...p, companies: p.companies.includes(c) ? p.companies.filter((x) => x !== c) : [...p.companies, c] }))
-
-  // Convert arrays to MultiSelect options
-  const sectorsOptions: MultiSelectOption[] = sectorsList.map(sector => ({ label: sector, value: sector }))
-  const companiesOptions: MultiSelectOption[] = companiesList.map(company => ({ label: company, value: company }))
   const toggleExperience = (e: string) =>
     setFormData((p) => ({
       ...p,
@@ -111,9 +141,10 @@ export default function NuevoSegmentoPage() {
   }
 
   useEffect(() => {
+    if (loading) return
     const t = setTimeout(() => { void recalcEstimate() }, 500)
     return () => clearTimeout(t)
-  }, [formData.jobTitles.join("|"), formData.locations.join("|"), formData.sectors.join("|"), formData.companies.join("|")])
+  }, [formData.jobTitles.join("|"), formData.locations.join("|"), formData.sectors.join("|"), formData.companies.join("|"), loading])
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
@@ -121,20 +152,45 @@ export default function NuevoSegmentoPage() {
       toast({ title: "Errores en el formulario", description: "El nombre es obligatorio", variant: "destructive" })
       return
     }
-    await createSegment({
-      name: formData.name,
-      description: formData.description,
-      filters: {
-        jobTitles: formData.jobTitles,
-        locations: formData.locations,
-        sectors: formData.sectors,
-        companies: formData.companies,
-        experienceLevels: formData.experienceLevels,
-        contractTypes: formData.contractTypes, // sin uso
-      },
-    })
-    toast({ title: "Segmento creado", description: formData.name })
-    router.push("/segmentos")
+    
+    try {
+      await updateSegment(id, {
+        name: formData.name,
+        description: formData.description,
+        filters: {
+          jobTitles: formData.jobTitles,
+          locations: formData.locations,
+          sectors: formData.sectors,
+          companies: formData.companies,
+          experienceLevels: formData.experienceLevels,
+          contractTypes: formData.contractTypes,
+        },
+      })
+      toast({ title: "Segmento actualizado", description: formData.name })
+      router.push("/segmentos")
+    } catch (e: any) {
+      toast({
+        title: "Error al actualizar segmento",
+        description: e.message,
+        variant: "destructive"
+      })
+    }
+  }
+
+  if (loading) {
+    return (
+      <div className="flex flex-col gap-6 p-6">
+        <div className="flex items-center gap-4">
+          <SidebarTrigger />
+          <div>
+            <h1 className="text-3xl font-bold">Cargando segmento...</h1>
+          </div>
+        </div>
+        <div className="flex items-center justify-center h-32">
+          <Loader2 className="h-8 w-8 animate-spin" />
+        </div>
+      </div>
+    )
   }
 
   return (
@@ -145,8 +201,8 @@ export default function NuevoSegmentoPage() {
           <Link href="/segmentos"><ArrowLeft className="h-4 w-4 mr-2" />Volver</Link>
         </Button>
         <div>
-          <h1 className="text-3xl font-bold">Nuevo Segmento</h1>
-          <p className="text-muted-foreground">Crea un nuevo segmento dinámico de ofertas</p>
+          <h1 className="text-3xl font-bold">Editar Segmento</h1>
+          <p className="text-muted-foreground">Modifica las características del segmento</p>
         </div>
       </div>
 
@@ -154,7 +210,7 @@ export default function NuevoSegmentoPage() {
         <div className="grid gap-6 lg:grid-cols-3">
           {/* Columna principal */}
           <div className="lg:col-span-2 space-y-6">
-            {/* Información básica (restaurado) */}
+            {/* Información básica */}
             <Card>
               <CardHeader>
                 <CardTitle>Información Básica</CardTitle>
@@ -347,8 +403,8 @@ export default function NuevoSegmentoPage() {
             </Card>
 
             <div className="flex gap-2">
-              <Button type="submit" className="flex-1" onClick={(e) => { e.preventDefault(); handleSubmit(e) }}>
-                <Save className="h-4 w-4 mr-2" />Crear Segmento
+              <Button type="submit" className="flex-1">
+                <Save className="h-4 w-4 mr-2" />Actualizar Segmento
               </Button>
             </div>
           </div>

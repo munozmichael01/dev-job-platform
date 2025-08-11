@@ -9,6 +9,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip"
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from "@/components/ui/alert-dialog"
 import Link from "next/link"
+import { useRouter } from "next/navigation"
 import { useToast } from "@/hooks/use-toast"
 import { fetchSegments, deleteSegment, recalculateSegment, duplicateSegment } from "@/lib/api-temp"
 
@@ -26,6 +27,7 @@ type ApiSegment = {
 
 export default function SegmentosPage() {
   const { toast } = useToast()
+  const router = useRouter()
   const [segmentos, setSegmentos] = useState<ApiSegment[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
@@ -301,9 +303,7 @@ export default function SegmentosPage() {
                                 <Button
                                   variant="outline"
                                   size="sm"
-                                  onClick={() =>
-                                    toast({ title: "Editar segmento", description: `Abrir editor para "${segmento.Name}"` })
-                                  }
+                                  onClick={() => router.push(`/segmentos/${segmento.Id}/editar`)}
                                 >
                                   <Edit className="h-4 w-4" />
                                 </Button>

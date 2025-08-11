@@ -1,5 +1,6 @@
 const axios = require("axios")
 const { pool, sql } = require("../db/db")
+const { updateOfferStatusByGoals } = require("../utils/statusUpdater")
 
 class APIProcessor {
   constructor(connection) {
@@ -351,6 +352,12 @@ class APIProcessor {
 
       console.log(`✅ Processing completed: ${totalProcessed} processed, ${totalFailed} failed`)
 
+      // 6. Actualizar estados automáticos por presupuesto/objetivos
+      if (totalProcessed > 0) {
+        console.log("🎯 Updating automatic status based on budget/goals...")
+        await updateOfferStatusByGoals(this.connection.id)
+      }
+
       // 7. Generar mapeo automático SIEMPRE que se procesen ofertas exitosamente
       if (totalProcessed > 0) {
         console.log("🔄 Generating/updating automatic mapping...")
@@ -599,7 +606,13 @@ class APIProcessor {
               BudgetSpent = @BudgetSpent,
               ApplicationsGoal = @ApplicationsGoal,
               ApplicationsReceived = @ApplicationsReceived,
-              StatusId = @StatusId,
+              StatusId = CASE 
+                WHEN Target.StatusId = 2 THEN 2  -- Mantener pausadas manuales
+                WHEN Target.StatusId = 5 THEN 5  -- Mantener archivadas manuales
+                WHEN Target.StatusId = 3 THEN 3  -- Mantener objetivos completados
+                WHEN Target.StatusId = 4 THEN 4  -- Mantener presupuestos completados
+                ELSE @StatusId  -- Actualizar las demás (recibidas en API)
+              END,
               Source = @Source,
               PublicationDate = @PublicationDate,
               UpdatedAt = GETDATE()
@@ -654,9 +667,10 @@ class APIProcessor {
 
         await request.query(`
           UPDATE JobOffers
-          SET StatusId = 2
+          SET StatusId = 5  -- ARCHIVADA (no pausada)
           WHERE ConnectionId = @ConnectionId
           AND Source = 'API'
+          AND StatusId NOT IN (2, 3, 4)  -- NO tocar pausadas, objetivos o presupuestos completados
           AND ExternalId NOT IN (${placeholders})
         `)
       }
