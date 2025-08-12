@@ -11,9 +11,45 @@ const parseJSON = (val) => {
 router.get('/', async (_req, res) => {
   try {
     await poolConnect;
-    const r = await pool.request().query(`SELECT * FROM Campaigns ORDER BY CreatedAt DESC`);
-    const rows = r.recordset.map(c => ({ ...c, Channels: parseJSON(c.Channels) }));
-    res.json(rows);
+    const r = await pool.request().query(`
+      SELECT 
+        c.*,
+        s.Name as SegmentName,
+        s.OfferCount as SegmentOffers
+      FROM Campaigns c
+      LEFT JOIN Segments s ON c.SegmentId = s.Id 
+      ORDER BY c.CreatedAt DESC
+    `);
+    
+    // Para cada campaña, obtener todos sus segmentos
+    const campaigns = [];
+    for (const campaign of r.recordset) {
+      // Obtener segmentos asociados
+      const segmentsResult = await pool.request()
+        .input('CampaignId', sql.Int, campaign.Id)
+        .query(`
+          SELECT cs.*, s.Name as SegmentName, s.OfferCount 
+          FROM CampaignSegments cs
+          INNER JOIN Segments s ON cs.SegmentId = s.Id
+          WHERE cs.CampaignId = @CampaignId
+          ORDER BY cs.CreatedAt
+        `);
+      
+      const segments = segmentsResult.recordset;
+      const totalOffers = segments.reduce((sum, seg) => sum + (seg.OfferCount || 0), 0);
+      const segmentNames = segments.map(seg => seg.SegmentName).join(', ');
+      
+      campaigns.push({
+        ...campaign,
+        Channels: parseJSON(campaign.Channels),
+        segments: segments, // Array completo de segmentos
+        segment: segmentNames || campaign.SegmentName || `Segmento #${campaign.SegmentId}`, // Para compatibilidad
+        offers: totalOffers || campaign.SegmentOffers || 0,
+        segmentCount: segments.length
+      });
+    }
+    
+    res.json(campaigns);
   } catch (e) {
     res.status(500).json({ error: 'Error listando campañas', details: e.message });
   }
@@ -21,7 +57,7 @@ router.get('/', async (_req, res) => {
 
 router.post('/', async (req, res) => {
   const {
-    name, description = '', segmentId,
+    name, description = '', segmentId, segmentIds, // Soporte para ambos formatos
     distributionType = 'automatic',
     startDate = null, endDate = null,
     budget = null, targetApplications = null, maxCPA = null,
@@ -29,18 +65,33 @@ router.post('/', async (req, res) => {
     priority = 'medium', autoOptimization = true
   } = req.body || {};
   
-  if (!name || !segmentId) {
-    return res.status(400).json({ error: 'name y segmentId son requeridos' });
+  // Soporte para segmentId (legacy) o segmentIds (nuevo)
+  const segments = segmentIds && Array.isArray(segmentIds) && segmentIds.length > 0 
+    ? segmentIds 
+    : (segmentId ? [segmentId] : []);
+  
+  if (!name || segments.length === 0) {
+    return res.status(400).json({ 
+      error: 'name y al menos un segmento son requeridos',
+      received: { name: !!name, segmentsCount: segments.length }
+    });
   }
   
-  if (!budget || !targetApplications || !channels || channels.length === 0) {
+  if (!budget || !targetApplications) {
     return res.status(400).json({ 
-      error: 'budget, targetApplications y channels son requeridos para distribución automática',
-      received: { budget, targetApplications, channelsCount: channels.length }
+      error: 'budget y targetApplications son requeridos',
+      received: { budget, targetApplications }
     });
   }
 
-  console.log(`🎯 Creando campaña con distribución ${distributionType} para ${channels.length} canales`);
+  if (distributionType === 'manual' && (!channels || channels.length === 0)) {
+    return res.status(400).json({ 
+      error: 'Para distribución manual, se requiere al menos un canal',
+      received: { distributionType, channelsCount: channels.length }
+    });
+  }
+
+  console.log(`🎯 Creando campaña con distribución ${distributionType} para ${channels.length} canales y ${segments.length} segmentos`);
 
   try {
     await poolConnect;
@@ -50,7 +101,7 @@ router.post('/', async (req, res) => {
     const ins = await pool.request()
       .input('Name', sql.NVarChar(255), name)
       .input('Description', sql.NVarChar(sql.MAX), description)
-      .input('SegmentId', sql.Int, segmentId)
+      .input('SegmentId', sql.Int, segments[0]) // Usar primer segmento para compatibilidad
       .input('DistributionType', sql.NVarChar(50), distributionType)
       .input('StartDate', sql.DateTime, startDate ? new Date(startDate) : null)
       .input('EndDate', sql.DateTime, endDate ? new Date(endDate) : null)
@@ -76,17 +127,37 @@ router.post('/', async (req, res) => {
     const campaign = ins.recordset[0];
     console.log(`✅ Campaña creada con ID: ${campaign.Id}`);
 
-    // 2. Si es distribución automática, calcular y crear distribución por ofertas y canales
+    // 2. Insertar relaciones CampaignSegments para todos los segmentos
+    const budgetPerSegment = segments.length > 1 ? (100 / segments.length) : 100; // Distribución equitativa
+    
+    for (let i = 0; i < segments.length; i++) {
+      const segmentId = segments[i];
+      await pool.request()
+        .input('CampaignId', sql.Int, campaign.Id)
+        .input('SegmentId', sql.Int, segmentId)
+        .input('BudgetAllocation', sql.Decimal(5,2), budgetPerSegment)
+        .input('Weight', sql.Decimal(5,2), 1.0)
+        .input('CreatedAt', sql.DateTime, now)
+        .input('UpdatedAt', sql.DateTime, now)
+        .query(`
+          INSERT INTO CampaignSegments (CampaignId, SegmentId, BudgetAllocation, Weight, CreatedAt, UpdatedAt)
+          VALUES (@CampaignId, @SegmentId, @BudgetAllocation, @Weight, @CreatedAt, @UpdatedAt)
+        `);
+    }
+    
+    console.log(`✅ ${segments.length} segmentos asociados a la campaña`);
+
+    // 3. Si es distribución automática, calcular y crear distribución por ofertas y canales
     if (distributionType === 'automatic') {
       try {
-        // Obtener ofertas del segmento
-        const offers = await CampaignDistributionService.getOffersFromSegment(segmentId);
+        // Obtener ofertas de todos los segmentos
+        const offers = await CampaignDistributionService.getOffersFromSegment(segments);
         
         if (offers.length === 0) {
-          console.warn(`⚠️ No se encontraron ofertas para el segmento ${segmentId}`);
+          console.warn(`⚠️ No se encontraron ofertas para los segmentos ${segments.join(', ')}`);
           return res.status(400).json({ 
-            error: 'No se encontraron ofertas en el segmento seleccionado',
-            segmentId: segmentId
+            error: 'No se encontraron ofertas en los segmentos seleccionados',
+            segmentIds: segments
           });
         }
 
@@ -111,7 +182,7 @@ router.post('/', async (req, res) => {
         // Crear registros CampaignChannels
         await CampaignDistributionService.createCampaignChannels(campaign.Id, channelDistribution);
         
-        console.log(`🎯 Distribución automática completada: ${offers.length} ofertas × ${channels.length} canales = ${channelDistribution.length} registros`);
+        console.log(`🎯 Distribución automática completada: ${offers.length} ofertas de ${segments.length} segmentos × ${channels.length} canales = ${channelDistribution.length} registros`);
         
         // Devolver campaña con información de distribución
         res.status(201).json({ 
@@ -485,6 +556,208 @@ router.post('/:id/control-external', async (req, res) => {
     res.status(500).json({
       error: `Error ejecutando acción ${action}`,
       details: error.message
+    });
+  }
+});
+
+// GET /api/campaigns/:id - Obtener una campaña específica
+router.get('/:id', async (req, res) => {
+  const campaignId = parseInt(req.params.id);
+  
+  try {
+    await poolConnect;
+    const r = await pool.request()
+      .input('Id', sql.Int, campaignId)
+      .query(`
+        SELECT 
+          c.*,
+          s.Name as SegmentName,
+          s.OfferCount as SegmentOffers
+        FROM Campaigns c
+        LEFT JOIN Segments s ON c.SegmentId = s.Id 
+        WHERE c.Id = @Id
+      `);
+      
+    if (r.recordset.length === 0) {
+      return res.status(404).json({ error: 'Campaña no encontrada' });
+    }
+    
+    const campaign = {
+      ...r.recordset[0],
+      Channels: parseJSON(r.recordset[0].Channels),
+      segment: r.recordset[0].SegmentName || `Segmento #${r.recordset[0].SegmentId}`,
+      offers: r.recordset[0].SegmentOffers || 0
+    };
+    
+    res.json(campaign);
+  } catch (e) {
+    res.status(500).json({ error: 'Error obteniendo campaña', details: e.message });
+  }
+});
+
+// PUT /api/campaigns/:id - Actualizar una campaña
+router.put('/:id', async (req, res) => {
+  const campaignId = parseInt(req.params.id);
+  const {
+    name, description = '', segmentId,
+    distributionType = 'automatic',
+    startDate = null, endDate = null,
+    budget = null, targetApplications = null, maxCPA = null,
+    channels = [], bidStrategy = 'automatic', manualBid = null,
+    priority = 'medium', autoOptimization = true
+  } = req.body || {};
+  
+  if (!name || !segmentId) {
+    return res.status(400).json({ error: 'name y segmentId son requeridos' });
+  }
+  
+  try {
+    await poolConnect;
+    
+    const updateResult = await pool.request()
+      .input('Id', sql.Int, campaignId)
+      .input('Name', sql.NVarChar(255), name)
+      .input('Description', sql.NVarChar(sql.MAX), description)
+      .input('SegmentId', sql.Int, segmentId)
+      .input('DistributionType', sql.NVarChar(50), distributionType)
+      .input('StartDate', sql.DateTime, startDate ? new Date(startDate) : null)
+      .input('EndDate', sql.DateTime, endDate ? new Date(endDate) : null)
+      .input('Budget', sql.Decimal(10,2), budget)
+      .input('TargetApplications', sql.Int, targetApplications)
+      .input('MaxCPA', sql.Decimal(8,2), maxCPA)
+      .input('Channels', sql.NVarChar(sql.MAX), JSON.stringify(channels))
+      .input('BidStrategy', sql.NVarChar(50), bidStrategy)
+      .input('ManualBid', sql.Decimal(8,2), manualBid)
+      .input('Priority', sql.NVarChar(20), priority)
+      .input('AutoOptimization', sql.Bit, autoOptimization)
+      .input('UpdatedAt', sql.DateTime, new Date())
+      .query(`
+        UPDATE Campaigns SET
+          Name = @Name,
+          Description = @Description,
+          SegmentId = @SegmentId,
+          DistributionType = @DistributionType,
+          StartDate = @StartDate,
+          EndDate = @EndDate,
+          Budget = @Budget,
+          TargetApplications = @TargetApplications,
+          MaxCPA = @MaxCPA,
+          Channels = @Channels,
+          BidStrategy = @BidStrategy,
+          ManualBid = @ManualBid,
+          Priority = @Priority,
+          AutoOptimization = @AutoOptimization,
+          UpdatedAt = @UpdatedAt
+        WHERE Id = @Id
+      `);
+    
+    if (updateResult.rowsAffected[0] === 0) {
+      return res.status(404).json({ error: 'Campaña no encontrada' });
+    }
+    
+    console.log(`✅ Campaña ${campaignId} actualizada exitosamente`);
+    res.json({ 
+      success: true, 
+      message: 'Campaña actualizada exitosamente',
+      campaignId: campaignId 
+    });
+    
+  } catch (error) {
+    console.error(`❌ Error actualizando campaña ${campaignId}:`, error);
+    res.status(500).json({ 
+      error: 'Error actualizando campaña', 
+      details: error.message 
+    });
+  }
+});
+
+// PATCH /api/campaigns/:id/status - Cambiar estado de campaña (pausar/reanudar)
+router.patch('/:id/status', async (req, res) => {
+  const campaignId = parseInt(req.params.id);
+  const { status } = req.body || {};
+  
+  if (!status || !['active', 'paused', 'completed', 'archived'].includes(status)) {
+    return res.status(400).json({
+      error: 'Estado requerido',
+      validStatuses: ['active', 'paused', 'completed', 'archived']
+    });
+  }
+  
+  try {
+    await poolConnect;
+    
+    const updateResult = await pool.request()
+      .input('Id', sql.Int, campaignId)
+      .input('Status', sql.NVarChar(50), status)
+      .input('UpdatedAt', sql.DateTime, new Date())
+      .query(`
+        UPDATE Campaigns SET
+          Status = @Status,
+          UpdatedAt = @UpdatedAt
+        WHERE Id = @Id
+      `);
+    
+    if (updateResult.rowsAffected[0] === 0) {
+      return res.status(404).json({ error: 'Campaña no encontrada' });
+    }
+    
+    console.log(`🔄 Campaña ${campaignId} cambió estado a: ${status}`);
+    res.json({ 
+      success: true, 
+      message: `Campaña ${status === 'paused' ? 'pausada' : status === 'active' ? 'reactivada' : 'actualizada'} exitosamente`,
+      campaignId: campaignId,
+      newStatus: status
+    });
+    
+  } catch (error) {
+    console.error(`❌ Error cambiando estado de campaña ${campaignId}:`, error);
+    res.status(500).json({ 
+      error: 'Error cambiando estado de campaña', 
+      details: error.message 
+    });
+  }
+});
+
+// DELETE /api/campaigns/:id - Eliminar una campaña
+router.delete('/:id', async (req, res) => {
+  const campaignId = parseInt(req.params.id);
+  
+  try {
+    await poolConnect;
+    
+    // Primero verificar que la campaña existe
+    const checkResult = await pool.request()
+      .input('Id', sql.Int, campaignId)
+      .query('SELECT Id, Name FROM Campaigns WHERE Id = @Id');
+    
+    if (checkResult.recordset.length === 0) {
+      return res.status(404).json({ error: 'Campaña no encontrada' });
+    }
+    
+    const campaignName = checkResult.recordset[0].Name;
+    
+    // Eliminar registros relacionados primero (CampaignChannels)
+    await pool.request()
+      .input('CampaignId', sql.Int, campaignId)
+      .query('DELETE FROM CampaignChannels WHERE CampaignId = @CampaignId');
+    
+    // Eliminar la campaña
+    const deleteResult = await pool.request()
+      .input('Id', sql.Int, campaignId)
+      .query('DELETE FROM Campaigns WHERE Id = @Id');
+    
+    console.log(`🗑️ Campaña ${campaignId} ("${campaignName}") eliminada exitosamente`);
+    res.json({ 
+      success: true, 
+      message: `Campaña "${campaignName}" eliminada exitosamente`,
+      campaignId: campaignId 
+    });
+    
+  } catch (error) {
+    console.error(`❌ Error eliminando campaña ${campaignId}:`, error);
+    res.status(500).json({ 
+      error: 'Error eliminando campaña', 
+      details: error.message 
     });
   }
 });

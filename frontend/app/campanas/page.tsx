@@ -5,12 +5,12 @@ import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
 import { Progress } from "@/components/ui/progress"
 import { SidebarTrigger } from "@/components/ui/sidebar"
-import { Plus, Megaphone, Edit, Pause, Play, Eye, Calendar, DollarSign, Target, Users, AlertTriangle } from "lucide-react"
+import { Plus, Megaphone, Edit, Pause, Play, Eye, Calendar, DollarSign, Target, Users, AlertTriangle, Trash2 } from "lucide-react"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
 import Link from "next/link"
 import { useToast } from "@/hooks/use-toast"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
-import { fetchCampaigns } from "@/lib/api-temp"
+import { fetchCampaigns, deleteCampaign, pauseCampaign, resumeCampaign } from "@/lib/api-temp"
 
 type ApiCampaign = {
   Id: number
@@ -24,6 +24,11 @@ type ApiCampaign = {
   DistributionType: string
   StartDate?: string
   EndDate?: string
+  // Nuevos campos del backend
+  segment?: string
+  offers?: number
+  SegmentName?: string
+  SegmentOffers?: number
 }
 
 export default function CampanasPage() {
@@ -34,37 +39,80 @@ export default function CampanasPage() {
   const [error, setError] = useState<string | null>(null)
 
   useEffect(() => {
-    ;(async () => {
-      try {
-        const data: ApiCampaign[] = await fetchCampaigns()
-        setCampanas(
-          data.map((c) => ({
-            id: c.Id,
-            name: c.Name,
-            segment: `Segmento #${c.SegmentId}`,
-            offers: 0,
-            budget: Number(c.Budget ?? 0),
-            spent: 0,
-            applications: 0,
-            target: c.TargetApplications ?? 0,
-            status: c.Status,
-            mode: c.DistributionType,
-            startDate: c.StartDate,
-            endDate: c.EndDate,
-            channels: Array.isArray(c.Channels) ? c.Channels : [],
-            cpa: c.MaxCPA ?? 0,
-            conversionRate: 0,
-          })),
-        )
-      } catch (e: any) {
-        setError(e.message || "Error al cargar campañas")
-      } finally {
-        setLoading(false)
-      }
-    })()
+    loadCampaigns()
   }, [])
 
   const filteredCampanas = campanas.filter((campana) => (statusFilter === "all" ? true : campana.status === statusFilter))
+
+  const handlePauseCampaign = async (id: number, name: string) => {
+    try {
+      await pauseCampaign(id)
+      toast({ title: "Campaña pausada", description: `La campaña "${name}" ha sido pausada exitosamente` })
+      // Recargar campañas para actualizar estado
+      loadCampaigns()
+    } catch (error: any) {
+      toast({ title: "Error", description: error.message, variant: "destructive" })
+    }
+  }
+
+  const handleResumeCampaign = async (id: number, name: string) => {
+    try {
+      await resumeCampaign(id)
+      toast({ title: "Campaña reactivada", description: `La campaña "${name}" ha sido reactivada exitosamente` })
+      // Recargar campañas para actualizar estado
+      loadCampaigns()
+    } catch (error: any) {
+      toast({ title: "Error", description: error.message, variant: "destructive" })
+    }
+  }
+
+  const handleDeleteCampaign = async (id: number, name: string) => {
+    if (!window.confirm(`¿Estás seguro de que quieres eliminar la campaña "${name}"? Esta acción no se puede deshacer.`)) {
+      return
+    }
+    
+    try {
+      await deleteCampaign(id)
+      toast({ title: "Campaña eliminada", description: `La campaña "${name}" ha sido eliminada exitosamente` })
+      // Recargar campañas para actualizar lista inmediatamente
+      setTimeout(loadCampaigns, 500) // Dar tiempo para que la BD se actualice
+    } catch (error: any) {
+      console.error("Error eliminando campaña:", error)
+      toast({ title: "Error", description: error.message || "Error desconocido al eliminar", variant: "destructive" })
+      // Aún así, intentar recargar por si funcionó en el backend
+      setTimeout(loadCampaigns, 1000)
+    }
+  }
+
+  const loadCampaigns = async () => {
+    try {
+      setLoading(true)
+      const data: ApiCampaign[] = await fetchCampaigns()
+      setCampanas(
+        data.map((c) => ({
+          id: c.Id,
+          name: c.Name,
+          segment: c.segment || `Segmento #${c.SegmentId}`,
+          offers: c.offers || 0,
+          budget: Number(c.Budget ?? 0),
+          spent: 0,
+          applications: 0,
+          target: c.TargetApplications ?? 0,
+          status: c.Status,
+          mode: c.DistributionType,
+          startDate: c.StartDate,
+          endDate: c.EndDate,
+          channels: Array.isArray(c.Channels) ? c.Channels : [],
+          cpa: c.MaxCPA ?? 0,
+          conversionRate: 0,
+        })),
+      )
+    } catch (e: any) {
+      setError(e.message || "Error al cargar campañas")
+    } finally {
+      setLoading(false)
+    }
+  }
 
   const getStatusBadge = (status: string) => {
     switch (status) {
@@ -269,23 +317,27 @@ export default function CampanasPage() {
                       <Button
                         variant="outline"
                         size="sm"
-                        onClick={() => toast({ title: "Ver campaña", description: `Abriendo "${campana.name}"` })}
+                        asChild
                       >
-                        <Eye className="h-4 w-4" />
+                        <Link href={`/campanas/${campana.id}`}>
+                          <Eye className="h-4 w-4" />
+                        </Link>
                       </Button>
                       <Button
                         variant="outline"
                         size="sm"
-                        onClick={() => toast({ title: "Editando campaña", description: `Editando "${campana.name}"` })}
+                        asChild
                       >
-                        <Edit className="h-4 w-4" />
+                        <Link href={`/campanas/${campana.id}/editar`}>
+                          <Edit className="h-4 w-4" />
+                        </Link>
                       </Button>
                       {campana.status === "active" ? (
                         <Button
                           variant="outline"
                           size="sm"
                           className="text-orange-600"
-                          onClick={() => toast({ title: "Pausar", description: "Implementar acción en siguiente iteración" })}
+                          onClick={() => handlePauseCampaign(campana.id, campana.name)}
                         >
                           <Pause className="h-4 w-4" />
                         </Button>
@@ -294,11 +346,19 @@ export default function CampanasPage() {
                           variant="outline"
                           size="sm"
                           className="text-green-600"
-                          onClick={() => toast({ title: "Reanudar", description: "Implementar acción en siguiente iteración" })}
+                          onClick={() => handleResumeCampaign(campana.id, campana.name)}
                         >
                           <Play className="h-4 w-4" />
                         </Button>
                       ) : null}
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        className="text-red-600"
+                        onClick={() => handleDeleteCampaign(campana.id, campana.name)}
+                      >
+                        <Trash2 className="h-4 w-4" />
+                      </Button>
                     </div>
                   </TableCell>
                 </TableRow>

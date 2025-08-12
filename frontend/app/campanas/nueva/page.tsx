@@ -16,6 +16,7 @@ import Link from "next/link"
 import { useToast } from "@/hooks/use-toast"
 import { createCampaign, fetchSegments } from "@/lib/api-temp"
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group"
+import { MultiSelect } from "@/components/ui/multi-select"
 import ChannelSelector from "@/components/campaigns/ChannelSelector"
 
 export default function NuevaCampanaPage() {
@@ -24,7 +25,7 @@ export default function NuevaCampanaPage() {
   const [formData, setFormData] = useState({
     name: "",
     description: "",
-    segmentId: "",
+    segmentIds: [] as string[],
     distributionType: "automatic",
     startDate: "",
     endDate: "",
@@ -55,14 +56,15 @@ export default function NuevaCampanaPage() {
     })()
   }, [])
 
-  const selectedSegment = availableSegments.find((s) => s.id === formData.segmentId)
+  const selectedSegments = availableSegments.filter((s) => formData.segmentIds.includes(s.id))
+  const totalOffers = selectedSegments.reduce((sum, segment) => sum + segment.offerCount, 0)
   const toggleChannel = (channelId: string) =>
     setFormData((prev) => ({ ...prev, channels: prev.channels.includes(channelId) ? prev.channels.filter((c) => c !== channelId) : [...prev.channels, channelId] }))
   const calculateEstimatedBudget = () => (formData.targetApplications && formData.maxCPA ? Number(formData.targetApplications) * Number(formData.maxCPA) : 0)
   const validateForm = () => {
     const errors = []
     if (!formData.name.trim()) errors.push("El nombre es obligatorio")
-    if (!formData.segmentId) errors.push("Debe seleccionar un segmento")
+    if (formData.segmentIds.length === 0) errors.push("Debe seleccionar al menos un segmento")
     if (!formData.startDate) errors.push("La fecha de inicio es obligatoria")
     if (!formData.endDate) errors.push("La fecha de fin es obligatoria")
     if (!formData.budget) errors.push("El presupuesto es obligatorio")
@@ -79,24 +81,34 @@ export default function NuevaCampanaPage() {
       toast({ title: "Errores en el formulario", description: errors.join(", "), variant: "destructive" })
       return
     }
-    await createCampaign({
-      name: formData.name,
-      description: formData.description,
-      segmentId: Number(formData.segmentId),
-      distributionType: formData.distributionType,
-      startDate: formData.startDate || null,
-      endDate: formData.endDate || null,
-      budget: formData.budget ? Number(formData.budget) : null,
-      targetApplications: formData.targetApplications ? Number(formData.targetApplications) : null,
-      maxCPA: formData.maxCPA ? Number(formData.maxCPA) : null,
-      channels: formData.distributionType === "manual" ? formData.channels : [],
-      bidStrategy: formData.bidStrategy,
-      manualBid: formData.manualBid ? Number(formData.manualBid) : null,
-      priority: formData.priority,
-      autoOptimization: formData.autoOptimization,
-    })
-    toast({ title: "Campaña creada exitosamente", description: `La campaña "${formData.name}" ha sido creada` })
-    router.push("/campanas")
+
+    // Para distribución automática, usar todos los canales integrados por defecto
+    const channelsToUse = formData.distributionType === "manual" 
+      ? formData.channels 
+      : ["jooble", "talent", "jobrapido"] // Todos los canales integrados
+
+    try {
+      await createCampaign({
+        name: formData.name,
+        description: formData.description,
+        segmentIds: formData.segmentIds.map(id => Number(id)), // Enviar todos los segmentos
+        distributionType: formData.distributionType,
+        startDate: formData.startDate || null,
+        endDate: formData.endDate || null,
+        budget: formData.budget ? Number(formData.budget) : null,
+        targetApplications: formData.targetApplications ? Number(formData.targetApplications) : null,
+        maxCPA: formData.maxCPA ? Number(formData.maxCPA) : null,
+        channels: channelsToUse,
+        bidStrategy: formData.bidStrategy,
+        manualBid: formData.manualBid ? Number(formData.manualBid) : null,
+        priority: formData.priority,
+        autoOptimization: formData.autoOptimization,
+      })
+      toast({ title: "Campaña creada exitosamente", description: `La campaña "${formData.name}" ha sido creada` })
+      router.push("/campanas")
+    } catch (error: any) {
+      toast({ title: "Error", description: error.message, variant: "destructive" })
+    }
   }
 
   const availableChannels = [
@@ -163,30 +175,31 @@ export default function NuevaCampanaPage() {
                 <CardDescription>Selecciona el segmento de ofertas para esta campaña</CardDescription>
               </CardHeader>
               <CardContent className="space-y-4">
-                <Select value={formData.segmentId} onValueChange={(value) => setFormData((prev) => ({ ...prev, segmentId: value }))}>
-                  <SelectTrigger>
-                    <SelectValue placeholder="Selecciona un segmento" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {availableSegments.map((segment) => (
-                      <SelectItem key={segment.id} value={segment.id}>
-                        <div className="flex flex-col">
-                          <span className="font-medium">{segment.name}</span>
-                          <span className="text-sm text-muted-foreground">{segment.offerCount} ofertas</span>
-                        </div>
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
+                <MultiSelect
+                  options={availableSegments.map(segment => ({
+                    label: `${segment.name} (${segment.offerCount} ofertas)`,
+                    value: segment.id
+                  }))}
+                  selected={formData.segmentIds}
+                  onChange={(selected) => setFormData((prev) => ({ ...prev, segmentIds: selected }))}
+                  placeholder="Selecciona uno o más segmentos"
+                />
 
-                {selectedSegment && (
+                {selectedSegments.length > 0 && (
                   <div className="p-4 border rounded-lg bg-muted/50">
-                    <h4 className="font-medium">{selectedSegment.name}</h4>
-                    <p className="text-sm text-muted-foreground mt-1">{selectedSegment.description}</p>
-                    <div className="flex gap-4 mt-2 text-sm">
-                      <span>
-                        <strong>{selectedSegment.offerCount}</strong> ofertas disponibles
-                      </span>
+                    <h4 className="font-medium">
+                      {selectedSegments.length} segmento{selectedSegments.length > 1 ? 's' : ''} seleccionado{selectedSegments.length > 1 ? 's' : ''}
+                    </h4>
+                    <div className="flex items-center gap-2 mt-2">
+                      <Users className="h-4 w-4" />
+                      <span className="text-sm">{totalOffers} ofertas disponibles en total</span>
+                    </div>
+                    <div className="mt-2 space-y-1">
+                      {selectedSegments.map(segment => (
+                        <div key={segment.id} className="text-sm text-muted-foreground">
+                          • {segment.name}: {segment.offerCount} ofertas
+                        </div>
+                      ))}
                     </div>
                   </div>
                 )}

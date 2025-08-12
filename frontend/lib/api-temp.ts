@@ -233,40 +233,86 @@ export async function fetchCampaigns() {
   if (!res.ok) throw new Error('Error al obtener campañas');
   return res.json();
 }
-export async function createCampaign(data: any) {
-  const res = await fetch(`${API_URL}/api/campaigns`, {
-    method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(data),
-  });
-  if (!res.ok) throw new Error('Error al crear campaña');
-  return res.json();
-}
-export async function getCampaign(id: number) {
+
+export async function fetchCampaign(id: number) {
   const res = await fetch(`${API_URL}/api/campaigns/${id}`, { cache: 'no-store' });
   if (!res.ok) throw new Error('Error al obtener campaña');
   return res.json();
 }
+
+export async function createCampaign(data: any) {
+  console.log("🎯 Enviando data a backend:", data);
+  const res = await fetch(`${API_URL}/api/campaigns`, {
+    method: 'POST', 
+    headers: { 'Content-Type': 'application/json' }, 
+    body: JSON.stringify(data),
+  });
+  if (!res.ok) {
+    const error = await res.text();
+    console.error("❌ Error respuesta backend:", error);
+    throw new Error(`Error al crear campaña: ${error}`);
+  }
+  return res.json();
+}
+
 export async function updateCampaign(id: number, data: any) {
   const res = await fetch(`${API_URL}/api/campaigns/${id}`, {
-    method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(data),
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(data),
   });
-  if (!res.ok) throw new Error('Error al actualizar campaña');
+  if (!res.ok) {
+    const error = await res.text();
+    throw new Error(`Error al actualizar campaña: ${error}`);
+  }
   return res.json();
 }
+
 export async function deleteCampaign(id: number) {
-  const res = await fetch(`${API_URL}/api/campaigns/${id}`, { method: 'DELETE' });
-  if (!res.ok) throw new Error('Error al eliminar campaña');
-  return true;
+  const res = await fetch(`${API_URL}/api/campaigns/${id}`, {
+    method: 'DELETE',
+  });
+  if (!res.ok) {
+    const error = await res.text();
+    throw new Error(`Error al eliminar campaña: ${error}`);
+  }
+  
+  // Verificar si hay contenido JSON válido
+  const text = await res.text();
+  try {
+    return text ? JSON.parse(text) : { success: true };
+  } catch {
+    // Si no es JSON válido, asumir éxito si el status es OK
+    return { success: true };
+  }
 }
+
 export async function pauseCampaign(id: number) {
-  const res = await fetch(`${API_URL}/api/campaigns/${id}/pause`, { method: 'POST' });
-  if (!res.ok) throw new Error('Error al pausar campaña');
+  const res = await fetch(`${API_URL}/api/campaigns/${id}/status`, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ status: 'paused' }),
+  });
+  if (!res.ok) {
+    const error = await res.text();
+    throw new Error(`Error al pausar campaña: ${error}`);
+  }
   return res.json();
 }
+
 export async function resumeCampaign(id: number) {
-  const res = await fetch(`${API_URL}/api/campaigns/${id}/resume`, { method: 'POST' });
-  if (!res.ok) throw new Error('Error al reanudar campaña');
+  const res = await fetch(`${API_URL}/api/campaigns/${id}/status`, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ status: 'active' }),
+  });
+  if (!res.ok) {
+    const error = await res.text();
+    throw new Error(`Error al reanudar campaña: ${error}`);
+  }
   return res.json();
 }
+
 
 export async function fetchCompanies(filters: FilterParams = {}) {
   console.log("🔍 fetchCompanies con filtros:", filters);

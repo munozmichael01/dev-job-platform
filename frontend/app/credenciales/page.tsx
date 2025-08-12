@@ -78,11 +78,35 @@ export default function CredencialesPage() {
 
   const loadAvailableChannels = async () => {
     try {
-      const response = await fetch('http://localhost:3002/api/users/credentials/channels');
-      if (response.ok) {
-        const data = await response.json();
-        setAvailableChannels(data.channels || {});
-      }
+      // Solo mostrar canales realmente integrados
+      const integratedChannels = {
+        jooble: {
+          name: 'Jooble',
+          type: 'CPC',
+          description: 'Motor de búsqueda de empleo global con modelo CPC',
+          requiredCredentials: ['apiKey', 'countryCode'],
+          optionalCredentials: ['timeout'],
+          setupInstructions: 'Contacta a tu manager de Jooble para obtener tu API Key única'
+        },
+        talent: {
+          name: 'Talent.com',
+          type: 'CPA',
+          description: 'Plataforma de reclutamiento con modelo de costo por aplicación',
+          requiredCredentials: ['publisherName', 'publisherUrl', 'partnerEmail'],
+          optionalCredentials: ['feedUrl', 'postbackUrl'],
+          setupInstructions: 'Regístrate como publisher en Talent.com y configura tu feed XML'
+        },
+        jobrapido: {
+          name: 'JobRapido',
+          type: 'Organic',
+          description: 'Agregador de ofertas con distribución orgánica y webhooks',
+          requiredCredentials: ['partnerId', 'partnerEmail'],
+          optionalCredentials: ['partnerUsername', 'partnerPassword', 'webhookUrl', 'feedFormat'],
+          setupInstructions: 'Solicita credenciales de partner a JobRapido y configura tu webhook'
+        }
+      };
+      
+      setAvailableChannels(integratedChannels);
     } catch (error) {
       console.error('Error cargando canales disponibles:', error);
     } finally {

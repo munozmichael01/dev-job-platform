@@ -172,6 +172,37 @@ async function ensureTables() {
     END
   `);
   */
+
+  // CampaignSegments - Tabla para soporte de múltiples segmentos por campaña
+  await pool.request().query(`
+    IF NOT EXISTS (SELECT * FROM sys.tables WHERE name = 'CampaignSegments')
+    BEGIN
+      CREATE TABLE CampaignSegments (
+        Id INT IDENTITY(1,1) PRIMARY KEY,
+        CampaignId INT NOT NULL,
+        SegmentId INT NOT NULL,
+        
+        -- Configuración específica por segmento (opcional)
+        BudgetAllocation DECIMAL(5,2) NULL, -- Porcentaje del presupuesto asignado a este segmento
+        Weight DECIMAL(5,2) DEFAULT 1.0, -- Peso relativo para distribución automática
+        
+        -- Auditoría
+        CreatedAt DATETIME NOT NULL DEFAULT GETDATE(),
+        UpdatedAt DATETIME NOT NULL DEFAULT GETDATE(),
+        
+        -- Constraints
+        CONSTRAINT FK_CampaignSegments_Campaign FOREIGN KEY (CampaignId) REFERENCES Campaigns(Id) ON DELETE CASCADE,
+        CONSTRAINT FK_CampaignSegments_Segment FOREIGN KEY (SegmentId) REFERENCES Segments(Id),
+        CONSTRAINT UQ_CampaignSegments_Campaign_Segment UNIQUE(CampaignId, SegmentId)
+      )
+
+      -- Índices para performance
+      CREATE INDEX IX_CampaignSegments_Campaign ON CampaignSegments(CampaignId);
+      CREATE INDEX IX_CampaignSegments_Segment ON CampaignSegments(SegmentId);
+    END
+  `);
+
+  console.log('🎯 Todas las tablas están disponibles');
 }
 
 module.exports = { ensureTables };

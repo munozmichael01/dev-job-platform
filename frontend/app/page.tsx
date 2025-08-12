@@ -1,3 +1,5 @@
+"use client"
+
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
@@ -5,43 +7,26 @@ import { SidebarTrigger } from "@/components/ui/sidebar"
 import ChannelsDashboard from "@/components/dashboard/ChannelsDashboard"
 import { AlertTriangle, Briefcase, Eye, Megaphone, TrendingUp, Users, DollarSign, Target, Activity } from "lucide-react"
 import Link from "next/link"
+import { useState, useEffect } from "react"
 
 export default function Dashboard() {
-  const activeCampaigns = [
-    {
-      id: 1,
-      name: "Desarrolladores Frontend",
-      segment: "Tech Jobs",
-      offers: 45,
-      budget: 2500,
-      spent: 1200,
-      applications: 89,
-      target: 150,
-      status: "active",
-    },
-    {
-      id: 2,
-      name: "Hostelería Madrid",
-      segment: "Turismo",
-      offers: 23,
-      budget: 800,
-      spent: 650,
-      applications: 156,
-      target: 200,
-      status: "active",
-    },
-    {
-      id: 3,
-      name: "Comerciales Senior",
-      segment: "Ventas",
-      offers: 12,
-      budget: 1500,
-      spent: 1450,
-      applications: 67,
-      target: 80,
-      status: "warning",
-    },
-  ]
+  const [activeCampaigns, setActiveCampaigns] = useState([])
+
+  useEffect(() => {
+    loadCampaigns()
+  }, [])
+
+  const loadCampaigns = async () => {
+    try {
+      const response = await fetch('http://localhost:3002/api/campaigns')
+      if (response.ok) {
+        const campaigns = await response.json()
+        setActiveCampaigns(campaigns)
+      }
+    } catch (error) {
+      console.error('Error loading campaigns:', error)
+    }
+  }
 
   const alerts = [
     {

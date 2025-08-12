@@ -304,40 +304,79 @@ class CampaignDistributionService {
   }
 
   /**
-   * Obtiene las ofertas de un segmento específico para la campaña
-   * @param {number} segmentId - ID del segmento
-   * @returns {Array} Ofertas del segmento
+   * Obtiene las ofertas de uno o múltiples segmentos para la campaña
+   * @param {number|Array<number>} segmentIds - ID del segmento o array de IDs
+   * @returns {Array} Ofertas de los segmentos
    */
-  static async getOffersFromSegment(segmentId) {
+  static async getOffersFromSegment(segmentIds) {
+    // Normalizar entrada: siempre trabajar con array
+    const segments = Array.isArray(segmentIds) ? segmentIds : [segmentIds];
     try {
       await poolConnect;
       
-      // Obtener filtros del segmento
-      const segmentResult = await pool.request()
-        .input('SegmentId', sql.Int, segmentId)
-        .query('SELECT Filters FROM Segments WHERE Id = @SegmentId');
-      
-      if (segmentResult.recordset.length === 0) {
-        throw new Error(`Segmento ${segmentId} no encontrado`);
+      if (segments.length === 0) {
+        throw new Error('Se requiere al menos un segmento');
       }
       
-      const filters = JSON.parse(segmentResult.recordset[0].Filters || '{}');
-      console.log(`🔍 Obteniendo ofertas para segmento ${segmentId} con filtros:`, filters);
+      // Obtener filtros de todos los segmentos
+      const segmentPlaceholders = segments.map((_, index) => `@SegmentId${index}`).join(',');
+      const segmentRequest = pool.request();
+      segments.forEach((segmentId, index) => {
+        segmentRequest.input(`SegmentId${index}`, sql.Int, segmentId);
+      });
       
-      // Construir query dinámico basado en filtros del segmento
+      const segmentResult = await segmentRequest.query(`
+        SELECT Id, Filters FROM Segments WHERE Id IN (${segmentPlaceholders})
+      `);
+      
+      if (segmentResult.recordset.length === 0) {
+        throw new Error(`Segmentos ${segments.join(', ')} no encontrados`);
+      }
+      
+      console.log(`🔍 Obteniendo ofertas para ${segments.length} segmentos: ${segments.join(', ')}`);
+      
+      // Combinar todos los filtros de todos los segmentos
+      const allJobTitles = [];
+      const allLocations = [];
+      const allSectors = [];
+      const allCompanies = [];
+      
+      segmentResult.recordset.forEach(segment => {
+        const filters = JSON.parse(segment.Filters || '{}');
+        if (filters.jobTitles && filters.jobTitles.length > 0) {
+          allJobTitles.push(...filters.jobTitles);
+        }
+        if (filters.locations && filters.locations.length > 0) {
+          allLocations.push(...filters.locations);
+        }
+        if (filters.sectors && filters.sectors.length > 0) {
+          allSectors.push(...filters.sectors);
+        }
+        if (filters.companies && filters.companies.length > 0) {
+          allCompanies.push(...filters.companies);
+        }
+      });
+      
+      // Eliminar duplicados
+      const uniqueJobTitles = [...new Set(allJobTitles)];
+      const uniqueLocations = [...new Set(allLocations)];
+      const uniqueSectors = [...new Set(allSectors)];
+      const uniqueCompanies = [...new Set(allCompanies)];
+      
+      // Construir query dinámico basado en filtros combinados
       let whereConditions = ['jo.StatusId = 1']; // Solo ofertas activas
       const request = pool.request();
       
-      if (filters.jobTitles && filters.jobTitles.length > 0) {
-        const titleConditions = filters.jobTitles.map((title, index) => {
+      if (uniqueJobTitles.length > 0) {
+        const titleConditions = uniqueJobTitles.map((title, index) => {
           request.input(`title${index}`, sql.NVarChar(255), `%${title.toLowerCase()}%`);
           return `(LOWER(jo.Title) LIKE @title${index} OR LOWER(jo.JobTitle) LIKE @title${index})`;
         }).join(' OR ');
         whereConditions.push(`(${titleConditions})`);
       }
       
-      if (filters.locations && filters.locations.length > 0) {
-        const locationConditions = filters.locations.map((location, index) => {
+      if (uniqueLocations.length > 0) {
+        const locationConditions = uniqueLocations.map((location, index) => {
           // Extraer solo la ciudad de strings como "Valencia, Valencia, Valencia"
           const cityName = location.split(',')[0].trim().toLowerCase();
           request.input(`location${index}`, sql.NVarChar(255), `%${cityName}%`);
@@ -346,16 +385,16 @@ class CampaignDistributionService {
         whereConditions.push(`(${locationConditions})`);
       }
       
-      if (filters.sectors && filters.sectors.length > 0) {
-        const sectorConditions = filters.sectors.map((sector, index) => {
+      if (uniqueSectors.length > 0) {
+        const sectorConditions = uniqueSectors.map((sector, index) => {
           request.input(`sector${index}`, sql.NVarChar(255), `%${sector.toLowerCase()}%`);
           return `LOWER(jo.Sector) LIKE @sector${index}`;
         }).join(' OR ');
         whereConditions.push(`(${sectorConditions})`);
       }
       
-      if (filters.companies && filters.companies.length > 0) {
-        const companyConditions = filters.companies.map((company, index) => {
+      if (uniqueCompanies.length > 0) {
+        const companyConditions = uniqueCompanies.map((company, index) => {
           request.input(`company${index}`, sql.NVarChar(255), `%${company.toLowerCase()}%`);
           return `LOWER(jo.CompanyName) LIKE @company${index}`;
         }).join(' OR ');

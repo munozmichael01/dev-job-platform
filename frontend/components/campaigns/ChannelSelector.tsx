@@ -69,27 +69,43 @@ export default function ChannelSelector({
 
   const loadChannelsData = async () => {
     try {
-      // Cargar canales disponibles
-      const channelsResponse = await fetch('http://localhost:3002/api/users/credentials/channels');
-      const channelsData = await channelsResponse.json();
-      
       // Cargar credenciales del usuario
       const credentialsResponse = await fetch(`http://localhost:3002/api/users/${userId}/credentials`);
       const credentialsData = await credentialsResponse.json();
-      
-      // Convertir formato de canales disponibles
-      const channels = Object.entries(channelsData.channels || {}).map(([id, info]: [string, any]) => ({
-        id,
-        name: info.name,
-        type: info.type,
-        description: info.description,
-        avgCPA: getChannelCPA(id),
-        costModel: getCostModel(id),
-        features: info.requiredCredentials || []
-      }));
-      
-      setAvailableChannels(channels);
       setUserCredentials(credentialsData.channels || []);
+      
+      // Solo mostrar canales realmente integrados (que tenemos servicios backend)
+      const integratedChannels = [
+        {
+          id: 'jooble',
+          name: 'Jooble',
+          type: 'CPC',
+          description: 'Motor de búsqueda de empleo global con modelo CPC',
+          avgCPA: 15,
+          costModel: 'CPC',
+          features: ['apiKey', 'countryCode']
+        },
+        {
+          id: 'talent',
+          name: 'Talent.com',
+          type: 'CPA',
+          description: 'Plataforma de reclutamiento con modelo de costo por aplicación',
+          avgCPA: 18,
+          costModel: 'CPA',
+          features: ['publisherName', 'publisherUrl', 'partnerEmail']
+        },
+        {
+          id: 'jobrapido',
+          name: 'JobRapido',
+          type: 'Organic',
+          description: 'Agregador de ofertas con distribución orgánica y webhooks',
+          avgCPA: 12,
+          costModel: 'Organic',
+          features: ['partnerId', 'partnerEmail']
+        }
+      ];
+      
+      setAvailableChannels(integratedChannels);
       
     } catch (error) {
       console.error('Error cargando datos de canales:', error);
@@ -222,8 +238,8 @@ export default function ChannelSelector({
                       <Checkbox
                         id={channel.id}
                         checked={isSelected}
-                        onCheckedChange={() => isReady && onChannelToggle(channel.id)}
-                        disabled={!isReady}
+                        onCheckedChange={() => isReady && distributionType === 'manual' && onChannelToggle(channel.id)}
+                        disabled={!isReady || distributionType === 'automatic'}
                       />
                       
                       <div className="flex-1 min-w-0">

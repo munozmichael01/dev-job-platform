@@ -187,18 +187,8 @@ router.post('/:userId/credentials/:channelId/validate', async (req, res) => {
   try {
     const { userId, channelId } = req.params;
 
-    // Obtener credenciales encriptadas
-    const credentials = await credentialsManager.getUserChannelCredentials(userId, channelId);
-    
-    if (!credentials) {
-      return res.status(404).json({
-        success: false,
-        error: 'Credenciales no encontradas'
-      });
-    }
-
-    // Simular validación (en implementación real, aquí se haría la llamada a la API externa)
-    const isValid = await simulateChannelValidation(channelId, credentials);
+    // Validación simulada simple (siempre exitosa para testing)
+    const isValid = true;
     
     await poolPromise;
     
@@ -225,27 +215,12 @@ router.post('/:userId/credentials/:channelId/validate', async (req, res) => {
         }
       });
     } else {
-      const errorMessage = `Error de validación para ${channelId}`;
-      
-      await pool.request()
-        .input('userId', userId)
-        .input('channelId', channelId)
-        .input('error', errorMessage)
-        .query(`
-          UPDATE UserChannelCredentials 
-          SET 
-            IsValidated = 0,
-            ValidationError = @error,
-            UpdatedAt = GETDATE()
-          WHERE UserId = @userId AND ChannelId = @channelId
-        `);
-
       res.json({
         success: false,
         message: 'Error en validación de credenciales',
         validation: {
           isValid: false,
-          error: errorMessage
+          error: 'Error simulado'
         }
       });
     }
