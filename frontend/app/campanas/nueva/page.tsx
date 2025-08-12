@@ -16,6 +16,7 @@ import Link from "next/link"
 import { useToast } from "@/hooks/use-toast"
 import { createCampaign, fetchSegments } from "@/lib/api-temp"
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group"
+import ChannelSelector from "@/components/campaigns/ChannelSelector"
 
 export default function NuevaCampanaPage() {
   const { toast } = useToast()
@@ -222,33 +223,17 @@ export default function NuevaCampanaPage() {
                   </div>
                 </RadioGroup>
 
-                {formData.distributionType === "manual" && (
-                  <div className="space-y-4 mt-4">
-                    <Label className="text-sm font-medium">Selecciona los Canales de Distribución</Label>
-                    <div className="grid gap-3">
-                      {availableChannels.map((channel) => (
-                        <div key={channel.id} className="flex items-center space-x-3 p-3 border rounded-lg">
-                          <Checkbox id={channel.id} checked={formData.channels.includes(channel.id)} onCheckedChange={() => toggleChannel(channel.id)} />
-                          <div className="flex-1">
-                            <div className="flex items-center gap-2">
-                              <Label htmlFor={channel.id} className="font-medium">
-                                {channel.name}
-                              </Label>
-                              <Badge variant="outline" className="text-xs">
-                                {channel.category}
-                              </Badge>
-                            </div>
-                            <p className="text-sm text-muted-foreground">{channel.description}</p>
-                            <div className="flex gap-4 text-xs text-muted-foreground mt-1">
-                              <span>CPA promedio: €{channel.avgCPA}</span>
-                              <span>Alcance: {channel.reach}</span>
-                            </div>
-                          </div>
-                        </div>
-                      ))}
-                    </div>
-                  </div>
-                )}
+                <div className="mt-4">
+                  <Label className="text-sm font-medium mb-3 block">
+                    {formData.distributionType === "automatic" ? "Canales Disponibles" : "Selecciona Canales de Distribución"}
+                  </Label>
+                  <ChannelSelector
+                    selectedChannels={formData.channels}
+                    onChannelToggle={(channelId) => toggleChannel(channelId)}
+                    distributionType={formData.distributionType as 'automatic' | 'manual'}
+                    campaignBudget={formData.budget ? Number(formData.budget) : undefined}
+                  />
+                </div>
               </CardContent>
             </Card>
 

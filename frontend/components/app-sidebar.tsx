@@ -46,6 +46,11 @@ const menuItems = [
     icon: Database,
   },
   {
+    title: "Credenciales",
+    url: "/credenciales",
+    icon: Shield,
+  },
+  {
     title: "Métricas",
     url: "/metricas",
     icon: BarChart3,

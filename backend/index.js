@@ -6,6 +6,8 @@ const connectionsRouter = require('./src/routes/connections');
 const mappingsRouter = require('./src/routes/mappings');
 const segmentsRouter = require('./src/routes/segments');
 const campaignsRouter = require('./src/routes/campaigns');
+const channelWebhooksRouter = require('./src/routes/channelWebhooks');
+const userCredentialsRouter = require('./src/routes/userCredentials');
 const swaggerUi = require('swagger-ui-express');
 const YAML = require('yamljs');
 const path = require('path');
@@ -56,7 +58,19 @@ console.error = function(...args) {
 
 const app = express();
 const { ensureTables } = require('./src/db/bootstrap');
+const { performanceTracker } = require('./src/services/performanceTracker');
+
 ensureTables().catch(err => console.error('ensureTables error', err));
+
+// Iniciar tracking de performance automático
+setTimeout(() => {
+  try {
+    performanceTracker.start();
+    console.log('🚀 Sistema de tracking de performance iniciado');
+  } catch (error) {
+    console.error('❌ Error iniciando performance tracker:', error.message);
+  }
+}, 5000); // Esperar 5 segundos para que se complete la inicialización
 // Manual CORS middleware to ensure headers are set correctly
 app.use((req, res, next) => {
   const origin = req.headers.origin;
@@ -116,6 +130,9 @@ app.use('/api/connections', connectionsRouter);
 app.use('/api/mappings', mappingsRouter);
 app.use('/api/segments', segmentsRouter);
 app.use('/api/campaigns', campaignsRouter);
+app.use('/api/channels', channelWebhooksRouter);
+app.use('/api/users', userCredentialsRouter);
+app.use('/api/credentials', userCredentialsRouter);
 
 // Cargar especificación OpenAPI desde swagger.yaml
 const swaggerDocument = YAML.load(path.join(__dirname, 'swagger.yaml'));

@@ -2,6 +2,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { SidebarTrigger } from "@/components/ui/sidebar"
+import ChannelsDashboard from "@/components/dashboard/ChannelsDashboard"
 import { AlertTriangle, Briefcase, Eye, Megaphone, TrendingUp, Users, DollarSign, Target, Activity } from "lucide-react"
 import Link from "next/link"
 
@@ -117,6 +118,12 @@ export default function Dashboard() {
             <p className="text-xs text-muted-foreground">72% del objetivo</p>
           </CardContent>
         </Card>
+      </div>
+
+      {/* Dashboard de Canales */}
+      <div>
+        <h2 className="text-xl font-semibold mb-4">Estado de Canales de Distribución</h2>
+        <ChannelsDashboard />
       </div>
 
       <div className="grid gap-6 lg:grid-cols-2">
