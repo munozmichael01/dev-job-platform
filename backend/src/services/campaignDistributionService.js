@@ -175,7 +175,12 @@ class CampaignDistributionService {
       const targetPerChannel = Math.floor(offerTarget / totalChannels);
       
       for (const channelData of selectedChannels) {
-        const channelId = channelData.id || channelData.channelId;
+        // Handle both string and object formats
+        const channelId = typeof channelData === 'string' ? channelData : (channelData.id || channelData.channelId);
+        if (!channelId) {
+          console.warn(`⚠️ Canal sin ID válido:`, channelData);
+          continue;
+        }
         const channelInfo = this.CHANNELS[channelId.toUpperCase()];
         
         if (!channelInfo) {
@@ -428,7 +433,7 @@ class CampaignDistributionService {
         ORDER BY jo.CreatedAt DESC
       `);
       
-      console.log(`✅ ${result.recordset.length} ofertas encontradas para el segmento ${segmentId}`);
+      console.log(`✅ ${result.recordset.length} ofertas encontradas para segmentos ${segments.join(', ')}`);
       return result.recordset;
       
     } catch (error) {

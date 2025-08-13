@@ -25,7 +25,8 @@
       "Bash(npx kill-port:*)",
       "Bash(sed:*)",
       "Bash(source ~/.bashrc)",
-      "Bash(timeout:*)"
+      "Bash(timeout:*)",
+      "Bash(time curl:*)"
     ],
     "deny": []
   }

@@ -223,18 +223,6 @@ router.post('/', async (req, res) => {
   }
 });
 
-router.get('/:id', async (req, res) => {
-  const id = parseInt(req.params.id);
-  try {
-    await poolConnect;
-    const r = await pool.request().input('Id', sql.Int, id).query(`SELECT * FROM Campaigns WHERE Id=@Id`);
-    if (r.recordset.length === 0) return res.status(404).json({ error: 'Campaña no encontrada' });
-    const row = r.recordset[0];
-    res.json({ ...row, Channels: parseJSON(row.Channels) });
-  } catch (e) {
-    res.status(500).json({ error: 'Error obteniendo campaña', details: e.message });
-  }
-});
 
 router.put('/:id', async (req, res) => {
   const id = parseInt(req.params.id);
@@ -758,6 +746,113 @@ router.delete('/:id', async (req, res) => {
     res.status(500).json({ 
       error: 'Error eliminando campaña', 
       details: error.message 
+    });
+  }
+});
+
+// 🔧 ENDPOINT DE REPARACIÓN: Repoblar CampaignChannels para campañas automáticas existentes
+router.post('/repopulate-channels', async (req, res) => {
+  try {
+    await poolConnect;
+    console.log('🔧 Iniciando repoblación de CampaignChannels para campañas automáticas...');
+    
+    // Obtener campañas automáticas activas
+    const campaignsResult = await pool.request()
+      .query(`
+        SELECT c.Id, c.Name, c.DistributionType, c.Channels, c.Budget, c.TargetApplications, c.MaxCPA,
+               c.BidStrategy, c.ManualBid, c.Priority, c.AutoOptimization
+        FROM Campaigns c 
+        WHERE c.DistributionType = 'automatic' AND c.Status = 'active'
+      `);
+    
+    const campaigns = campaignsResult.recordset;
+    console.log(`🔍 Encontradas ${campaigns.length} campañas automáticas para procesar`);
+    
+    let totalProcessed = 0;
+    let totalChannels = 0;
+    
+    for (const campaign of campaigns) {
+      try {
+        console.log(`📝 Procesando campaña ${campaign.Id}: "${campaign.Name}"`);
+        
+        // Obtener segmentos de la campaña
+        const segmentsResult = await pool.request()
+          .input('CampaignId', sql.Int, campaign.Id)
+          .query('SELECT SegmentId FROM CampaignSegments WHERE CampaignId = @CampaignId');
+        
+        const segmentIds = segmentsResult.recordset.map(s => s.SegmentId);
+        console.log(`🎯 Segmentos: ${segmentIds.join(', ')}`);
+        
+        if (segmentIds.length === 0) {
+          console.log(`⚠️ Campaña ${campaign.Id} no tiene segmentos asignados`);
+          continue;
+        }
+        
+        // Obtener ofertas de los segmentos
+        const offers = await CampaignDistributionService.getOffersFromSegment(segmentIds);
+        console.log(`📊 Ofertas encontradas: ${offers.length}`);
+        
+        if (offers.length === 0) {
+          console.log(`⚠️ No se encontraron ofertas para campaña ${campaign.Id}`);
+          continue;
+        }
+        
+        // Preparar datos de campaña
+        const campaignData = {
+          id: campaign.Id,
+          budget: campaign.Budget,
+          targetApplications: campaign.TargetApplications,
+          maxCPA: campaign.MaxCPA,
+          bidStrategy: campaign.BidStrategy,
+          manualBid: campaign.ManualBid,
+          priority: campaign.Priority,
+          autoOptimization: campaign.AutoOptimization
+        };
+        
+        const channels = parseJSON(campaign.Channels);
+        console.log(`📺 Canales: ${channels.join(', ')}`);
+        
+        // Calcular distribución
+        const offerDistribution = await CampaignDistributionService.calculateOfferDistribution(campaignData, offers);
+        const channelDistribution = await CampaignDistributionService.calculateChannelDistribution(
+          campaignData, 
+          offerDistribution, 
+          channels
+        );
+        
+        // Limpiar registros existentes
+        await pool.request()
+          .input('CampaignId', sql.Int, campaign.Id)
+          .query('DELETE FROM CampaignChannels WHERE CampaignId = @CampaignId');
+        
+        // Crear nuevos registros
+        await CampaignDistributionService.createCampaignChannels(campaign.Id, channelDistribution);
+        
+        console.log(`✅ Campaña ${campaign.Id}: ${offers.length} ofertas × ${channels.length} canales = ${channelDistribution.length} registros`);
+        totalProcessed++;
+        totalChannels += channelDistribution.length;
+        
+      } catch (error) {
+        console.error(`❌ Error procesando campaña ${campaign.Id}:`, error.message);
+      }
+    }
+    
+    console.log(`🎉 Repoblación completada: ${totalProcessed} campañas, ${totalChannels} registros CampaignChannels`);
+    
+    res.json({
+      success: true,
+      message: `Repoblación completada exitosamente`,
+      campaignsProcessed: totalProcessed,
+      totalChannelRecords: totalChannels,
+      campaignsFound: campaigns.length
+    });
+    
+  } catch (error) {
+    console.error('❌ Error en repoblación de CampaignChannels:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Error repoblando CampaignChannels',
+      details: error.message
     });
   }
 });

@@ -1,6 +1,7 @@
 "use client"
 
 import { useState, useEffect, useCallback, useMemo } from "react"
+import { useSearchParams } from "next/navigation"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
@@ -53,6 +54,8 @@ interface Oferta {
 // NOTA: API call ahora manejada internamente por el hook useKeysetPagination
 
 export default function OfertasPage() {
+  const searchParams = useSearchParams()
+  
   // Estados para filtros
   const [searchTerm, setSearchTerm] = useState("")
   const [statusFilter, setStatusFilter] = useState<string>("all")
@@ -60,6 +63,17 @@ export default function OfertasPage() {
   const [sectorFilter, setSectorFilter] = useState<string>("all")
   const [companyFilter, setCompanyFilter] = useState<string>("all")
   const [externalIdFilter, setExternalIdFilter] = useState<string>("all")
+  const [promocionFilter, setPromocionFilter] = useState<string>(() => {
+    const promocionParam = searchParams?.get("promocion")
+    // Mapear valores legacy del dashboard
+    if (promocionParam === "no") return "sin-promocion"
+    if (promocionParam === "si") return "promocionandose"
+    // Valores específicos de 4 estados
+    if (["promocionandose", "preparada", "categorizada", "sin-promocion"].includes(promocionParam || "")) {
+      return promocionParam || "all"
+    }
+    return "all"
+  })
   
   // Estados para opciones de dropdowns
   const [locations, setLocations] = useState<string[]>([])
@@ -157,8 +171,9 @@ export default function OfertasPage() {
       ...(sectorFilter && sectorFilter !== 'all' ? { sector: sectorFilter } : {}),
       ...(companyFilter && companyFilter !== 'all' ? { company: companyFilter } : {}),
       ...(externalIdFilter && externalIdFilter !== 'all' ? { externalId: externalIdFilter } : {}),
+      ...(promocionFilter && promocionFilter !== 'all' ? { promocion: promocionFilter } : {}),
     }
-  }, [debouncedSearchTerm, statusFilter, locationFilter, sectorFilter, companyFilter, externalIdFilter])
+  }, [debouncedSearchTerm, statusFilter, locationFilter, sectorFilter, companyFilter, externalIdFilter, promocionFilter])
 
   // Hash para detectar cambios en filtros
   const filtersHash = useMemo(() => {
@@ -201,7 +216,7 @@ export default function OfertasPage() {
   // Efecto para resetear y cargar cuando cambien los filtros
   useEffect(() => {
     reset(getCleanFilters());
-  }, [filtersHash, reset, getCleanFilters]);
+  }, [filtersHash, reset]);
 
   // Cargar opciones de dropdowns con filtros dependientes
   useEffect(() => {
@@ -279,7 +294,7 @@ export default function OfertasPage() {
     }
     
     loadDropdownOptions()
-  }, [statusFilter, locationFilter, sectorFilter, companyFilter, externalIdFilter, debouncedSearchTerm]) // Recargar cuando cambien los filtros
+  }, [statusFilter, locationFilter, sectorFilter, companyFilter, externalIdFilter, promocionFilter, debouncedSearchTerm]) // Recargar cuando cambien los filtros
 
   // NOTA: La carga inicial se maneja en el efecto de abajo con reset()
 
@@ -308,6 +323,10 @@ export default function OfertasPage() {
     setExternalIdFilter(value)
   }, [])
 
+  const handlePromocionChange = useCallback((value: string) => {
+    setPromocionFilter(value)
+  }, [])
+
   const handleClearFilters = useCallback(() => {
     setSearchTerm("")
     setStatusFilter("all")
@@ -315,6 +334,7 @@ export default function OfertasPage() {
     setSectorFilter("all")
     setCompanyFilter("all")
     setExternalIdFilter("all")
+    setPromocionFilter("all")
   }, [])
 
   const handleRetry = useCallback(() => {
@@ -595,7 +615,7 @@ export default function OfertasPage() {
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-6 gap-4">
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-7 gap-4">
             <div className="space-y-2">
               <label className="text-sm font-medium">Búsqueda</label>
               <div className="relative">
@@ -625,6 +645,22 @@ export default function OfertasPage() {
                   <SelectItem value="pending">Pendiente</SelectItem>
                   <SelectItem value="paused">Pausada</SelectItem>
                   <SelectItem value="archived">Archivada</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+
+            <div className="space-y-2">
+              <label className="text-sm font-medium">Promoción</label>
+              <Select value={promocionFilter} onValueChange={handlePromocionChange}>
+                <SelectTrigger>
+                  <SelectValue placeholder="Todas" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">Todas</SelectItem>
+                  <SelectItem value="promocionandose">🟢 En campañas activas</SelectItem>
+                  <SelectItem value="preparada">🟡 En campañas pausadas</SelectItem>
+                  <SelectItem value="categorizada">🟠 En campañas inactivas</SelectItem>
+                  <SelectItem value="sin-promocion">🔴 Sin campañas</SelectItem>
                 </SelectContent>
               </Select>
             </div>

@@ -52,9 +52,22 @@ export default function VerCampanaPage() {
   const loadCampaignData = async () => {
     try {
       setLoading(true)
-      const data = await fetchCampaign(Number(campaignId))
+      
+      // Validar que tenemos un ID válido
+      if (!campaignId || campaignId === 'undefined') {
+        throw new Error('ID de campaña no válido')
+      }
+      
+      const numericId = Number(campaignId)
+      if (isNaN(numericId)) {
+        throw new Error(`ID de campaña no es un número válido: ${campaignId}`)
+      }
+      
+      console.log('🔍 Cargando campaña con ID:', numericId)
+      const data = await fetchCampaign(numericId)
       setCampaign(data)
     } catch (error: any) {
+      console.error('❌ Error cargando campaña:', error)
       toast({ title: "Error", description: error.message, variant: "destructive" })
       router.push("/campanas")
     } finally {

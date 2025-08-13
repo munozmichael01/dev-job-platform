@@ -13,10 +13,12 @@ import { useState, useEffect } from "react"
 export default function Dashboard() {
   const [activeCampaigns, setActiveCampaigns] = useState([])
   const [dashboardMetrics, setDashboardMetrics] = useState(null)
+  const [offersStats, setOffersStats] = useState(null)
 
   useEffect(() => {
     loadCampaigns()
     loadDashboardMetrics()
+    loadOffersStats()
   }, [])
 
   const loadCampaigns = async () => {
@@ -43,6 +45,18 @@ export default function Dashboard() {
     }
   }
 
+  const loadOffersStats = async () => {
+    try {
+      const response = await fetch('http://localhost:3002/api/offers/stats')
+      if (response.ok) {
+        const data = await response.json()
+        setOffersStats(data.data)
+      }
+    } catch (error) {
+      console.error('Error loading offers stats:', error)
+    }
+  }
+
   const alerts = [
     {
       type: "error",
@@ -61,7 +75,7 @@ export default function Dashboard() {
     },
   ]
 
-  const unassignedOffers = 8
+  const unassignedOffers = offersStats?.unassignedOffers || 0
 
   // Usar datos reales del API o fallback
   const budgetDistribution = dashboardMetrics?.budgetDistribution || [
@@ -162,6 +176,9 @@ export default function Dashboard() {
             <CardDescription>
               Presupuesto asignado por canal en campañas activas
             </CardDescription>
+            <p className="text-xs text-muted-foreground mt-2">
+              Total acumulado para campañas actualmente activas
+            </p>
           </CardHeader>
           <CardContent>
             <div className="h-64">
@@ -180,7 +197,11 @@ export default function Dashboard() {
                     ))}
                   </Pie>
                   <Tooltip 
-                    formatter={(value) => [`€${value}`, 'Presupuesto']}
+                    formatter={(value, name, props) => {
+                      const total = budgetDistribution.reduce((sum, item) => sum + item.value, 0)
+                      const percentage = total > 0 ? ((value / total) * 100).toFixed(1) : 0
+                      return [`€${value} (${percentage}%)`, 'Presupuesto']
+                    }}
                     labelStyle={{ color: '#000' }}
                   />
                   <Legend />
@@ -200,6 +221,9 @@ export default function Dashboard() {
             <CardDescription>
               Aplicaciones recibidas por canal
             </CardDescription>
+            <p className="text-xs text-muted-foreground mt-2">
+              Total acumulado para campañas actualmente activas
+            </p>
           </CardHeader>
           <CardContent>
             <div className="h-64">
@@ -218,7 +242,11 @@ export default function Dashboard() {
                     ))}
                   </Pie>
                   <Tooltip 
-                    formatter={(value) => [`${value}`, 'Aplicaciones']}
+                    formatter={(value, name, props) => {
+                      const total = applicationsDistribution.reduce((sum, item) => sum + item.value, 0)
+                      const percentage = total > 0 ? ((value / total) * 100).toFixed(1) : 0
+                      return [`${value} (${percentage}%)`, 'Aplicaciones']
+                    }}
                     labelStyle={{ color: '#000' }}
                   />
                   <Legend />
@@ -241,28 +269,28 @@ export default function Dashboard() {
           </CardHeader>
           <CardContent className="space-y-4">
             {activeCampaigns.map((campaign) => (
-              <div key={campaign.id} className="flex items-center justify-between p-4 border rounded-lg">
+              <div key={campaign.id || campaign.Id} className="flex items-center justify-between p-4 border rounded-lg">
                 <div className="space-y-1">
                   <div className="flex items-center gap-2">
-                    <h4 className="font-medium">{campaign.name}</h4>
-                    <Badge variant={campaign.status === "active" ? "default" : "destructive"}>
-                      {campaign.status === "active" ? "Activa" : "Atención"}
+                    <h4 className="font-medium">{campaign.Name || campaign.name}</h4>
+                    <Badge variant={(campaign.Status || campaign.status) === "active" ? "default" : "destructive"}>
+                      {(campaign.Status || campaign.status) === "active" ? "Activa" : "Atención"}
                     </Badge>
                   </div>
                   <p className="text-sm text-muted-foreground">
-                    {campaign.offers} ofertas • {campaign.segment}
+                    {campaign.offers || 0} ofertas • {campaign.segment || campaign.SegmentName}
                   </p>
                   <div className="flex gap-4 text-sm">
                     <span>
-                      €{campaign.spent}/€{campaign.budget}
+                      €{campaign.spent || 0}/€{campaign.Budget || campaign.budget}
                     </span>
                     <span>
-                      {campaign.applications}/{campaign.target} aplicaciones
+                      {campaign.applications || 0}/{campaign.TargetApplications || campaign.target} aplicaciones
                     </span>
                   </div>
                 </div>
                 <Button variant="outline" size="sm" asChild>
-                  <Link href={`/campanas/${campaign.id}`}>
+                  <Link href={`/campanas/${campaign.Id || campaign.id}`}>
                     <Eye className="h-4 w-4" />
                   </Link>
                 </Button>
@@ -302,10 +330,10 @@ export default function Dashboard() {
               <div className="flex items-center justify-between p-3 border rounded-lg bg-orange-50 border-orange-200">
                 <div className="flex items-center gap-2">
                   <Briefcase className="h-4 w-4 text-orange-600" />
-                  <span className="text-sm font-medium">{unassignedOffers} ofertas sin canal asignado</span>
+                  <span className="text-sm font-medium">{unassignedOffers} ofertas no están incluidas en ninguna campaña activa</span>
                 </div>
                 <Button variant="outline" size="sm" asChild>
-                  <Link href="/ofertas?filter=unassigned">Revisar</Link>
+                  <Link href="/ofertas?promocion=no">Revisar</Link>
                 </Button>
               </div>
             )}
