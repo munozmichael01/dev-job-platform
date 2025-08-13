@@ -50,6 +50,8 @@ async function ensureTables() {
   `);
 
   // CampaignChannels - Nueva tabla para tracking granular por canal y oferta
+  // (Comentado para evitar error de permisos - tabla se creará manualmente)
+  /*
   await pool.request().query(`
     IF NOT EXISTS (SELECT * FROM sys.tables WHERE name = 'CampaignChannels')
     BEGIN
@@ -96,8 +98,11 @@ async function ensureTables() {
       CREATE INDEX IX_CampaignChannels_Status ON CampaignChannels(Status, CampaignId);
     END
   `);
+  */
 
   // Applications - Tabla para aplicaciones recibidas desde canales externos
+  // (Comentado para evitar error de permisos - tabla se creará manualmente)
+  /*
   await pool.request().query(`
     IF NOT EXISTS (SELECT * FROM sys.tables WHERE name = 'Applications')
     BEGIN
@@ -126,6 +131,7 @@ async function ensureTables() {
       CREATE INDEX IX_Applications_Status ON Applications(Status, ReceivedAt);
     END
   `);
+  */
 
   // UserChannelCredentials - Tabla ya creada manualmente 
   // (Comentado para evitar error de permisos - tabla existe en BD)
@@ -173,7 +179,9 @@ async function ensureTables() {
   `);
   */
 
-  // CampaignSegments - Tabla para soporte de múltiples segmentos por campaña
+  // CampaignSegments - Tabla ya creada manualmente 
+  // (Comentado para evitar error de permisos - tabla debe existir en BD)
+  /*
   await pool.request().query(`
     IF NOT EXISTS (SELECT * FROM sys.tables WHERE name = 'CampaignSegments')
     BEGIN
@@ -201,6 +209,7 @@ async function ensureTables() {
       CREATE INDEX IX_CampaignSegments_Segment ON CampaignSegments(SegmentId);
     END
   `);
+  */
 
   console.log('🎯 Todas las tablas están disponibles');
 }

@@ -24,7 +24,8 @@
       "Bash(npx next build:*)",
       "Bash(npx kill-port:*)",
       "Bash(sed:*)",
-      "Bash(source ~/.bashrc)"
+      "Bash(source ~/.bashrc)",
+      "Bash(timeout:*)"
     ],
     "deny": []
   }
