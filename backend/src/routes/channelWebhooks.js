@@ -146,6 +146,216 @@ router.post('/jobrapido/applications', logWebhook, async (req, res) => {
 });
 
 /**
+ * GET/POST /api/channels/whatjobs/click
+ * Endpoint para procesar clicks de WhatJobs y reportar conversiones vía S2S
+ * Basado en documentación: WhatJobs S2S Integration
+ */
+router.get('/whatjobs/click', logWebhook, async (req, res) => {
+  try {
+    console.log('🔗 Click recibido desde WhatJobs (GET)');
+    
+    const { wjClickID, authKey, offerId } = req.query;
+    
+    if (!wjClickID) {
+      return respondWebhook(req, res, {
+        success: false,
+        error: 'wjClickID es requerido'
+      });
+    }
+    
+    // Procesar click usando WhatJobsService
+    const WhatJobsService = require('../services/channels/whatJobsService');
+    const whatJobsService = new WhatJobsService({ authKey });
+    
+    const result = await whatJobsService.processWhatJobsClick(wjClickID, authKey, offerId);
+    
+    // Actualizar estadísticas de la oferta si tenemos offerId
+    if (offerId) {
+      await updateOfferStats(offerId, 'click');
+    }
+    
+    respondWebhook(req, res, {
+      success: true,
+      data: {
+        clickId: wjClickID,
+        offerId: offerId,
+        source: 'whatjobs',
+        message: 'Click registrado exitosamente'
+      }
+    });
+    
+  } catch (error) {
+    console.error(`❌ Error procesando click WhatJobs: ${error.message}`);
+    respondWebhook(req, res, {
+      success: false,
+      error: error.message
+    });
+  }
+});
+
+// También soportar método POST para clicks
+router.post('/whatjobs/click', logWebhook, async (req, res) => {
+  try {
+    console.log('🔗 Click recibido desde WhatJobs (POST)');
+    
+    const { wjClickID, authKey, offerId } = req.body;
+    
+    if (!wjClickID) {
+      return respondWebhook(req, res, {
+        success: false,
+        error: 'wjClickID es requerido'
+      });
+    }
+    
+    // Procesar click usando WhatJobsService
+    const WhatJobsService = require('../services/channels/whatJobsService');
+    const whatJobsService = new WhatJobsService({ authKey });
+    
+    const result = await whatJobsService.processWhatJobsClick(wjClickID, authKey, offerId);
+    
+    // Actualizar estadísticas de la oferta
+    if (offerId) {
+      await updateOfferStats(offerId, 'click');
+    }
+    
+    respondWebhook(req, res, {
+      success: true,
+      data: {
+        clickId: wjClickID,
+        offerId: offerId,
+        source: 'whatjobs',
+        message: 'Click registrado exitosamente'
+      }
+    });
+    
+  } catch (error) {
+    console.error(`❌ Error procesando click WhatJobs: ${error.message}`);
+    respondWebhook(req, res, {
+      success: false,
+      error: error.message
+    });
+  }
+});
+
+/**
+ * POST /api/channels/whatjobs/conversion
+ * Endpoint para reportar conversiones a WhatJobs cuando el usuario aplica
+ */
+router.post('/whatjobs/conversion', logWebhook, async (req, res) => {
+  try {
+    console.log('🎯 Conversión para reportar a WhatJobs');
+    
+    const { wjClickID, authKey, applicantData } = req.body;
+    
+    if (!wjClickID) {
+      return respondWebhook(req, res, {
+        success: false,
+        error: 'wjClickID es requerido para reportar conversión'
+      });
+    }
+    
+    // Reportar conversión a WhatJobs vía S2S
+    const WhatJobsService = require('../services/channels/whatJobsService');
+    const whatJobsService = new WhatJobsService({ authKey });
+    
+    const result = await whatJobsService.reportConversion(wjClickID);
+    
+    // Guardar aplicación en base de datos si se proporcionan datos
+    if (applicantData) {
+      const applicationData = {
+        applicant: applicantData.applicant,
+        job: applicantData.job,
+        channel: 'whatjobs',
+        applicationId: wjClickID,
+        receivedAt: new Date().toISOString()
+      };
+      
+      await saveApplication(applicationData);
+      
+      // Actualizar estadísticas de la oferta
+      if (applicantData.job?.externalJobId) {
+        await updateOfferStats(applicantData.job.externalJobId, 'application');
+      }
+    }
+    
+    respondWebhook(req, res, {
+      success: true,
+      data: {
+        clickId: wjClickID,
+        conversionReported: result.success,
+        whatjobsResponse: result.response || result.error,
+        source: 'whatjobs'
+      }
+    });
+    
+  } catch (error) {
+    console.error(`❌ Error reportando conversión WhatJobs: ${error.message}`);
+    respondWebhook(req, res, {
+      success: false,
+      error: error.message
+    });
+  }
+});
+
+/**
+ * GET /api/channels/whatjobs/feed/:userId
+ * Endpoint para servir el feed XML de WhatJobs específico por usuario
+ */
+router.get('/whatjobs/feed/:userId', async (req, res) => {
+  try {
+    const { userId } = req.params;
+    const { campaignId, segmentIds } = req.query;
+    
+    console.log(`📤 Generando feed XML WhatJobs para usuario ${userId}`);
+    
+    if (!userId) {
+      return res.status(400).xml('<?xml version="1.0" encoding="utf-8"?><error>userId es requerido</error>');
+    }
+    
+    // Obtener ofertas según segmentos o campaña
+    let offers = [];
+    if (segmentIds) {
+      const CampaignDistributionService = require('../services/campaignDistributionService');
+      const segmentIdArray = segmentIds.split(',').map(id => parseInt(id));
+      offers = await CampaignDistributionService.getOffersFromSegment(segmentIdArray);
+    } else if (campaignId) {
+      // Obtener ofertas de una campaña específica
+      offers = await getOffersFromCampaign(campaignId);
+    } else {
+      // Obtener todas las ofertas activas del usuario
+      offers = await getAllActiveOffers(userId);
+    }
+    
+    // Generar feed XML usando WhatJobsService
+    const ChannelFactory = require('../services/channels/channelFactory');
+    const channelFactory = new ChannelFactory();
+    const whatJobsService = await channelFactory.getChannel('whatjobs', {}, userId);
+    
+    const xmlFeed = await whatJobsService.generateWhatJobsFeed(userId, offers, {
+      maxCPA: 15.0,
+      defaultCPC: 2.5
+    });
+    
+    // Responder con XML
+    res.set({
+      'Content-Type': 'application/xml; charset=utf-8',
+      'Cache-Control': 'public, max-age=3600', // Cache por 1 hora
+      'X-Offers-Count': offers.length.toString(),
+      'X-Generated-At': new Date().toISOString()
+    });
+    
+    res.send(xmlFeed);
+    
+    console.log(`✅ Feed XML WhatJobs servido: ${offers.length} ofertas para usuario ${userId}`);
+    
+  } catch (error) {
+    console.error(`❌ Error generando feed WhatJobs: ${error.message}`);
+    res.status(500).set('Content-Type', 'application/xml; charset=utf-8')
+       .send(`<?xml version="1.0" encoding="utf-8"?><error>${error.message}</error>`);
+  }
+});
+
+/**
  * POST /api/channels/jooble/notifications
  * Endpoint para notificaciones de Jooble (stats, cambios de estado, etc.)
  */
@@ -242,6 +452,9 @@ router.get('/webhook-status', (req, res) => {
       talent_applications: '/api/channels/talent/applications',
       jooble_notifications: '/api/channels/jooble/notifications',
       jobrapido_applications: '/api/channels/jobrapido/applications',
+      whatjobs_click: '/api/channels/whatjobs/click',
+      whatjobs_conversion: '/api/channels/whatjobs/conversion',
+      whatjobs_feed: '/api/channels/whatjobs/feed/:userId',
       performance_callback: '/api/channels/performance-callback'
     },
     uptime: process.uptime()
@@ -573,6 +786,68 @@ async function notifyJobRapidoApplication(application) {
     
   } catch (error) {
     console.error(`❌ Error enviando notificación JobRapido: ${error.message}`);
+  }
+}
+
+// Funciones auxiliares para WhatJobs
+
+/**
+ * Obtiene ofertas de una campaña específica
+ * @param {Number} campaignId - ID de la campaña
+ * @returns {Array} Array de ofertas
+ */
+async function getOffersFromCampaign(campaignId) {
+  try {
+    await poolConnect;
+    
+    const result = await pool.request()
+      .input('CampaignId', sql.Int, campaignId)
+      .query(`
+        SELECT DISTINCT jo.*
+        FROM JobOffers jo
+        INNER JOIN CampaignChannels cc ON jo.Id = cc.OfferId
+        WHERE cc.CampaignId = @CampaignId
+          AND jo.StatusId = 1
+        ORDER BY jo.CreatedAt DESC
+      `);
+    
+    console.log(`📋 ${result.recordset.length} ofertas encontradas para campaña ${campaignId}`);
+    return result.recordset;
+    
+  } catch (error) {
+    console.error(`❌ Error obteniendo ofertas de campaña ${campaignId}: ${error.message}`);
+    return [];
+  }
+}
+
+/**
+ * Obtiene todas las ofertas activas de un usuario
+ * @param {Number} userId - ID del usuario
+ * @returns {Array} Array de ofertas
+ */
+async function getAllActiveOffers(userId) {
+  try {
+    await poolConnect;
+    
+    // Por simplicidad, obtener ofertas de todas las conexiones del usuario
+    // En implementación real, podrías filtrar por criterios específicos
+    const result = await pool.request()
+      .input('UserId', sql.BigInt, userId)
+      .query(`
+        SELECT TOP 1000 jo.*
+        FROM JobOffers jo
+        INNER JOIN Connections c ON jo.ConnectionId = c.Id
+        WHERE c.UserId = @UserId
+          AND jo.StatusId = 1
+        ORDER BY jo.CreatedAt DESC
+      `);
+    
+    console.log(`📋 ${result.recordset.length} ofertas activas encontradas para usuario ${userId}`);
+    return result.recordset;
+    
+  } catch (error) {
+    console.error(`❌ Error obteniendo ofertas del usuario ${userId}: ${error.message}`);
+    return [];
   }
 }
 

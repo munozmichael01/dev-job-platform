@@ -1,6 +1,7 @@
 const TalentService = require('./talentService');
 const JoobleService = require('./joobleService');
 const JobRapidoService = require('./jobRapidoService');
+const WhatJobsService = require('./whatJobsService');
 
 /**
  * ChannelFactory - Factory pattern para manejo unificado de canales
@@ -12,7 +13,7 @@ class ChannelFactory {
   
   constructor() {
     this.channels = new Map();
-    this.supportedChannels = ['talent', 'jooble', 'jobrapido', 'infojobs', 'linkedin', 'indeed'];
+    this.supportedChannels = ['talent', 'jooble', 'jobrapido', 'whatjobs', 'infojobs', 'linkedin', 'indeed'];
     
     console.log('🏭 ChannelFactory inicializado con soporte para:', this.supportedChannels.join(', '));
   }
@@ -71,6 +72,10 @@ class ChannelFactory {
         
       case 'jobrapido':
         channelService = new JobRapidoService(finalConfig);
+        break;
+        
+      case 'whatjobs':
+        channelService = new WhatJobsService(finalConfig);
         break;
         
       case 'infojobs':
@@ -161,6 +166,9 @@ class ChannelFactory {
       case 'jobrapido':
         return await channelService.publishOffers(offers, campaignData);
         
+      case 'whatjobs':
+        return await channelService.generateWhatJobsFeed(offers, campaignData);
+        
       case 'infojobs':
       case 'linkedin':
       case 'indeed':
@@ -190,6 +198,7 @@ class ChannelFactory {
       'talent': 18,
       'jooble': 15,
       'jobrapido': 12,  // Organic, mejor CPA por no tener costo directo
+      'whatjobs': 14,   // CPC con optimización S2S, buen balance
       'infojobs': 20,
       'linkedin': 25,
       'indeed': 22
@@ -344,6 +353,12 @@ class ChannelFactory {
           features: ['xml_json_feeds', 'custom_screening_questions', 'cv_base64_delivery', 'detailed_candidate_data'],
           costModel: 'organic',
           avgCPA: 12
+        },
+        whatjobs: {
+          type: 'xml_feed_cpc',
+          features: ['xml_feed', 's2s_tracking', 'auto_optimization', 'global_reach', 'conversion_tracking'],
+          costModel: 'cpc',
+          avgCPA: 14
         },
         infojobs: {
           type: 'api',

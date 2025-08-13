@@ -8,6 +8,7 @@ const segmentsRouter = require('./src/routes/segments');
 const campaignsRouter = require('./src/routes/campaigns');
 const channelWebhooksRouter = require('./src/routes/channelWebhooks');
 const userCredentialsRouter = require('./src/routes/userCredentials');
+const metricsRouter = require('./src/routes/metrics');
 const swaggerUi = require('swagger-ui-express');
 const YAML = require('yamljs');
 const path = require('path');
@@ -133,6 +134,7 @@ app.use('/api/campaigns', campaignsRouter);
 app.use('/api/channels', channelWebhooksRouter);
 app.use('/api/users', userCredentialsRouter);
 app.use('/api/credentials', userCredentialsRouter);
+app.use('/api/metrics', metricsRouter);
 
 // Cargar especificación OpenAPI desde swagger.yaml
 const swaggerDocument = YAML.load(path.join(__dirname, 'swagger.yaml'));

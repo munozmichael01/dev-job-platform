@@ -85,7 +85,7 @@ export default function NuevaCampanaPage() {
     // Para distribución automática, usar todos los canales integrados por defecto
     const channelsToUse = formData.distributionType === "manual" 
       ? formData.channels 
-      : ["jooble", "talent", "jobrapido"] // Todos los canales integrados
+      : ["jooble", "talent", "jobrapido", "whatjobs"] // Todos los canales integrados
 
     try {
       await createCampaign({
@@ -331,8 +331,18 @@ export default function NuevaCampanaPage() {
                   <p className="text-sm text-muted-foreground">{formData.name || "Sin nombre"}</p>
                 </div>
                 <div>
-                  <Label className="text-sm font-medium">Segmento</Label>
-                  <p className="text-sm text-muted-foreground">{selectedSegment ? selectedSegment.name : "No seleccionado"}</p>
+                  <Label className="text-sm font-medium">Segmentos</Label>
+                  <p className="text-sm text-muted-foreground">
+                    {selectedSegments.length > 0 
+                      ? selectedSegments.map(s => s.name).join(", ")
+                      : "No seleccionados"
+                    }
+                  </p>
+                  {selectedSegments.length > 0 && (
+                    <p className="text-xs text-muted-foreground mt-1">
+                      {totalOffers} ofertas en total
+                    </p>
+                  )}
                 </div>
                 <div>
                   <Label className="text-sm font-medium">Tipo de Distribución</Label>

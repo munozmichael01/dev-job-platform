@@ -32,6 +32,14 @@ class CampaignDistributionService {
       defaultCPA: 18,
       supportedFormats: ['xml', 'json']
     },
+    WHATJOBS: {
+      id: 'whatjobs',
+      name: 'WhatJobs',
+      type: 'aggregator',
+      cpaRange: { min: 8, max: 20 },
+      defaultCPA: 14,
+      supportedFormats: ['xml', 's2s']
+    },
     // Fase 2: InfoJobs, LinkedIn, Indeed (mantener compatibilidad)
     INFOJOBS: {
       id: 'infojobs',

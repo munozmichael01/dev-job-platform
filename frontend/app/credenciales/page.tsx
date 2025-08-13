@@ -78,8 +78,16 @@ export default function CredencialesPage() {
 
   const loadAvailableChannels = async () => {
     try {
-      // Solo mostrar canales realmente integrados
-      const integratedChannels = {
+      // Cargar canales desde la API del backend
+      const response = await fetch('http://localhost:3002/api/credentials/channels');
+      if (response.ok) {
+        const data = await response.json();
+        setAvailableChannels(data.channels || {});
+        console.log('✅ Canales cargados desde API:', Object.keys(data.channels || {}));
+      } else {
+        console.warn('No se pudieron cargar canales desde API, usando fallback');
+        // Fallback a canales hardcodeados solo si la API falla
+        const fallbackChannels = {
         jooble: {
           name: 'Jooble',
           type: 'CPC',
@@ -103,12 +111,56 @@ export default function CredencialesPage() {
           requiredCredentials: ['partnerId', 'partnerEmail'],
           optionalCredentials: ['partnerUsername', 'partnerPassword', 'webhookUrl', 'feedFormat'],
           setupInstructions: 'Solicita credenciales de partner a JobRapido y configura tu webhook'
+        },
+        whatjobs: {
+          name: 'WhatJobs',
+          type: 'XML Feed + CPC',
+          description: 'Motor de búsqueda global con optimización automática via S2S tracking',
+          requiredCredentials: ['authKey', 'country'],
+          optionalCredentials: ['defaultCPC', 'feedUrl'],
+          setupInstructions: 'Contacta a WhatJobs para obtener tu Authentication Key y selecciona el país objetivo'
         }
-      };
-      
-      setAvailableChannels(integratedChannels);
+        };
+        setAvailableChannels(fallbackChannels);
+      }
     } catch (error) {
       console.error('Error cargando canales disponibles:', error);
+      // En caso de error de red, usar fallback con WhatJobs incluido
+      const fallbackChannels = {
+        jooble: {
+          name: 'Jooble',
+          type: 'CPC',
+          description: 'Motor de búsqueda de empleo global con modelo CPC',
+          requiredCredentials: ['apiKey', 'countryCode'],
+          optionalCredentials: ['timeout'],
+          setupInstructions: 'Contacta a tu manager de Jooble para obtener tu API Key única'
+        },
+        talent: {
+          name: 'Talent.com',
+          type: 'CPA',
+          description: 'Plataforma de reclutamiento con modelo de costo por aplicación',
+          requiredCredentials: ['publisherName', 'publisherUrl', 'partnerEmail'],
+          optionalCredentials: ['feedUrl', 'postbackUrl'],
+          setupInstructions: 'Regístrate como publisher en Talent.com y configura tu feed XML'
+        },
+        jobrapido: {
+          name: 'JobRapido',
+          type: 'Organic',
+          description: 'Agregador de ofertas con distribución orgánica y webhooks',
+          requiredCredentials: ['partnerId', 'partnerEmail'],
+          optionalCredentials: ['partnerUsername', 'partnerPassword', 'webhookUrl', 'feedFormat'],
+          setupInstructions: 'Solicita credenciales de partner a JobRapido y configura tu webhook'
+        },
+        whatjobs: {
+          name: 'WhatJobs',
+          type: 'XML Feed + CPC',
+          description: 'Motor de búsqueda global con optimización automática via S2S tracking',
+          requiredCredentials: ['authKey', 'country'],
+          optionalCredentials: ['defaultCPC', 'feedUrl'],
+          setupInstructions: 'Contacta a WhatJobs para obtener tu Authentication Key y selecciona el país objetivo'
+        }
+        };
+        setAvailableChannels(fallbackChannels);
     } finally {
       setLoading(false);
     }

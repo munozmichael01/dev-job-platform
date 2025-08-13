@@ -425,6 +425,7 @@ function getChannelIcon(channelId: string): string {
     jooble: '/icons/jooble.png',
     talent: '/icons/talent.png',
     jobrapido: '/icons/jobrapido.png',
+    whatjobs: '/icons/whatjobs.png',
     infojobs: '/icons/infojobs.png',
     linkedin: '/icons/linkedin.png',
     indeed: '/icons/indeed.png'
@@ -453,6 +454,12 @@ function getFieldPlaceholder(channelId: string, field: string): string {
       partnerPassword: '••••••••',
       webhookUrl: 'https://miempresa.com/webhook/jobrapido',
       feedFormat: 'xml'
+    },
+    whatjobs: {
+      authKey: '71ca00e950a5054cac5afc0cb89abcb3',
+      country: 'ES',
+      defaultCPC: '2.50',
+      feedUrl: 'https://miempresa.com/whatjobs-feed.xml'
     },
     infojobs: {
       apiKey: 'tu-api-key-infojobs',
@@ -493,6 +500,12 @@ function getFieldDescription(channelId: string, field: string): string {
       partnerEmail: 'Email de contacto para aplicaciones',
       webhookUrl: 'URL donde recibirás aplicaciones',
       feedFormat: 'Formato del feed: xml o json'
+    },
+    whatjobs: {
+      authKey: 'Clave de autenticación proporcionada por WhatJobs',
+      country: 'Código de país objetivo (ES, MX, GB, US, DE, FR)',
+      defaultCPC: 'CPC por defecto en euros/dolares',
+      feedUrl: 'URL generada automáticamente para tu feed XML'
     }
   };
 
@@ -532,6 +545,24 @@ function renderChannelSpecificHelp(channelId: string) {
           <li>Elige formato de feed (XML o JSON)</li>
           <li>Configura screening questions personalizadas</li>
         </ol>
+      </div>
+    ),
+    whatjobs: (
+      <div className="space-y-3 text-sm">
+        <h4 className="font-medium">Pasos para configurar WhatJobs:</h4>
+        <ol className="list-decimal list-inside space-y-1 text-muted-foreground">
+          <li>Contacta a WhatJobs para obtener tu Authentication Key</li>
+          <li>Selecciona el país objetivo para tus ofertas</li>
+          <li>Configura tu CPC por defecto según tu presupuesto</li>
+          <li>El feed XML se generará automáticamente</li>
+          <li>Las conversiones se trackearán via S2S automáticamente</li>
+        </ol>
+        <div className="mt-3 p-3 bg-blue-50 rounded-lg border border-blue-200">
+          <p className="text-xs text-blue-800">
+            <strong>Ventaja única:</strong> WhatJobs optimiza automáticamente tus campañas 
+            basándose en las conversiones reales que reportamos via S2S tracking.
+          </p>
+        </div>
       </div>
     )
   };

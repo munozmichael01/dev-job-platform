@@ -5,15 +5,18 @@ import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { SidebarTrigger } from "@/components/ui/sidebar"
 import ChannelsDashboard from "@/components/dashboard/ChannelsDashboard"
-import { AlertTriangle, Briefcase, Eye, Megaphone, TrendingUp, Users, DollarSign, Target, Activity } from "lucide-react"
+import { AlertTriangle, Briefcase, Eye, Megaphone, TrendingUp, Users, DollarSign, Target, Activity, PieChart } from "lucide-react"
+import { PieChart as RechartsPieChart, Pie, Cell, ResponsiveContainer, Tooltip, Legend } from "recharts"
 import Link from "next/link"
 import { useState, useEffect } from "react"
 
 export default function Dashboard() {
   const [activeCampaigns, setActiveCampaigns] = useState([])
+  const [dashboardMetrics, setDashboardMetrics] = useState(null)
 
   useEffect(() => {
     loadCampaigns()
+    loadDashboardMetrics()
   }, [])
 
   const loadCampaigns = async () => {
@@ -25,6 +28,18 @@ export default function Dashboard() {
       }
     } catch (error) {
       console.error('Error loading campaigns:', error)
+    }
+  }
+
+  const loadDashboardMetrics = async () => {
+    try {
+      const response = await fetch('http://localhost:3002/api/metrics/dashboard')
+      if (response.ok) {
+        const data = await response.json()
+        setDashboardMetrics(data.data)
+      }
+    } catch (error) {
+      console.error('Error loading dashboard metrics:', error)
     }
   }
 
@@ -48,6 +63,30 @@ export default function Dashboard() {
 
   const unassignedOffers = 8
 
+  // Usar datos reales del API o fallback
+  const budgetDistribution = dashboardMetrics?.budgetDistribution || [
+    { name: "Talent.com", value: 1850, color: "#3b82f6" },
+    { name: "Jooble", value: 1200, color: "#10b981" },
+    { name: "WhatJobs", value: 950, color: "#f59e0b" },
+    { name: "JobRapido", value: 800, color: "#8b5cf6" }
+  ]
+
+  const applicationsDistribution = dashboardMetrics?.applicationsDistribution || [
+    { name: "Talent.com", value: 145, color: "#3b82f6" },
+    { name: "Jooble", value: 98, color: "#10b981" },
+    { name: "WhatJobs", value: 76, color: "#f59e0b" },
+    { name: "JobRapido", value: 52, color: "#8b5cf6" }
+  ]
+  
+  const metrics = dashboardMetrics?.generalMetrics || {
+    activeCampaigns: 3,
+    activeOffers: 80,
+    totalBudget: 4800,
+    totalSpent: 3300,
+    totalApplications: 312,
+    spentPercentage: 69
+  }
+
   return (
     <div className="flex flex-col gap-6 p-6">
       <div className="flex items-center gap-4">
@@ -66,7 +105,7 @@ export default function Dashboard() {
             <Megaphone className="h-4 w-4 text-muted-foreground" />
           </CardHeader>
           <CardContent>
-            <div className="text-2xl font-bold">3</div>
+            <div className="text-2xl font-bold">{metrics.activeCampaigns}</div>
             <p className="text-xs text-muted-foreground">+1 desde la semana pasada</p>
           </CardContent>
         </Card>
@@ -77,7 +116,7 @@ export default function Dashboard() {
             <Briefcase className="h-4 w-4 text-muted-foreground" />
           </CardHeader>
           <CardContent>
-            <div className="text-2xl font-bold">80</div>
+            <div className="text-2xl font-bold">{metrics.activeOffers}</div>
             <p className="text-xs text-muted-foreground">+12 nuevas hoy</p>
           </CardContent>
         </Card>
@@ -88,8 +127,8 @@ export default function Dashboard() {
             <DollarSign className="h-4 w-4 text-muted-foreground" />
           </CardHeader>
           <CardContent>
-            <div className="text-2xl font-bold">€4,800</div>
-            <p className="text-xs text-muted-foreground">€3,300 gastados (69%)</p>
+            <div className="text-2xl font-bold">€{metrics.totalBudget.toLocaleString()}</div>
+            <p className="text-xs text-muted-foreground">€{metrics.totalSpent.toLocaleString()} gastados ({metrics.spentPercentage}%)</p>
           </CardContent>
         </Card>
 
@@ -99,7 +138,7 @@ export default function Dashboard() {
             <Target className="h-4 w-4 text-muted-foreground" />
           </CardHeader>
           <CardContent>
-            <div className="text-2xl font-bold">312</div>
+            <div className="text-2xl font-bold">{metrics.totalApplications}</div>
             <p className="text-xs text-muted-foreground">72% del objetivo</p>
           </CardContent>
         </Card>
@@ -109,6 +148,85 @@ export default function Dashboard() {
       <div>
         <h2 className="text-xl font-semibold mb-4">Estado de Canales de Distribución</h2>
         <ChannelsDashboard />
+      </div>
+
+      {/* Gráficos de Distribución */}
+      <div className="grid gap-6 lg:grid-cols-2">
+        {/* Distribución de Presupuesto */}
+        <Card>
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2">
+              <PieChart className="h-5 w-5" />
+              Distribución de Presupuesto
+            </CardTitle>
+            <CardDescription>
+              Presupuesto asignado por canal en campañas activas
+            </CardDescription>
+          </CardHeader>
+          <CardContent>
+            <div className="h-64">
+              <ResponsiveContainer width="100%" height="100%">
+                <RechartsPieChart>
+                  <Pie
+                    data={budgetDistribution}
+                    cx="50%"
+                    cy="50%"
+                    outerRadius={70}
+                    dataKey="value"
+                    label={({ name, value }) => `€${value}`}
+                  >
+                    {budgetDistribution.map((entry, index) => (
+                      <Cell key={`budget-${index}`} fill={entry.color} />
+                    ))}
+                  </Pie>
+                  <Tooltip 
+                    formatter={(value) => [`€${value}`, 'Presupuesto']}
+                    labelStyle={{ color: '#000' }}
+                  />
+                  <Legend />
+                </RechartsPieChart>
+              </ResponsiveContainer>
+            </div>
+          </CardContent>
+        </Card>
+
+        {/* Distribución de Aplicaciones */}
+        <Card>
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2">
+              <Target className="h-5 w-5" />
+              Distribución de Aplicaciones
+            </CardTitle>
+            <CardDescription>
+              Aplicaciones recibidas por canal
+            </CardDescription>
+          </CardHeader>
+          <CardContent>
+            <div className="h-64">
+              <ResponsiveContainer width="100%" height="100%">
+                <RechartsPieChart>
+                  <Pie
+                    data={applicationsDistribution}
+                    cx="50%"
+                    cy="50%"
+                    outerRadius={70}
+                    dataKey="value"
+                    label={({ name, value }) => `${value}`}
+                  >
+                    {applicationsDistribution.map((entry, index) => (
+                      <Cell key={`apps-${index}`} fill={entry.color} />
+                    ))}
+                  </Pie>
+                  <Tooltip 
+                    formatter={(value) => [`${value}`, 'Aplicaciones']}
+                    labelStyle={{ color: '#000' }}
+                  />
+                  <Legend />
+                </RechartsPieChart>
+              </ResponsiveContainer>
+            </div>
+          </CardContent>
+        </Card>
       </div>
 
       <div className="grid gap-6 lg:grid-cols-2">
@@ -167,7 +285,7 @@ export default function Dashboard() {
           </CardHeader>
           <CardContent className="space-y-4">
             {alerts.map((alert, index) => (
-              <div key={index} className="flex items-start gap-3 p-3 border rounded-lg">
+              <div key={`alert-${index}`} className="flex items-start gap-3 p-3 border rounded-lg">
                 <div
                   className={`h-2 w-2 rounded-full mt-2 ${
                     alert.type === "error" ? "bg-red-500" : alert.type === "warning" ? "bg-yellow-500" : "bg-blue-500"

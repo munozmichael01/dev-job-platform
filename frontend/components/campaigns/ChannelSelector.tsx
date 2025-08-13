@@ -74,8 +74,71 @@ export default function ChannelSelector({
       const credentialsData = await credentialsResponse.json();
       setUserCredentials(credentialsData.channels || []);
       
-      // Solo mostrar canales realmente integrados (que tenemos servicios backend)
-      const integratedChannels = [
+      // Cargar canales disponibles desde la API del backend
+      const channelsResponse = await fetch('http://localhost:3002/api/credentials/channels');
+      if (channelsResponse.ok) {
+        const channelsData = await channelsResponse.json();
+        
+        // Convertir el formato de la API a nuestro formato local
+        const formattedChannels = Object.entries(channelsData.channels || {}).map(([id, info]: [string, any]) => ({
+          id,
+          name: info.name,
+          type: info.type,
+          description: info.description,
+          avgCPA: getChannelAvgCPA(id), // Función auxiliar para obtener CPA
+          costModel: getCostModel(info.type),
+          features: info.requiredCredentials || []
+        }));
+        
+        setAvailableChannels(formattedChannels);
+      } else {
+        console.warn('No se pudieron cargar canales desde API, usando fallback');
+        // Fallback solo si la API falla completamente
+        const fallbackChannels = [
+          {
+            id: 'jooble',
+            name: 'Jooble',
+            type: 'CPC',
+            description: 'Motor de búsqueda de empleo global con modelo CPC',
+            avgCPA: 15,
+            costModel: 'CPC',
+            features: ['apiKey', 'countryCode']
+          },
+          {
+            id: 'talent',
+            name: 'Talent.com',
+            type: 'CPA',
+            description: 'Plataforma de reclutamiento con modelo de costo por aplicación',
+            avgCPA: 18,
+            costModel: 'CPA',
+            features: ['publisherName', 'publisherUrl', 'partnerEmail']
+          },
+          {
+            id: 'jobrapido',
+            name: 'JobRapido',
+            type: 'Organic',
+            description: 'Agregador de ofertas con distribución orgánica y webhooks',
+            avgCPA: 12,
+            costModel: 'Organic',
+            features: ['partnerId', 'partnerEmail']
+          },
+          {
+            id: 'whatjobs',
+            name: 'WhatJobs',
+            type: 'XML Feed + CPC',
+            description: 'Motor de búsqueda global con optimización automática via S2S tracking',
+            avgCPA: 14,
+            costModel: 'CPC',
+            features: ['authKey', 'country']
+          }
+        ];
+        setAvailableChannels(fallbackChannels);
+      }
+      
+    } catch (error) {
+      console.error('Error cargando datos de canales:', error);
+      // En caso de error de red, usar fallback
+      const fallbackChannels = [
         {
           id: 'jooble',
           name: 'Jooble',
@@ -102,16 +165,42 @@ export default function ChannelSelector({
           avgCPA: 12,
           costModel: 'Organic',
           features: ['partnerId', 'partnerEmail']
+        },
+        {
+          id: 'whatjobs',
+          name: 'WhatJobs',
+          type: 'XML Feed + CPC',
+          description: 'Motor de búsqueda global con optimización automática via S2S tracking',
+          avgCPA: 14,
+          costModel: 'CPC',
+          features: ['authKey', 'country']
         }
       ];
-      
-      setAvailableChannels(integratedChannels);
-      
-    } catch (error) {
-      console.error('Error cargando datos de canales:', error);
+      setAvailableChannels(fallbackChannels);
     } finally {
       setLoading(false);
     }
+  };
+
+  // Funciones auxiliares para mapear datos de la API
+  const getChannelAvgCPA = (channelId: string): number => {
+    const cpaMappings: Record<string, number> = {
+      'jooble': 15,
+      'talent': 18,
+      'jobrapido': 12,
+      'whatjobs': 14,
+      'infojobs': 20,
+      'linkedin': 25,
+      'indeed': 22
+    };
+    return cpaMappings[channelId] || 20;
+  };
+
+  const getCostModel = (type: string): string => {
+    if (type.toLowerCase().includes('cpc')) return 'CPC';
+    if (type.toLowerCase().includes('cpa')) return 'CPA';
+    if (type.toLowerCase().includes('organic')) return 'Organic';
+    return type;
   };
 
   const getChannelStatus = (channelId: string) => {

@@ -367,6 +367,7 @@ function generateMockPerformance(channelId: string) {
     talent: { spend: 150, apps: 8, cpa: 18.8 },
     jooble: { spend: 200, apps: 13, cpa: 15.4 },
     jobrapido: { spend: 80, apps: 7, cpa: 11.4 },
+    whatjobs: { spend: 175, apps: 12, cpa: 14.6 },
     infojobs: { spend: 120, apps: 6, cpa: 20.0 },
     linkedin: { spend: 300, apps: 12, cpa: 25.0 },
     indeed: { spend: 180, apps: 8, cpa: 22.5 }

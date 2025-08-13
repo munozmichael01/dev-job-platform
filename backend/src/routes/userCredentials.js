@@ -83,6 +83,7 @@ router.post('/:userId/credentials/:channelId', async (req, res) => {
       'jooble': 'Jooble',
       'talent': 'Talent.com',
       'jobrapido': 'JobRapido',
+      'whatjobs': 'WhatJobs',
       'infojobs': 'InfoJobs',
       'linkedin': 'LinkedIn',
       'indeed': 'Indeed'
@@ -235,7 +236,7 @@ router.post('/:userId/credentials/:channelId/validate', async (req, res) => {
 });
 
 // GET /api/credentials/channels - Obtener información de canales disponibles  
-router.get('/credentials/channels', async (req, res) => {
+router.get('/channels', async (req, res) => {
   try {
     const channels = {
       jooble: {
@@ -261,6 +262,14 @@ router.get('/credentials/channels', async (req, res) => {
         requiredCredentials: ['partnerId', 'partnerEmail'],
         optionalCredentials: ['partnerUsername', 'partnerPassword', 'webhookUrl', 'feedFormat'],
         setupInstructions: 'Solicita credenciales de partner a JobRapido y configura tu webhook'
+      },
+      whatjobs: {
+        name: 'WhatJobs',
+        type: 'XML Feed + CPC',
+        description: 'Motor de búsqueda global con optimización automática via S2S tracking',
+        requiredCredentials: ['authKey', 'country'],
+        optionalCredentials: ['defaultCPC', 'feedUrl'],
+        setupInstructions: 'Contacta a WhatJobs para obtener tu Authentication Key y selecciona el país objetivo'
       },
       infojobs: {
         name: 'InfoJobs',
@@ -358,6 +367,8 @@ async function simulateChannelValidation(channelId, credentials) {
       return credentials.publisherName && credentials.publisherUrl && credentials.partnerEmail;
     case 'jobrapido':
       return credentials.partnerId && credentials.partnerEmail;
+    case 'whatjobs':
+      return credentials.authKey && credentials.country;
     case 'infojobs':
       return credentials.apiKey && credentials.clientId;
     case 'linkedin':
