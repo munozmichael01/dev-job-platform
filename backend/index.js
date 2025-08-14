@@ -899,11 +899,25 @@ app.get('/job-offers', async (req, res) => {
     `;
     }
 
-    // PERFORMANCE OPTIMIZED - Use fast estimation instead of exact count
-    let totalCount = 62383; // Use approximate total for performance
+    // PERFORMANCE OPTIMIZED COUNT - Use real count but optimized
+    let totalCount = 0;
     if (whereConditions.length > 0) {
-      // For filtered queries, estimate based on percentage
-      totalCount = Math.round(62383 * 0.8); // Estimate 80% match rate
+      // For filtered queries, use optimized count with OPTION (FAST 1000)
+      const countQuery = `
+        SELECT COUNT(*) as total
+        FROM JobOffers jo WITH (READPAST)
+        ${whereClause}
+        OPTION (FAST 1000)
+      `;
+      const countRequest = pool.request();
+      queryParams.forEach(param => {
+        countRequest.input(param.name, param.type, param.value);
+      });
+      const countResult = await countRequest.query(countQuery);
+      totalCount = countResult.recordset[0].total;
+    } else {
+      // For unfiltered queries, use fast table stats
+      totalCount = 62383; // Use cached total for performance
     }
 
     // Ejecutar query principal

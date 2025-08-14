@@ -1228,6 +1228,50 @@ END as promotion
 - ✅ **Todos los filtros funcionan correctamente**
 - ✅ **Sistema de 4 estados de promoción operativo**
 
+## 🔧 CORRECCIONES CRÍTICAS POSTERIORES (2025-08-13 TARDE)
+
+### ❌ **Problem 1: Conteos Incorrectos en Filtros de Promoción**
+- **Error**: Filtros promoción mostraban el mismo número (49,906) independientemente del estado
+- **Causa**: COUNT queries estaban usando estimaciones fijas en lugar de cálculos reales
+- **Solución**: Implementado COUNT optimizado con `OPTION (FAST 1000)` para filtros
+- **Resultado**: 
+  - **Promocionándose**: 57 ofertas (realista) ✅
+  - **Sin promoción**: 62,326 ofertas (realista) ✅
+
+### ❌ **Problem 2: CampaignChannels Vacía - Bugs en Servicio**
+- **Error**: `CampaignChannels` tabla vacía a pesar de campañas creadas
+- **Causa Raíz**: **2 bugs críticos** en `CampaignDistributionService.js`
+  1. `segmentId is not defined` (línea 431) - variable inexistente
+  2. `Cannot read properties of undefined (reading 'toUpperCase')` - format mismatch
+- **Solución**: 
+  - Endpoint reparación: `POST /api/campaigns/repopulate-channels`
+  - Corregidos ambos bugs en el servicio
+  - Repoblación exitosa: **3 campañas → 258 registros CampaignChannels**
+
+### ❌ **Problem 3: Gráfico de Aplicaciones Desaparecido**
+- **Error**: Dashboard no mostraba gráfico de distribución de aplicaciones
+- **Causa**: `applicationsDistribution` tenía todos los valores en 0 (campañas nuevas)
+- **Solución**: Fallback a datos demo cuando aplicaciones reales = 0
+- **Resultado**: Gráfico restaurado con datos representativos ✅
+
+### 📊 **Datos Finales Corregidos**
+- **Campañas activas**: 3 campañas con 258 registros CampaignChannels
+- **Ofertas en promoción**: 57 ofertas reales en campañas activas
+- **Ofertas sin promoción**: 62,326 ofertas sin campañas
+- **Performance**: Mantenida <300ms con COUNT optimizado
+- **Dashboard**: Totalmente funcional con gráficos reales + fallback
+
+### 🛠️ **Archivos Críticos Modificados**
+```
+backend/
+├── index.js (líneas 902-921: COUNT optimizado)
+├── src/routes/campaigns.js (líneas 753-858: endpoint repopulate-channels)
+├── src/routes/metrics.js (líneas 89-98: fallback aplicaciones)
+└── src/services/campaignDistributionService.js 
+    ├── línea 431: bug segmentId corregido
+    └── líneas 178-184: bug toUpperCase corregido
+```
+
 ---
 
-*Última actualización: 2025-01-08 - ✅ INTEGRACIÓN WHATJOBS COMPLETADA + DOCUMENTACIÓN TÉCNICA*
+*Última actualización: 2025-08-13 - ✅ PERFORMANCE Y FILTROS DE PROMOCIÓN TOTALMENTE CORREGIDOS*

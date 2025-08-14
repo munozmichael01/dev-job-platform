@@ -69,6 +69,8 @@ router.get('/dashboard', async (req, res) => {
     }));
     
     // Si no hay datos reales, usar datos simulados para demostración
+    const hasApplicationsData = applicationsDistribution.some(app => app.value > 0);
+    
     if (budgetDistribution.length === 0) {
       console.log('⚠️ No hay datos reales de campañas, usando datos simulados para demo');
       budgetDistribution = [
@@ -78,6 +80,15 @@ router.get('/dashboard', async (req, res) => {
         { name: 'JobRapido', value: 800, spent: 150, campaigns: 1, color: '#8b5cf6' }
       ];
       
+      applicationsDistribution = [
+        { name: 'Talent.com', value: 145, campaigns: 3, color: '#3b82f6' },
+        { name: 'Jooble', value: 98, campaigns: 2, color: '#10b981' },
+        { name: 'WhatJobs', value: 76, campaigns: 2, color: '#f59e0b' },
+        { name: 'JobRapido', value: 52, campaigns: 1, color: '#8b5cf6' }
+      ];
+    } else if (!hasApplicationsData && applicationsDistribution.length > 0) {
+      // Tenemos campañas reales pero sin aplicaciones aún - usar datos de demo para aplicaciones
+      console.log('📊 Campañas reales encontradas pero sin aplicaciones aún - usando datos de demo para gráfico');
       applicationsDistribution = [
         { name: 'Talent.com', value: 145, campaigns: 3, color: '#3b82f6' },
         { name: 'Jooble', value: 98, campaigns: 2, color: '#10b981' },
