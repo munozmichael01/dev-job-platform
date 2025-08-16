@@ -47,21 +47,47 @@ class JoobleService {
     console.log(`🎯 Creando campaña en Jooble: "${campaignData.name}" con ${offers.length} ofertas`);
     
     try {
-      const campaignPayload = this.buildCampaignPayload(campaignData, offers, budgetInfo);
+      // Aplicar UTMs a las ofertas para tracking real
+      const offersWithTracking = this.applyTrackingToOffers(offers, campaignData);
+      
+      // Construir payload-to-jooble incluyendo segmentationRules derivadas de ofertas
+      const payloadToJooble = this.buildJooblePayload(campaignData, offers, budgetInfo);
+      
+      // Construir datos internos (NO se envían a Jooble)
+      const internalData = this.buildInternalData(campaignData, offers, budgetInfo);
+      
+      console.log(`📤 Payload-to-jooble: ${JSON.stringify(payloadToJooble, null, 2)}`);
+      console.log(`🗄️ Datos internos conservados para control: ${Object.keys(internalData).join(', ')}`);
       
       if (!this.config.apiKey) {
-        // Modo simulación
-        return this.simulateCreateCampaign(campaignPayload);
+        // Modo simulación - mostrar ambos payloads y ejemplo de URL
+        const exampleUrl = offersWithTracking[0]?.trackingUrl;
+        return this.simulateCreateCampaign(payloadToJooble, internalData, exampleUrl);
       }
       
-      const response = await this.httpClient.post(`/createCampaign/${this.config.apiKey}`, campaignPayload);
+      // Enviar SOLO el payload mínimo a Jooble
+      const response = await this.httpClient.post(`/createCampaign/${this.config.apiKey}`, payloadToJooble);
       
       console.log(`✅ Campaña creada en Jooble con ID: ${response.data.campaignId || 'unknown'}`);
+      
+      // Log de verificación: payload y URL final
+      console.log(`🔍 Verificación - Payload enviado: ${JSON.stringify(payloadToJooble)}`);
+      if (offersWithTracking.length > 0) {
+        console.log(`🔍 Verificación - URL ejemplo con UTMs: ${offersWithTracking[0].trackingUrl}`);
+      }
+      
+      // TODO: Guardar internalData en nuestra BD para control de límites
+      // await this.saveInternalCampaignData(response.data.campaignId, internalData);
+      
       return {
         success: true,
         channel: 'jooble',
         campaignId: response.data.campaignId,
         data: response.data,
+        internalData: internalData, // Para referencia en logs
+        payloadSent: payloadToJooble, // Para auditoría
+        offersWithTracking: offersWithTracking, // Ofertas con UTMs aplicados
+        exampleTrackingUrl: offersWithTracking[0]?.trackingUrl, // URL ejemplo para verificación
         timestamp: new Date().toISOString()
       };
       
@@ -71,96 +97,330 @@ class JoobleService {
     }
   }
 
+
+
   /**
-   * Construye el payload para crear campaña según especificaciones de Jooble
-   * @param {Object} campaignData - Datos de la campaña
-   * @param {Array} offers - Ofertas
+   * Construye el payload que va a Jooble con campos requeridos + segmentationRules
+   * @param {Object} campaignData - Datos de campaña
+   * @param {Array} offers - Ofertas pre-filtradas para derivar segmentationRules
    * @param {Object} budgetInfo - Info de presupuesto
-   * @returns {Object} Payload para API de Jooble
+   * @returns {Object} Payload para Jooble API
    */
-  buildCampaignPayload(campaignData, offers, budgetInfo) {
-    const segmentationRules = this.buildSegmentationRules(offers, campaignData);
+  buildJooblePayload(campaignData, offers, budgetInfo) {
+    // Calcular Budget total desde dailyBudget si es necesario
+    const budget = this.calculateTotalBudget(campaignData, budgetInfo);
+    
+    // Construir UTM string serializado
+    const utmString = this.buildUtmString(campaignData);
+    
+    // Determinar SiteUrl 
+    const siteUrl = this.determineSiteUrl(campaignData);
+    
+    // Construir segmentationRules derivadas de las ofertas pre-filtradas
+    const segmentationRules = this.buildSegmentationRulesForJooble(offers);
     
     return {
-      name: campaignData.name || 'Campaña Job Platform',
-      dailyBudget: budgetInfo.dailyBudget || Math.floor(campaignData.budget / 30),
-      maxCPC: budgetInfo.maxCPC || campaignData.maxCPA || 25,
-      startDate: campaignData.startDate || new Date().toISOString().split('T')[0],
+      // Campos requeridos por Jooble API
+      CampaignName: campaignData.name || 'Campaña Job Platform',
+      Status: this.mapInternalStatusToJooble(campaignData.status),
+      ClickPrice: budgetInfo.maxCPC || campaignData.maxCPA || 25,
+      Budget: budget,
+      MonthlyBudget: campaignData.monthlyBudget || false,
+      Utm: utmString,
+      SiteUrl: siteUrl,
+      
+      // SegmentationRules derivadas automáticamente de ofertas pre-filtradas
+      segmentationRules: segmentationRules
+    };
+  }
+
+  /**
+   * Construye datos internos que NO se envían a Jooble pero necesitamos para control
+   * @param {Object} campaignData - Datos de campaña
+   * @param {Array} offers - Ofertas
+   * @param {Object} budgetInfo - Info de presupuesto
+   * @returns {Object} Datos para nuestro control interno
+   */
+  buildInternalData(campaignData, offers, budgetInfo) {
+    return {
+      // Campos internos para nuestro control
+      maxCPC: budgetInfo.maxCPC || campaignData.maxCPA || 25, // alias interno
+      dailyBudget: budgetInfo.dailyBudget,
+      totalBudget: campaignData.budget,
+      startDate: campaignData.startDate,
       endDate: campaignData.endDate || this.calculateEndDate(campaignData),
-      status: 0, // InProgress
-      segmentationRules: segmentationRules,
-      timezone: 'Europe/Madrid',
+      timezone: campaignData.timezone || 'Europe/Madrid',
       bidStrategy: campaignData.bidStrategy || 'automatic',
       
-      // Configuraciones adicionales
+      // Targeting interno (para decidir qué ofertas incluir)
       targeting: {
         locations: this.extractLocations(offers),
         companies: this.extractCompanies(offers),
         jobTitles: this.extractJobTitles(offers)
       },
       
-      // Tracking y analytics
+      // Segmentación interna (NO se envía a Jooble)
+      segmentationRules: this.buildInternalSegmentationRules(offers, campaignData),
+      
+      // Tracking estructurado para reporting interno
       trackingParams: {
-        source: 'job_platform',
-        campaign_id: campaignData.id,
-        utm_campaign: campaignData.name?.toLowerCase().replace(/\s+/g, '_')
+        source: 'jooble',
+        medium: 'cpc',
+        campaign: this.normalizeCampaignName(campaignData.name)
       }
     };
   }
 
   /**
-   * Construye reglas de segmentación para Jooble según tipos disponibles
+   * Calcula Budget total desde dailyBudget si es necesario
+   * @param {Object} campaignData - Datos de campaña
+   * @param {Object} budgetInfo - Info de presupuesto
+   * @returns {Number} Budget total para Jooble
+   */
+  calculateTotalBudget(campaignData, budgetInfo) {
+    // Si tenemos totalBudget, usarlo directamente
+    if (campaignData.budget) {
+      return campaignData.budget;
+    }
+    
+    // Si tenemos dailyBudget y fechas, calcular total
+    if (budgetInfo.dailyBudget && campaignData.startDate && campaignData.endDate) {
+      const startDate = new Date(campaignData.startDate);
+      const endDate = new Date(campaignData.endDate);
+      const daysDiff = Math.ceil((endDate - startDate) / (1000 * 60 * 60 * 24));
+      return budgetInfo.dailyBudget * daysDiff;
+    }
+    
+    // Si solo tenemos dailyBudget, asumir 30 días
+    if (budgetInfo.dailyBudget) {
+      return budgetInfo.dailyBudget * 30;
+    }
+    
+    // Default fallback
+    return 3000;
+  }
+
+  /**
+   * Construye string UTM serializado para Jooble
+   * @param {Object} campaignData - Datos de campaña
+   * @returns {String} UTM string con formato ?utm_source=...
+   */
+  buildUtmString(campaignData) {
+    const source = 'jooble';
+    const medium = 'cpc';
+    const campaign = this.normalizeCampaignName(campaignData.name);
+    
+    return `?utm_source=${source}&utm_medium=${medium}&utm_campaign=${campaign}`;
+  }
+
+  /**
+   * Normaliza el nombre de campaña para UTM
+   * @param {String} campaignName - Nombre de campaña
+   * @returns {String} Nombre normalizado
+   */
+  normalizeCampaignName(campaignName) {
+    if (!campaignName) return 'campaign_default';
+    
+    return campaignName
+      .toLowerCase()
+      .replace(/\s+/g, '_')
+      .replace(/[^a-z0-9_]/g, '')
+      .substring(0, 50); // Límite para UTM
+  }
+
+  /**
+   * Determina SiteUrl para Jooble
+   * @param {Object} campaignData - Datos de campaña
+   * @returns {String} URL del sitio
+   */
+  determineSiteUrl(campaignData) {
+    // Si hay SiteId configurado en credenciales, Jooble lo manejará automáticamente
+    // Si no, usar SiteUrl
+    return campaignData.siteUrl || process.env.FRONTEND_URL || 'https://www.turijobs.com';
+  }
+
+  /**
+   * Mapea estado interno a formato Jooble
+   * @param {String} internalStatus - Estado interno
+   * @returns {Number} Estado para Jooble (0=InProgress, 1=Stopped, 2=Deleted)
+   */
+  mapInternalStatusToJooble(internalStatus) {
+    const statusMap = {
+      'active': 0,      // InProgress
+      'paused': 1,      // Stopped
+      'stopped': 1,     // Stopped
+      'deleted': 2,     // Deleted
+      'archived': 2     // Deleted
+    };
+    
+    return statusMap[internalStatus] || 0; // Default: InProgress
+  }
+
+  /**
+   * Genera URL de oferta con UTMs de Jooble aplicados
+   * @param {Object} offer - Oferta
+   * @param {Object} campaignData - Datos de campaña
+   * @returns {String} URL final con UTMs para tracking
+   */
+  buildOfferTrackingUrl(offer, campaignData) {
+    // URL base de la oferta
+    const baseUrl = offer.ExternalUrl || offer.ApplicationUrl || 
+                   `${process.env.FRONTEND_URL || 'https://www.turijobs.com'}/ofertas/${offer.Id}`;
+    
+    // Construir parámetros UTM según especificación
+    const utmParams = {
+      utm_source: 'jooble',
+      utm_medium: 'cpc',
+      utm_campaign: this.normalizeCampaignName(campaignData.name)
+    };
+    
+    // Crear URLSearchParams para manejo correcto de encoding
+    const params = new URLSearchParams(utmParams);
+    
+    // Si la URL ya tiene querystring, usar & en lugar de ?
+    const separator = baseUrl.includes('?') ? '&' : '?';
+    const finalUrl = `${baseUrl}${separator}${params.toString()}`;
+    
+    console.log(`🔗 URL final con UTMs: ${finalUrl}`);
+    return finalUrl;
+  }
+
+  /**
+   * Aplica UTMs a un array de ofertas para distribución por Jooble
    * @param {Array} offers - Ofertas
    * @param {Object} campaignData - Datos de campaña
-   * @returns {Array} Reglas de segmentación
+   * @returns {Array} Ofertas con URLs de tracking aplicadas
    */
-  buildSegmentationRules(offers, campaignData) {
+  applyTrackingToOffers(offers, campaignData) {
+    console.log(`🏷️ Aplicando UTMs de Jooble a ${offers.length} ofertas`);
+    
+    return offers.map(offer => ({
+      ...offer,
+      trackingUrl: this.buildOfferTrackingUrl(offer, campaignData),
+      // Conservar URL original para referencia
+      originalUrl: offer.ExternalUrl || offer.ApplicationUrl,
+      // Metadatos de tracking
+      trackingApplied: true,
+      trackingSource: 'jooble',
+      appliedAt: new Date().toISOString()
+    }));
+  }
+
+  /**
+   * Construye segmentationRules para Jooble respetando límites de la API
+   * Derivadas automáticamente de las ofertas pre-filtradas que ya hemos segmentado internamente
+   * @param {Array} offers - Ofertas pre-filtradas (ya segmentadas internamente)
+   * @returns {Array} SegmentationRules válidas para Jooble API
+   */
+  buildSegmentationRulesForJooble(offers) {
+    console.log(`🎯 Construyendo segmentationRules para Jooble desde ${offers.length} ofertas pre-filtradas`);
+    
     const rules = [];
     
-    // Regla 1: Títulos de trabajo (Title)
+    // TIPO 1: Títulos de trabajo (máx 5, operator=contains)
     const uniqueTitles = [...new Set(offers.map(o => o.Title).filter(Boolean))];
     if (uniqueTitles.length > 0) {
-      // Para múltiples títulos, crear regla por cada uno
-      uniqueTitles.slice(0, 5).forEach(title => { // Límite de 5 para evitar sobrecarga
+      const titlesToSend = uniqueTitles.slice(0, 5); // Límite de Jooble
+      titlesToSend.forEach(title => {
         rules.push({
-          type: 1, // Title
+          type: 1,
           value: title,
           operator: 'contains'
         });
       });
+      console.log(`📋 Agregados ${titlesToSend.length}/5 títulos: ${titlesToSend.join(', ')}`);
     }
     
-    // Regla 2: Empresas (CompanyName)
+    // TIPO 2: Empresas (máx 3, operator=equals)
+    const uniqueCompanies = [...new Set(offers.map(o => o.CompanyName).filter(Boolean))];
+    if (uniqueCompanies.length > 0) {
+      const companiesToSend = uniqueCompanies.slice(0, 3); // Límite de Jooble
+      companiesToSend.forEach(company => {
+        rules.push({
+          type: 2,
+          value: company,
+          operator: 'equals'
+        });
+      });
+      console.log(`🏢 Agregadas ${companiesToSend.length}/3 empresas: ${companiesToSend.join(', ')}`);
+    }
+    
+    // TIPO 4: Regiones (operator=in, sin límite explícito pero deduplicado)
+    const uniqueRegions = [...new Set(offers.map(o => o.City || o.Region).filter(Boolean))];
+    if (uniqueRegions.length > 0) {
+      // Deduplicar y mantener razonable (máx 10 para performance)
+      const regionsToSend = uniqueRegions.slice(0, 10);
+      rules.push({
+        type: 4,
+        value: regionsToSend.join(','), // Jooble espera múltiples separadas por coma
+        operator: 'in'
+      });
+      console.log(`📍 Agregadas ${regionsToSend.length} regiones: ${regionsToSend.join(', ')}`);
+    }
+    
+    console.log(`✅ SegmentationRules para Jooble: ${rules.length} reglas generadas`);
+    return rules;
+  }
+
+  /**
+   * Construye reglas de segmentación INTERNAS (para nuestro control y reporting)
+   * @param {Array} offers - Ofertas
+   * @param {Object} campaignData - Datos de campaña
+   * @returns {Array} Reglas de segmentación para uso interno
+   */
+  buildInternalSegmentationRules(offers, campaignData) {
+    console.log('🗄️ Construyendo reglas de segmentación INTERNAS (no se envían a Jooble)');
+    
+    const rules = [];
+    
+    // Regla 1: Títulos de trabajo (Title) - SOLO para uso interno
+    const uniqueTitles = [...new Set(offers.map(o => o.Title).filter(Boolean))];
+    if (uniqueTitles.length > 0) {
+      uniqueTitles.slice(0, 5).forEach(title => {
+        rules.push({
+          type: 1, // Title
+          value: title,
+          operator: 'contains',
+          internal: true // Marcador de uso interno
+        });
+      });
+    }
+    
+    // Regla 2: Empresas (CompanyName) - SOLO para uso interno
     const uniqueCompanies = [...new Set(offers.map(o => o.CompanyName).filter(Boolean))];
     if (uniqueCompanies.length > 0) {
       uniqueCompanies.slice(0, 3).forEach(company => {
         rules.push({
           type: 2, // CompanyName
           value: company,
-          operator: 'equals'
+          operator: 'equals',
+          internal: true
         });
       });
     }
     
-    // Regla 4: Regiones incluidas (Region)
+    // Regla 4: Regiones incluidas (Region) - SOLO para uso interno
     const uniqueRegions = [...new Set(offers.map(o => o.City || o.Region).filter(Boolean))];
     if (uniqueRegions.length > 0) {
       rules.push({
         type: 4, // Region
-        value: uniqueRegions.slice(0, 5).join(','), // Jooble permite múltiples separadas por coma
-        operator: 'in'
+        value: uniqueRegions.slice(0, 5).join(','),
+        operator: 'in',
+        internal: true
       });
     }
     
-    // Regla 64: Regex en título si hay patrones específicos
+    // Regla 64: Regex en título si hay patrones específicos - SOLO para uso interno
     if (campaignData.titlePattern) {
       rules.push({
         type: 64, // TitleRegex
         value: campaignData.titlePattern,
-        operator: 'regex'
+        operator: 'regex',
+        internal: true
       });
     }
     
+    console.log(`🗄️ Generadas ${rules.length} reglas de segmentación para uso interno`);
     return rules;
   }
 
@@ -418,8 +678,15 @@ class JoobleService {
   /**
    * Simula creación de campaña (para desarrollo)
    */
-  simulateCreateCampaign(payload) {
+  simulateCreateCampaign(payloadToJooble, internalData, exampleUrl) {
     console.log('🔧 Modo simulación: Creando campaña Jooble');
+    console.log('📤 PAYLOAD ENVIADO A JOOBLE:', JSON.stringify(payloadToJooble, null, 2));
+    console.log('🗄️ DATOS INTERNOS (NO ENVIADOS):', JSON.stringify(internalData, null, 2));
+    
+    if (exampleUrl) {
+      console.log('🔍 URL EJEMPLO CON UTMs:', exampleUrl);
+    }
+    
     return {
       success: true,
       channel: 'jooble',
@@ -427,12 +694,15 @@ class JoobleService {
       simulation: true,
       data: {
         campaignId: `jooble_sim_${Date.now()}`,
-        status: 0,
-        name: payload.name,
-        dailyBudget: payload.dailyBudget,
-        maxCPC: payload.maxCPC,
+        status: payloadToJooble.Status,
+        name: payloadToJooble.CampaignName,
+        budget: payloadToJooble.Budget,
+        clickPrice: payloadToJooble.ClickPrice,
         estimatedReach: Math.floor(Math.random() * 10000) + 1000
       },
+      payloadSent: payloadToJooble,
+      internalData: internalData,
+      exampleTrackingUrl: exampleUrl,
       timestamp: new Date().toISOString()
     };
   }
@@ -470,6 +740,173 @@ class JoobleService {
       },
       timestamp: new Date().toISOString()
     };
+  }
+
+  /**
+   * Valida las credenciales API haciendo una petición real a Jooble
+   * @param {Object} credentials - Credenciales a validar
+   * @returns {Object} Resultado de la validación
+   */
+  async validateCredentials(credentials) {
+    console.log('🔍 Validando credenciales Jooble...');
+    
+    try {
+      if (!credentials.apiKey) {
+        return {
+          success: false,
+          error: 'API Key es requerida',
+          code: 'MISSING_API_KEY'
+        };
+      }
+
+      if (!credentials.countryCode) {
+        return {
+          success: false,
+          error: 'Código de país es requerido',
+          code: 'MISSING_COUNTRY_CODE'
+        };
+      }
+
+      // Manejar múltiples códigos de país separados por comas
+      const countryCodes = credentials.countryCode.split(',').map(code => code.trim());
+      console.log(`🌍 Validando TODOS los países: ${countryCodes.join(', ')}`);
+
+      // Probar TODOS los países y recopilar resultados
+      const countryResults = [];
+      let hasAuthError = false;
+      
+      for (const countryCode of countryCodes) {
+        try {
+          console.log(`🔍 Probando país: ${countryCode}`);
+          
+          const tempConfig = {
+            apiKey: credentials.apiKey,
+            countryCode: countryCode,
+            baseUrl: `https://${countryCode}.jooble.org/auction/api`,
+            timeout: credentials.timeout || 30000
+          };
+
+          // Crear cliente temporal
+          const testClient = axios.create({
+            baseURL: tempConfig.baseUrl,
+            timeout: tempConfig.timeout,
+            headers: {
+              'Content-Type': 'application/json',
+              'User-Agent': 'JobPlatform-Integration/1.0'
+            }
+          });
+
+          // Hacer una petición simple para validar las credenciales
+          const today = new Date().toISOString().split('T')[0];
+          const testPayload = {
+            from: today,
+            to: today
+          };
+
+          console.log(`🔍 Probando conexión a ${tempConfig.baseUrl} con API key ${credentials.apiKey.substring(0, 8)}...`);
+
+          const response = await testClient.post(`/${credentials.apiKey}`, testPayload);
+          
+          console.log(`✅ Respuesta exitosa de Jooble ${countryCode}:`, response.status);
+          
+          // País validado exitosamente
+          countryResults.push({
+            country: countryCode,
+            success: true,
+            status: response.status,
+            baseUrl: tempConfig.baseUrl
+          });
+
+        } catch (countryError) {
+          console.log(`❌ Error en país ${countryCode}:`, countryError.message);
+          
+          // Registrar resultado del país
+          countryResults.push({
+            country: countryCode,
+            success: false,
+            error: countryError.message,
+            status: countryError.response?.status,
+            baseUrl: `https://${countryCode}.jooble.org/auction/api`
+          });
+          
+          // Si es un error de autenticación (401/403), marcar para todos los países
+          if (countryError.response && [401, 403].includes(countryError.response.status)) {
+            console.log(`🚫 Error de autenticación en ${countryCode} - API key inválida para todos los países`);
+            hasAuthError = true;
+            break; // No tiene sentido probar otros países con API key inválida
+          }
+        }
+      }
+
+      // Analizar resultados
+      const successfulCountries = countryResults.filter(r => r.success);
+      const failedCountries = countryResults.filter(r => !r.success);
+
+      if (successfulCountries.length > 0) {
+        // Al menos un país funciona
+        console.log(`✅ Países exitosos: ${successfulCountries.map(c => c.country).join(', ')}`);
+        if (failedCountries.length > 0) {
+          console.log(`⚠️ Países con problemas: ${failedCountries.map(c => c.country).join(', ')}`);
+        }
+
+        return {
+          success: true,
+          message: `Credenciales Jooble validadas exitosamente para: ${successfulCountries.map(c => c.country).join(', ')}${failedCountries.length > 0 ? ` (fallaron: ${failedCountries.map(c => c.country).join(', ')})` : ''}`,
+          validatedAt: new Date().toISOString(),
+          details: {
+            apiKey: credentials.apiKey.substring(0, 8) + '...',
+            allCountries: credentials.countryCode,
+            successfulCountries: successfulCountries.map(c => c.country),
+            failedCountries: failedCountries.map(c => c.country),
+            countryResults: countryResults
+          }
+        };
+      }
+
+      // Si llegamos aquí, ningún país funcionó
+      console.error('❌ Falló validación en todos los países');
+      
+      // Analizar el tipo de errores para dar un mensaje específico
+      let errorMessage = 'Error validando credenciales en todos los países';
+      let errorCode = 'VALIDATION_ERROR';
+
+      if (hasAuthError || failedCountries.some(c => [401, 403].includes(c.status))) {
+        errorMessage = 'API Key inválida o sin permisos para ningún país';
+        errorCode = 'INVALID_API_KEY';
+      } else if (failedCountries.some(c => c.status === 404)) {
+        errorMessage = 'Endpoints no encontrados - verifica los códigos de país';
+        errorCode = 'INVALID_COUNTRY_CODE';
+      } else if (failedCountries.some(c => c.status === 429)) {
+        errorMessage = 'Demasiadas peticiones - API Key puede estar limitada';
+        errorCode = 'RATE_LIMITED';
+      } else if (failedCountries.some(c => [500, 502, 503].includes(c.status))) {
+        errorMessage = 'Error del servidor Jooble - intenta más tarde';
+        errorCode = 'SERVER_ERROR';
+      }
+
+      return {
+        success: false,
+        error: errorMessage,
+        code: errorCode,
+        details: {
+          allCountries: credentials.countryCode,
+          testedCountries: countryCodes,
+          countryResults: countryResults,
+          failedCountries: failedCountries.map(c => c.country)
+        }
+      };
+
+    } catch (error) {
+      console.error('❌ Error general validando credenciales Jooble:', error.message);
+      return {
+        success: false,
+        error: 'Error general de validación',
+        code: 'GENERAL_ERROR',
+        details: {
+          originalError: error.message
+        }
+      };
+    }
   }
 }
 

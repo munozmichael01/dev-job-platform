@@ -16,13 +16,16 @@ class CredentialsManager {
     try {
       const text = JSON.stringify(credentials);
       const iv = crypto.randomBytes(16);
-      const cipher = crypto.createCipher(this.algorithm, this.encryptionKey);
+      const key = crypto.createHash('sha256').update(this.encryptionKey).digest();
+      const cipher = crypto.createCipheriv(this.algorithm, key, iv);
       
       let encrypted = cipher.update(text, 'utf8', 'hex');
       encrypted += cipher.final('hex');
       
-      // Retornar IV + datos encriptados
-      return iv.toString('hex') + ':' + encrypted;
+      const authTag = cipher.getAuthTag();
+      
+      // Retornar IV + authTag + datos encriptados
+      return iv.toString('hex') + ':' + authTag.toString('hex') + ':' + encrypted;
     } catch (error) {
       console.error('Error encriptando credenciales:', error);
       throw new Error('Error en encriptación');
@@ -37,10 +40,25 @@ class CredentialsManager {
   decryptCredentials(encryptedData) {
     try {
       const parts = encryptedData.split(':');
-      const iv = Buffer.from(parts[0], 'hex');
-      const encryptedText = parts[1];
       
-      const decipher = crypto.createDecipher(this.algorithm, this.encryptionKey);
+      // Verificar formato: iv:authTag:encrypted o iv:encrypted (para compatibilidad)
+      if (parts.length === 2) {
+        // Formato antiguo sin authTag - usar método simple
+        return this.decryptCredentialsLegacy(encryptedData);
+      }
+      
+      if (parts.length !== 3) {
+        throw new Error('Formato de datos encriptados inválido');
+      }
+      
+      const iv = Buffer.from(parts[0], 'hex');
+      const authTag = Buffer.from(parts[1], 'hex');
+      const encryptedText = parts[2];
+      
+      const key = crypto.createHash('sha256').update(this.encryptionKey).digest();
+      const decipher = crypto.createDecipheriv(this.algorithm, key, iv);
+      decipher.setAuthTag(authTag);
+      
       let decrypted = decipher.update(encryptedText, 'hex', 'utf8');
       decrypted += decipher.final('utf8');
       
@@ -48,6 +66,31 @@ class CredentialsManager {
     } catch (error) {
       console.error('Error desencriptando credenciales:', error);
       throw new Error('Error en desencriptación');
+    }
+  }
+
+  /**
+   * Método legacy para desencriptar datos del formato antiguo
+   * @param {string} encryptedData - Datos encriptados en formato antiguo
+   * @returns {Object} - Credenciales desencriptadas
+   */
+  decryptCredentialsLegacy(encryptedData) {
+    try {
+      // Cambiar temporalmente a AES-256-CBC para el formato legacy
+      const parts = encryptedData.split(':');
+      const iv = Buffer.from(parts[0], 'hex');
+      const encryptedText = parts[1];
+      
+      const key = crypto.createHash('sha256').update(this.encryptionKey).digest();
+      const decipher = crypto.createDecipheriv('aes-256-cbc', key, iv);
+      
+      let decrypted = decipher.update(encryptedText, 'hex', 'utf8');
+      decrypted += decipher.final('utf8');
+      
+      return JSON.parse(decrypted);
+    } catch (error) {
+      console.error('Error en desencriptación legacy:', error);
+      throw new Error('Error en desencriptación legacy');
     }
   }
 

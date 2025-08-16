@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -76,6 +76,64 @@ export default function ChannelConfigForm({
   const [validating, setValidating] = useState(false);
   const [validationResult, setValidationResult] = useState<any>(null);
   const [error, setError] = useState<string | null>(null);
+  const [loadingExisting, setLoadingExisting] = useState(false);
+
+  // Cargar datos existentes si estamos editando
+  useEffect(() => {
+    const loadExistingCredentials = async () => {
+      if (!existingCredentials) return;
+      
+      setLoadingExisting(true);
+      setError(null); // Limpiar errores anteriores
+      setValidationResult(null); // Limpiar resultados de validación anteriores
+      try {
+        console.log('🔄 Cargando credenciales existentes para edición...');
+        
+        const response = await fetch(`http://localhost:3002/api/users/${userId}/credentials/${channelId}/details`);
+        const data = await response.json();
+        
+        if (data.success) {
+          console.log('✅ Credenciales cargadas:', data.data);
+          
+          setFormData({
+            credentials: data.data.credentials || {},
+            limits: {
+              dailyBudgetLimit: data.data.limits?.dailyBudgetLimit || '',
+              monthlyBudgetLimit: data.data.limits?.monthlyBudgetLimit || '',
+              maxCPA: data.data.limits?.maxCPA || ''
+            },
+            configuration: {
+              timezone: data.data.configuration?.timezone || 'Europe/Madrid',
+              notifications: data.data.configuration?.notifications ?? true
+            }
+          });
+
+          // Mostrar solo estado de validación exitosa anterior
+          if (data.data.status?.isValidated && !data.data.status?.validationError) {
+            setValidationResult({
+              success: true,
+              message: 'Credenciales validadas previamente',
+              validation: {
+                isValid: true,
+                validatedAt: data.data.status.lastValidated
+              }
+            });
+          }
+          // No mostrar errores de validaciones anteriores automáticamente
+        } else {
+          console.error('❌ Error cargando credenciales:', data.error);
+          setError('Error cargando credenciales existentes');
+        }
+      } catch (error) {
+        console.error('❌ Error al cargar credenciales:', error);
+        setError('Error conectando con el servidor');
+      } finally {
+        setLoadingExisting(false);
+      }
+    };
+
+    loadExistingCredentials();
+  }, [existingCredentials, userId, channelId]);
 
   const handleCredentialChange = (field: string, value: string) => {
     setFormData(prev => ({
@@ -119,15 +177,25 @@ export default function ChannelConfigForm({
         method: 'POST'
       });
 
+      console.log('🔍 Response status:', response.status);
+      console.log('🔍 Response headers:', response.headers);
+
+      if (!response.ok) {
+        const errorText = await response.text();
+        console.error('❌ HTTP Error:', response.status, errorText);
+        throw new Error(`HTTP ${response.status}: ${errorText}`);
+      }
+
       const data = await response.json();
+      console.log('✅ Validation response:', data);
       setValidationResult(data);
 
       if (!data.success) {
-        setError(data.validation?.error || 'Error en validación');
+        setError(data.validation?.error || data.message || 'Error en validación');
       }
     } catch (error) {
-      console.error('Error validando credenciales:', error);
-      setError('Error validando credenciales');
+      console.error('❌ Error validando credenciales:', error);
+      setError(`Error validando ${channelInfo.name}: ${error instanceof Error ? error.message : 'Error desconocido'}`);
     } finally {
       setValidating(false);
     }
@@ -252,6 +320,13 @@ export default function ChannelConfigForm({
         </CardHeader>
 
         <CardContent className="space-y-6">
+          {loadingExisting && (
+            <Alert>
+              <RefreshCw className="h-4 w-4 animate-spin" />
+              <AlertDescription>Cargando credenciales existentes...</AlertDescription>
+            </Alert>
+          )}
+
           {error && (
             <Alert variant="destructive">
               <AlertTriangle className="h-4 w-4" />
@@ -437,7 +512,7 @@ function getFieldPlaceholder(channelId: string, field: string): string {
   const placeholders: Record<string, Record<string, string>> = {
     jooble: {
       apiKey: 'XXXXX-XXXX-XXXX-XXXXX-XXXXXXXX',
-      countryCode: 'es',
+      countryCode: 'es,fr,de',
       timeout: '30000'
     },
     talent: {
@@ -485,7 +560,7 @@ function getFieldDescription(channelId: string, field: string): string {
   const descriptions: Record<string, Record<string, string>> = {
     jooble: {
       apiKey: 'Clave API única proporcionada por tu manager de Jooble',
-      countryCode: 'Código de país (es, uk, de, fr, etc.)',
+      countryCode: 'Códigos de país separados por comas (es,fr,de,uk,etc.)',
       timeout: 'Timeout en milisegundos para peticiones API'
     },
     talent: {

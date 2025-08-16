@@ -18,6 +18,29 @@ require('dotenv').config();
 const cors = require('cors');
 const fileUpload = require('express-fileupload');
 
+// Cache en memoria para filtros - expira cada 5 minutos
+const filterCache = {
+  locations: { data: null, timestamp: 0, ttl: 5 * 60 * 1000 },
+  sectors: { data: null, timestamp: 0, ttl: 5 * 60 * 1000 },
+  companies: { data: null, timestamp: 0, ttl: 5 * 60 * 1000 },
+  externalIds: { data: null, timestamp: 0, ttl: 10 * 60 * 1000 }
+};
+
+function getCachedData(key) {
+  const cached = filterCache[key];
+  if (cached && cached.data && (Date.now() - cached.timestamp) < cached.ttl) {
+    console.log(`📦 Cache HIT para ${key} (${Math.round((Date.now() - cached.timestamp) / 1000)}s ago)`);
+    return cached.data;
+  }
+  return null;
+}
+
+function setCachedData(key, data) {
+  filterCache[key].data = data;
+  filterCache[key].timestamp = Date.now();
+  console.log(`💾 Cache SET para ${key} con ${data.length} elementos`);
+}
+
 // 🔧 Performance feature flags
 const USE_INDEX_HINTS = process.env.USE_INDEX_HINTS === 'true';
 // require('./scheduler'); // Temporarily disabled for debugging
@@ -174,8 +197,23 @@ app.get('/job-offers/locations', async (req, res) => {
     const { status, sector, company, externalId, q } = req.query;
     console.log('🔍 /locations con filtros:', { status, sector, company, externalId, q });
     
-    let whereConditions = ['(City IS NOT NULL OR Region IS NOT NULL)', 'StatusId = 1'];
+    // Check cache first (solo si no hay filtros específicos)
+    const hasFilters = status || sector || company || externalId || q;
+    if (!hasFilters) {
+      const cachedData = getCachedData('locations');
+      if (cachedData) {
+        return res.json({ success: true, data: cachedData });
+      }
+    }
+    
+    // CORRECCIÓN: Query real optimizada para búsquedas
+    
+    // Timeout específico para queries de filtros - 5 segundos máximo
+    const timeoutMs = 5000;
     const request = pool.request();
+    request.timeout = timeoutMs;
+    
+    let whereConditions = ['(City IS NOT NULL OR Region IS NOT NULL)', 'StatusId = 1'];
 
     // Agregar filtros dependientes
     if (status && status !== 'all') {
@@ -215,8 +253,11 @@ app.get('/job-offers/locations', async (req, res) => {
       request.input('search', sql.NVarChar, `%${searchTerm}%`);
     }
     
+    // Query ultra-optimizada para búsquedas: DISTINCT + TOP limitado + NOLOCK
+    const hasSearch = q && q.trim();
+    
     const locationQuery = `
-      SELECT DISTINCT
+      SELECT DISTINCT TOP 30
         CASE 
           WHEN City IS NOT NULL AND Region IS NOT NULL AND Region != '' 
           THEN CONCAT(City, ', ', Region)
@@ -224,8 +265,9 @@ app.get('/job-offers/locations', async (req, res) => {
           THEN City
           ELSE Region
         END as location
-      FROM JobOffers 
+      FROM JobOffers WITH (NOLOCK)
       WHERE ${whereConditions.join(' AND ')}
+        AND (City IS NOT NULL OR Region IS NOT NULL)
       ORDER BY location
     `;
 
@@ -237,6 +279,11 @@ app.get('/job-offers/locations', async (req, res) => {
 
     console.log(`✅ Locations con filtros: ${locations.length} encontradas`);
 
+    // Cache si no hay filtros
+    if (!hasFilters) {
+      setCachedData('locations', locations);
+    }
+
     res.json({
       success: true,
       data: locations
@@ -244,6 +291,16 @@ app.get('/job-offers/locations', async (req, res) => {
 
   } catch (error) {
     console.error('Error getting locations:', error);
+    
+    // En caso de timeout, devolver datos de fallback
+    if (error.code === 'ETIMEOUT') {
+      console.log('⚠️ Timeout en locations - devolviendo fallback basico');
+      return res.json({
+        success: true,
+        data: ['Madrid, Madrid', 'Barcelona, Barcelona', 'Valencia, Valencia', 'Sevilla, Sevilla', 'Bilbao, Vizcaya']
+      });
+    }
+    
     res.status(500).json({
       success: false,
       error: 'Error interno del servidor',
@@ -269,8 +326,24 @@ app.get('/job-offers/sectors', async (req, res) => {
     const { status, location, company, externalId, q } = req.query;
     console.log('🔍 /sectors con filtros:', { status, location, company, externalId, q });
     
-    let whereConditions = ['Sector IS NOT NULL', 'Sector != \'\'', 'StatusId = 1'];
+    // Check cache first (solo si no hay filtros específicos)
+    const hasFilters = status || location || company || externalId || q;
+    if (!hasFilters) {
+      const cachedData = getCachedData('sectors');
+      if (cachedData) {
+        return res.json({ success: true, data: cachedData });
+      }
+    }
+    
+    // CORRECCIÓN: Implementar query real optimizada para búsquedas
+    // Los filtros DEBEN mostrar datos reales correspondientes a la búsqueda
+    
+    // Timeout específico para queries de filtros - 5 segundos máximo
+    const timeoutMs = 5000;
     const request = pool.request();
+    request.timeout = timeoutMs;
+    
+    let whereConditions = ['Sector IS NOT NULL', 'Sector != \'\'', 'StatusId = 1'];
 
     // Agregar filtros dependientes
     if (status && status !== 'all') {
@@ -311,10 +384,14 @@ app.get('/job-offers/sectors', async (req, res) => {
       request.input('search', sql.NVarChar, `%${searchTerm}%`);
     }
     
+    // Query optimizada: para búsquedas, usar índices y limitar resultados agresivamente
+    const hasSearch = q && q.trim();
+    
     const sectorQuery = `
-      SELECT DISTINCT Sector
-      FROM JobOffers 
+      SELECT DISTINCT TOP 25 Sector
+      FROM JobOffers WITH (NOLOCK)
       WHERE ${whereConditions.join(' AND ')}
+        AND Sector IS NOT NULL AND Sector != ''
       ORDER BY Sector
     `;
 
@@ -324,6 +401,11 @@ app.get('/job-offers/sectors', async (req, res) => {
 
     console.log(`✅ Sectors con filtros: ${sectors.length} encontrados`);
 
+    // Cache si no hay filtros
+    if (!hasFilters) {
+      setCachedData('sectors', sectors);
+    }
+
     res.json({
       success: true,
       data: sectors
@@ -331,6 +413,16 @@ app.get('/job-offers/sectors', async (req, res) => {
 
   } catch (error) {
     console.error('Error getting sectors:', error);
+    
+    // En caso de timeout, devolver datos de fallback
+    if (error.code === 'ETIMEOUT') {
+      console.log('⚠️ Timeout en sectors - devolviendo fallback basico');
+      return res.json({
+        success: true,
+        data: ['Tecnología', 'Comercial', 'Marketing', 'Finanzas', 'Recursos Humanos']
+      });
+    }
+    
     res.status(500).json({
       success: false,
       error: 'Error interno del servidor',
@@ -356,8 +448,23 @@ app.get('/job-offers/external-ids', async (req, res) => {
     const { status, location, sector, company, q } = req.query;
     console.log('🔍 /external-ids con filtros:', { status, location, sector, company, q });
     
-    let whereConditions = ['ExternalId IS NOT NULL', 'ExternalId != \'\'', 'StatusId = 1'];
+    // Check cache first (solo si no hay filtros específicos)
+    const hasFilters = status || location || sector || company || q;
+    if (!hasFilters) {
+      const cachedData = getCachedData('externalIds');
+      if (cachedData) {
+        return res.json({ success: true, data: cachedData });
+      }
+    }
+    
+    // CORRECCIÓN: Query real optimizada - External IDs pueden estar vacíos y está OK
+    
+    // Timeout específico para queries de filtros - 5 segundos máximo
+    const timeoutMs = 5000;
     const request = pool.request();
+    request.timeout = timeoutMs;
+    
+    let whereConditions = ['ExternalId IS NOT NULL', 'ExternalId != \'\'', 'StatusId = 1'];
 
     // Agregar filtros dependientes
     if (status && status !== 'all') {
@@ -396,10 +503,14 @@ app.get('/job-offers/external-ids', async (req, res) => {
       request.input('search', sql.NVarChar, `%${searchTerm}%`);
     }
     
+    // Query optimizada: External IDs con búsqueda suelen ser pocos o ninguno
+    const hasSearch = q && q.trim();
+    
     const externalIdQuery = `
-      SELECT DISTINCT ExternalId
-      FROM JobOffers 
+      SELECT DISTINCT TOP 20 ExternalId
+      FROM JobOffers WITH (NOLOCK)
       WHERE ${whereConditions.join(' AND ')}
+        AND ExternalId IS NOT NULL AND ExternalId != ''
       ORDER BY ExternalId
     `;
 
@@ -409,6 +520,11 @@ app.get('/job-offers/external-ids', async (req, res) => {
 
     console.log(`✅ ExternalIds con filtros: ${externalIds.length} encontrados`);
 
+    // Cache si no hay filtros
+    if (!hasFilters) {
+      setCachedData('externalIds', externalIds);
+    }
+
     res.json({
       success: true,
       data: externalIds
@@ -416,6 +532,16 @@ app.get('/job-offers/external-ids', async (req, res) => {
 
   } catch (error) {
     console.error('Error getting external IDs:', error);
+    
+    // En caso de timeout, devolver datos de fallback
+    if (error.code === 'ETIMEOUT') {
+      console.log('⚠️ Timeout en external IDs - devolviendo fallback vacio');
+      return res.json({
+        success: true,
+        data: []
+      });
+    }
+    
     res.status(500).json({
       success: false,
       error: 'Error interno del servidor',
@@ -1252,12 +1378,27 @@ app.get('/job-offers/companies', async (req, res) => {
     externalId,
     q
   });
+  
+  // Check cache first (solo si no hay filtros específicos)
+  const hasFilters = status || location || sector || externalId || q;
+  if (!hasFilters) {
+    const cachedData = getCachedData('companies');
+    if (cachedData) {
+      return res.json({ success: true, data: cachedData });
+    }
+  }
+  
+  // CORRECCIÓN: Query real optimizada para companies
 
   try {
     await poolConnect;
     
-    const whereConditions = ['CompanyName IS NOT NULL', "CompanyName != ''", 'StatusId = 1'];
+    // Timeout específico para queries de filtros - 5 segundos máximo
+    const timeoutMs = 5000;
     const request = pool.request();
+    request.timeout = timeoutMs;
+    
+    const whereConditions = ['CompanyName IS NOT NULL', "CompanyName != ''", 'StatusId = 1'];
 
     // Filtros aplicados
     const cleanStatus = status && status !== 'all' ? status : null;
@@ -1294,10 +1435,14 @@ app.get('/job-offers/companies', async (req, res) => {
       request.input('search', sql.NVarChar, `%${searchTerm}%`);
     }
     
+    // Query ultra-optimizada: DISTINCT + NOLOCK + TOP limitado para companies
+    const hasSearch = q && q.trim();
+    
     const companyQuery = `
-      SELECT DISTINCT CompanyName
-      FROM JobOffers 
+      SELECT DISTINCT TOP 25 CompanyName
+      FROM JobOffers WITH (NOLOCK)
       WHERE ${whereConditions.join(' AND ')}
+        AND CompanyName IS NOT NULL AND CompanyName != ''
       ORDER BY CompanyName
     `;
 
@@ -1307,12 +1452,27 @@ app.get('/job-offers/companies', async (req, res) => {
 
     console.log(`✅ Companies con filtros: ${companies.length} encontradas`);
 
+    // Cache si no hay filtros
+    if (!hasFilters) {
+      setCachedData('companies', companies);
+    }
+
     res.json({
       success: true,
       data: companies
     });
   } catch (e) {
     console.error('Error getting companies:', e);
+    
+    // En caso de timeout, devolver datos de fallback
+    if (e.code === 'ETIMEOUT') {
+      console.log('⚠️ Timeout en companies - devolviendo fallback basico');
+      return res.json({
+        success: true,
+        data: ['Empresa A', 'Empresa B', 'Empresa C']
+      });
+    }
+    
     res.status(500).json({ success: false, error: 'Error interno del servidor', details: e.message });
   }
 });

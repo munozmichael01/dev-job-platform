@@ -442,6 +442,7 @@ export default function CredencialesPage() {
         <ChannelConfigForm
           channelId={selectedChannel}
           channelInfo={availableChannels[selectedChannel]}
+          existingCredentials={userChannels.find(ch => ch.channelId === selectedChannel)}
           userId={userId}
           onSave={() => {
             setShowConfigForm(false);

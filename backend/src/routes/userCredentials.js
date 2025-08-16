@@ -2,6 +2,7 @@ const express = require('express');
 const router = express.Router();
 const { pool, poolPromise } = require('../db/db');
 const CredentialsManager = require('../services/credentialsManager');
+const JoobleService = require('../services/channels/joobleService');
 
 // Instancia del manager de credenciales
 const credentialsManager = new CredentialsManager();
@@ -188,12 +189,65 @@ router.post('/:userId/credentials/:channelId/validate', async (req, res) => {
   try {
     const { userId, channelId } = req.params;
 
-    // Validación simulada simple (siempre exitosa para testing)
-    const isValid = true;
-    
+    console.log(`🔍 Iniciando validación de credenciales para usuario ${userId}, canal ${channelId}`);
+
     await poolPromise;
     
-    if (isValid) {
+    // Obtener las credenciales existentes
+    const credentialsResult = await pool.request()
+      .input('userId', userId)
+      .input('channelId', channelId)
+      .query('SELECT EncryptedCredentials FROM UserChannelCredentials WHERE UserId = @userId AND ChannelId = @channelId');
+
+    if (credentialsResult.recordset.length === 0) {
+      return res.status(404).json({
+        success: false,
+        error: 'Credenciales no encontradas'
+      });
+    }
+
+    // Desencriptar credenciales
+    const encryptedCredentials = credentialsResult.recordset[0].EncryptedCredentials;
+    const credentials = credentialsManager.decryptCredentials(encryptedCredentials);
+
+    let validationResult;
+
+    // Validación específica por canal
+    switch (channelId) {
+      case 'jooble':
+        console.log('🎯 Validando credenciales Jooble con API real...');
+        const joobleService = new JoobleService({
+          apiKey: credentials.apiKey,
+          countryCode: credentials.countryCode,
+          timeout: credentials.timeout
+        });
+        validationResult = await joobleService.validateCredentials(credentials);
+        break;
+        
+      default:
+        // Para otros canales, usar validación simulada por ahora
+        console.log(`⚠️ Usando validación simulada para canal ${channelId}`);
+        validationResult = await simulateChannelValidation(channelId, credentials);
+        if (validationResult) {
+          validationResult = {
+            success: true,
+            message: 'Credenciales validadas exitosamente (simulación)',
+            validatedAt: new Date().toISOString()
+          };
+        } else {
+          validationResult = {
+            success: false,
+            error: 'Credenciales inválidas (simulación)',
+            code: 'SIMULATION_ERROR'
+          };
+        }
+        break;
+    }
+
+    console.log('📋 Resultado de validación:', validationResult.success ? '✅ Exitosa' : '❌ Falló');
+    
+    if (validationResult.success) {
+      // Actualizar estado en base de datos
       await pool.request()
         .input('userId', userId)
         .input('channelId', channelId)
@@ -209,28 +263,133 @@ router.post('/:userId/credentials/:channelId/validate', async (req, res) => {
 
       res.json({
         success: true,
-        message: 'Credenciales validadas exitosamente',
+        message: validationResult.message || 'Credenciales validadas exitosamente',
         validation: {
           isValid: true,
-          validatedAt: new Date().toISOString()
+          validatedAt: validationResult.validatedAt || new Date().toISOString(),
+          details: validationResult.details
         }
       });
     } else {
+      // Guardar error de validación
+      await pool.request()
+        .input('userId', userId)
+        .input('channelId', channelId)
+        .input('validationError', validationResult.error)
+        .query(`
+          UPDATE UserChannelCredentials 
+          SET 
+            IsValidated = 0,
+            ValidationError = @validationError,
+            LastValidated = GETDATE(),
+            UpdatedAt = GETDATE()
+          WHERE UserId = @userId AND ChannelId = @channelId
+        `);
+
       res.json({
         success: false,
         message: 'Error en validación de credenciales',
         validation: {
           isValid: false,
-          error: 'Error simulado'
+          error: validationResult.error,
+          code: validationResult.code,
+          details: validationResult.details
         }
       });
     }
 
   } catch (error) {
-    console.error('Error validando credenciales:', error);
+    console.error('❌ Error validando credenciales:', error);
     res.status(500).json({
       success: false,
       error: 'Error validando credenciales: ' + error.message
+    });
+  }
+});
+
+// GET /api/users/:userId/credentials/:channelId/details - Obtener credenciales para edición
+router.get('/:userId/credentials/:channelId/details', async (req, res) => {
+  try {
+    const { userId, channelId } = req.params;
+
+    console.log(`🔍 Obteniendo detalles de credenciales para usuario ${userId}, canal ${channelId}`);
+
+    await poolPromise;
+    
+    // Obtener las credenciales existentes
+    const credentialsResult = await pool.request()
+      .input('userId', userId)
+      .input('channelId', channelId)
+      .query(`
+        SELECT 
+          EncryptedCredentials, 
+          ConfigurationData,
+          DailyBudgetLimit,
+          MonthlyBudgetLimit,
+          MaxCPA,
+          IsValidated,
+          ValidationError,
+          LastValidated
+        FROM UserChannelCredentials 
+        WHERE UserId = @userId AND ChannelId = @channelId
+      `);
+
+    if (credentialsResult.recordset.length === 0) {
+      return res.status(404).json({
+        success: false,
+        error: 'Credenciales no encontradas'
+      });
+    }
+
+    const row = credentialsResult.recordset[0];
+    
+    // Desencriptar credenciales
+    let credentials = {};
+    try {
+      credentials = credentialsManager.decryptCredentials(row.EncryptedCredentials);
+    } catch (error) {
+      console.error('❌ Error desencriptando credenciales para edición:', error);
+      return res.status(500).json({
+        success: false,
+        error: 'Error desencriptando credenciales'
+      });
+    }
+
+    // Parsear configuración
+    let configuration = {};
+    if (row.ConfigurationData) {
+      try {
+        configuration = JSON.parse(row.ConfigurationData);
+      } catch (error) {
+        console.warn('⚠️ Error parseando configuración:', error);
+      }
+    }
+
+    console.log(`✅ Credenciales obtenidas para edición: ${Object.keys(credentials).join(', ')}`);
+
+    res.json({
+      success: true,
+      data: {
+        credentials: credentials,
+        limits: {
+          dailyBudgetLimit: row.DailyBudgetLimit?.toString() || '',
+          monthlyBudgetLimit: row.MonthlyBudgetLimit?.toString() || '',
+          maxCPA: row.MaxCPA?.toString() || ''
+        },
+        configuration: configuration,
+        status: {
+          isValidated: row.IsValidated,
+          validationError: row.ValidationError,
+          lastValidated: row.LastValidated
+        }
+      }
+    });
+
+  } catch (error) {
+    console.error('❌ Error obteniendo detalles de credenciales:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Error obteniendo detalles de credenciales: ' + error.message
     });
   }
 });
