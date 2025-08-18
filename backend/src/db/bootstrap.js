@@ -42,9 +42,47 @@ async function ensureTables() {
         Priority NVARCHAR(20) NULL,
         AutoOptimization BIT NOT NULL DEFAULT 1,
         Status NVARCHAR(50) NOT NULL DEFAULT 'active',
+        InternalConfig NVARCHAR(MAX) NULL, -- JSON con campos internos (maxCPC, dailyBudget, timezone, etc.)
         CreatedAt DATETIME NOT NULL DEFAULT GETDATE(),
         UpdatedAt DATETIME NOT NULL DEFAULT GETDATE(),
         CONSTRAINT FK_Campaigns_Segments FOREIGN KEY (SegmentId) REFERENCES Segments(Id)
+      )
+    END
+  `);
+
+  // Agregar columna InternalConfig a tabla Campaigns existente (si no existe)
+  await pool.request().query(`
+    IF NOT EXISTS (SELECT * FROM sys.columns WHERE object_id = OBJECT_ID('Campaigns') AND name = 'InternalConfig')
+    BEGIN
+      ALTER TABLE Campaigns 
+      ADD InternalConfig NVARCHAR(MAX) NULL
+      PRINT 'Columna InternalConfig agregada a tabla Campaigns'
+    END
+    ELSE
+    BEGIN
+      PRINT 'Columna InternalConfig ya existe en tabla Campaigns'
+    END
+  `);
+
+  // Notifications - Tabla para sistema de alertas y notificaciones
+  await pool.request().query(`
+    IF NOT EXISTS (SELECT * FROM sys.tables WHERE name = 'Notifications')
+    BEGIN
+      CREATE TABLE Notifications (
+        Id INT IDENTITY(1,1) PRIMARY KEY,
+        UserId INT NULL,
+        CampaignId INT NULL,
+        Type NVARCHAR(50) NOT NULL,
+        Priority NVARCHAR(20) NOT NULL DEFAULT 'medium',
+        Title NVARCHAR(255) NOT NULL,
+        Message NVARCHAR(1000) NOT NULL,
+        Data NVARCHAR(MAX) NULL,
+        Context NVARCHAR(MAX) NULL,
+        CreatedAt DATETIME NOT NULL DEFAULT GETDATE(),
+        ReadAt DATETIME NULL,
+        Acknowledged BIT NOT NULL DEFAULT 0,
+        CONSTRAINT FK_Notifications_Users FOREIGN KEY (UserId) REFERENCES Users(Id),
+        CONSTRAINT FK_Notifications_Campaigns FOREIGN KEY (CampaignId) REFERENCES Campaigns(Id)
       )
     END
   `);
@@ -210,6 +248,154 @@ async function ensureTables() {
     END
   `);
   */
+
+  // Notifications - Sistema de notificaciones interno
+  await pool.request().query(`
+    IF NOT EXISTS (SELECT * FROM sys.tables WHERE name = 'Notifications')
+    BEGIN
+      CREATE TABLE Notifications (
+        Id INT IDENTITY(1,1) PRIMARY KEY,
+        UserId INT NULL,
+        CampaignId INT NULL,
+        Type NVARCHAR(50) NOT NULL,
+        Priority NVARCHAR(20) NOT NULL DEFAULT 'medium',
+        Title NVARCHAR(255) NOT NULL,
+        Message NVARCHAR(1000) NOT NULL,
+        Data NVARCHAR(MAX) NULL,
+        Context NVARCHAR(MAX) NULL,
+        CreatedAt DATETIME NOT NULL DEFAULT GETDATE(),
+        ReadAt DATETIME NULL,
+        Acknowledged BIT NOT NULL DEFAULT 0
+      )
+      
+      -- Índices para performance
+      CREATE INDEX IX_Notifications_UserId ON Notifications(UserId);
+      CREATE INDEX IX_Notifications_CampaignId ON Notifications(CampaignId);
+      CREATE INDEX IX_Notifications_Type ON Notifications(Type);
+      CREATE INDEX IX_Notifications_CreatedAt ON Notifications(CreatedAt);
+      CREATE INDEX IX_Notifications_ReadAt ON Notifications(ReadAt);
+    END
+  `);
+
+  // Users - Tabla para autenticación de usuarios
+  await pool.request().query(`
+    IF NOT EXISTS (SELECT * FROM sys.tables WHERE name = 'Users')
+    BEGIN
+      CREATE TABLE Users (
+        Id BIGINT IDENTITY(1,1) PRIMARY KEY,
+        Email NVARCHAR(255) NOT NULL UNIQUE,
+        FirstName NVARCHAR(255) NOT NULL,
+        LastName NVARCHAR(255) NOT NULL,
+        Company NVARCHAR(255) NOT NULL,
+        Website NVARCHAR(500) NULL,
+        Phone NVARCHAR(50) NOT NULL,
+        PasswordHash NVARCHAR(255) NULL, -- Para autenticación tradicional
+        Image NVARCHAR(500) NULL,
+        GoogleId NVARCHAR(100) NULL, -- Para autenticación Google
+        Role NVARCHAR(50) NOT NULL DEFAULT 'user',
+        IsActive BIT NOT NULL DEFAULT 1,
+        CreatedAt DATETIME2 NOT NULL DEFAULT GETDATE(),
+        UpdatedAt DATETIME2 NOT NULL DEFAULT GETDATE()
+      )
+      
+      -- Índices para performance
+      CREATE UNIQUE INDEX IX_Users_Email ON Users(Email);
+      CREATE INDEX IX_Users_GoogleId ON Users(GoogleId);
+      CREATE INDEX IX_Users_Active ON Users(IsActive);
+      
+      PRINT 'Tabla Users creada exitosamente'
+    END
+    ELSE
+    BEGIN
+      PRINT 'Tabla Users ya existe'
+    END
+  `);
+
+  // Agregar columnas faltantes a tabla Users existente
+  await pool.request().query(`
+    -- Agregar columna FirstName si no existe
+    IF NOT EXISTS (SELECT * FROM sys.columns WHERE object_id = OBJECT_ID('Users') AND name = 'FirstName')
+    BEGIN
+      ALTER TABLE Users ADD FirstName NVARCHAR(255) NULL
+      PRINT 'Columna FirstName agregada a tabla Users'
+    END
+    
+    -- Agregar columna LastName si no existe
+    IF NOT EXISTS (SELECT * FROM sys.columns WHERE object_id = OBJECT_ID('Users') AND name = 'LastName')
+    BEGIN
+      ALTER TABLE Users ADD LastName NVARCHAR(255) NULL
+      PRINT 'Columna LastName agregada a tabla Users'
+    END
+    
+    -- Agregar columna Company si no existe
+    IF NOT EXISTS (SELECT * FROM sys.columns WHERE object_id = OBJECT_ID('Users') AND name = 'Company')
+    BEGIN
+      ALTER TABLE Users ADD Company NVARCHAR(255) NULL
+      PRINT 'Columna Company agregada a tabla Users'
+    END
+    
+    -- Agregar columna Website si no existe
+    IF NOT EXISTS (SELECT * FROM sys.columns WHERE object_id = OBJECT_ID('Users') AND name = 'Website')
+    BEGIN
+      ALTER TABLE Users ADD Website NVARCHAR(500) NULL
+      PRINT 'Columna Website agregada a tabla Users'
+    END
+    
+    -- Agregar columna Phone si no existe
+    IF NOT EXISTS (SELECT * FROM sys.columns WHERE object_id = OBJECT_ID('Users') AND name = 'Phone')
+    BEGIN
+      ALTER TABLE Users ADD Phone NVARCHAR(50) NULL
+      PRINT 'Columna Phone agregada a tabla Users'
+    END
+    
+    -- Agregar columna PasswordHash si no existe
+    IF NOT EXISTS (SELECT * FROM sys.columns WHERE object_id = OBJECT_ID('Users') AND name = 'PasswordHash')
+    BEGIN
+      ALTER TABLE Users ADD PasswordHash NVARCHAR(255) NULL
+      PRINT 'Columna PasswordHash agregada a tabla Users'
+    END
+    
+    -- Agregar columna GoogleId si no existe
+    IF NOT EXISTS (SELECT * FROM sys.columns WHERE object_id = OBJECT_ID('Users') AND name = 'GoogleId')
+    BEGIN
+      ALTER TABLE Users ADD GoogleId NVARCHAR(100) NULL
+      PRINT 'Columna GoogleId agregada a tabla Users'
+    END
+    
+    -- Agregar columna Image si no existe
+    IF NOT EXISTS (SELECT * FROM sys.columns WHERE object_id = OBJECT_ID('Users') AND name = 'Image')
+    BEGIN
+      ALTER TABLE Users ADD Image NVARCHAR(500) NULL
+      PRINT 'Columna Image agregada a tabla Users'
+    END
+    
+    -- Agregar columna Role si no existe
+    IF NOT EXISTS (SELECT * FROM sys.columns WHERE object_id = OBJECT_ID('Users') AND name = 'Role')
+    BEGIN
+      ALTER TABLE Users ADD Role NVARCHAR(50) NOT NULL DEFAULT 'user'
+      PRINT 'Columna Role agregada a tabla Users'
+    END
+    
+    -- Agregar columna IsActive si no existe
+    IF NOT EXISTS (SELECT * FROM sys.columns WHERE object_id = OBJECT_ID('Users') AND name = 'IsActive')
+    BEGIN
+      ALTER TABLE Users ADD IsActive BIT NOT NULL DEFAULT 1
+      PRINT 'Columna IsActive agregada a tabla Users'
+    END
+  `);
+
+  // Agregar relación UserId a tabla Campaigns si no existe
+  await pool.request().query(`
+    IF NOT EXISTS (SELECT * FROM sys.columns WHERE object_id = OBJECT_ID('Campaigns') AND name = 'UserId')
+    BEGIN
+      ALTER TABLE Campaigns ADD UserId BIGINT NULL
+      PRINT 'Columna UserId agregada a tabla Campaigns'
+    END
+    ELSE
+    BEGIN
+      PRINT 'Columna UserId ya existe en tabla Campaigns'
+    END
+  `);
 
   console.log('🎯 Todas las tablas están disponibles');
 }

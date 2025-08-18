@@ -43,7 +43,7 @@ function setCachedData(key, data) {
 
 // 🔧 Performance feature flags
 const USE_INDEX_HINTS = process.env.USE_INDEX_HINTS === 'true';
-// require('./scheduler'); // Temporarily disabled for debugging
+require('./scheduler'); // Enabled for metrics sync
 
 // ✅ SETUP LOGGING TO FILE
 const originalConsoleLog = console.log;
@@ -96,40 +96,35 @@ setTimeout(() => {
     console.error('❌ Error iniciando performance tracker:', error.message);
   }
 }, 5000); // Esperar 5 segundos para que se complete la inicialización
-// Manual CORS middleware to ensure headers are set correctly
+// CORS configuration (production-ready)
+const allowedOrigins = [
+  'http://localhost:3000', 'http://127.0.0.1:3000', // Landing (Next.js)
+  'http://localhost:3004', 'http://127.0.0.1:3004',
+  'http://localhost:3006', 'http://127.0.0.1:3006',
+  'http://localhost:3007', 'http://127.0.0.1:3007',
+  // Add prod domains via env: ALLOWED_ORIGINS=https://app.example.com,https://landing.example.com
+  ...(process.env.ALLOWED_ORIGINS ? process.env.ALLOWED_ORIGINS.split(',') : [])
+];
+
+const corsOptions = {
+  origin: allowedOrigins,
+  credentials: true,
+  methods: ['GET','HEAD','PUT','PATCH','POST','DELETE','OPTIONS'],
+  allowedHeaders: ['Content-Type','Authorization','Origin','Accept','Cache-Control','Pragma','Expires','If-None-Match','If-Modified-Since'],
+  exposedHeaders: ['Content-Length','Content-Type','Date','Server'],
+};
+
+app.use(cors(corsOptions));
+// Express 5 + path-to-regexp v6 no admite '*', usar '(.*)'
+app.options('(.*)', cors(corsOptions));
+
+// Ensure ACAO is present for allowed origins (production-safe)
 app.use((req, res, next) => {
   const origin = req.headers.origin;
-  console.log('🔍 CORS Request from origin:', origin);
-  
-  // Allow specific origins
-  const allowedOrigins = [
-    'http://localhost:3007',
-    'http://127.0.0.1:3007',
-    'http://localhost:3004',
-    'http://127.0.0.1:3004',
-    'http://localhost:3006',
-    'http://127.0.0.1:3006'
-  ];
-  
-  if (allowedOrigins.includes(origin)) {
-    res.setHeader('Access-Control-Allow-Origin', origin);
-    console.log('✅ CORS: Allowed origin', origin);
+  if (origin && allowedOrigins.includes(origin)) {
+    res.header('Access-Control-Allow-Origin', origin);
+    res.header('Vary', 'Origin');
   }
-  
-  res.setHeader('Access-Control-Allow-Credentials', 'true');
-  res.setHeader('Access-Control-Allow-Methods', 'GET,HEAD,PUT,PATCH,POST,DELETE,OPTIONS');
-  res.setHeader('Access-Control-Allow-Headers', 'Content-Type,Authorization,Origin,Accept,Cache-Control,Pragma,Expires,If-None-Match,If-Modified-Since');
-  res.setHeader('Access-Control-Expose-Headers', 'Content-Length,Content-Type,Date,Server');
-  res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
-  res.setHeader('Pragma', 'no-cache');
-  res.setHeader('Expires', '0');
-  
-  if (req.method === 'OPTIONS') {
-    console.log('🔧 CORS: Handling preflight request');
-    res.status(204).end();
-    return;
-  }
-  
   next();
 });
 app.use(express.json());
@@ -160,6 +155,26 @@ app.use('/api/users', userCredentialsRouter);
 app.use('/api/credentials', userCredentialsRouter);
 app.use('/api/metrics', metricsRouter);
 app.use('/api/offers', offersRouter);
+
+// Router para control de límites internos
+const internalLimitsRouter = require('./src/routes/internalLimits');
+app.use('/api/internal-limits', internalLimitsRouter);
+
+// Router para sistema de notificaciones
+const notificationsRouter = require('./src/routes/notifications');
+app.use('/api/notifications', notificationsRouter);
+
+// Router de demostración para middleware de límites por canal
+const channelLimitsDemoRouter = require('./src/routes/channelLimitsDemo');
+app.use('/api/channel-limits-demo', channelLimitsDemoRouter);
+
+// Router para sincronización de métricas
+const metricsSyncRouter = require('./src/routes/metricsSync');
+app.use('/api/metrics-sync', metricsSyncRouter);
+
+// Router para autenticación (Google OAuth)
+const authRouter = require('./src/routes/auth');
+app.use('/api/auth', authRouter);
 
 // Cargar especificación OpenAPI desde swagger.yaml
 const swaggerDocument = YAML.load(path.join(__dirname, 'swagger.yaml'));

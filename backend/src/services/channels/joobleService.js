@@ -1,4 +1,5 @@
 const axios = require('axios');
+const { ChannelLimitsMiddleware } = require('../../middleware/channelLimitsMiddleware');
 
 /**
  * JoobleService - Integración con Jooble Auction API
@@ -20,6 +21,9 @@ class JoobleService {
       defaultTimeout: config.timeout || 30000,
       ...config
     };
+    
+    // Inicializar middleware de límites internos
+    this.limitsMiddleware = new ChannelLimitsMiddleware();
     
     if (!this.config.apiKey) {
       console.warn('⚠️ JOOBLE_API_KEY no configurada. Funcionará en modo simulación.');
@@ -56,8 +60,44 @@ class JoobleService {
       // Construir datos internos (NO se envían a Jooble)
       const internalData = this.buildInternalData(campaignData, offers, budgetInfo);
       
+      // Validar segmentationRules antes de enviar
+      const validation = this.validateSegmentationRules(payloadToJooble.segmentationRules);
+      if (!validation.valid) {
+        console.error('❌ SegmentationRules inválidas:', validation.errors);
+        throw new Error(`Validación de segmentationRules falló: ${validation.errors.join(', ')}`);
+      }
+      
+      // ✨ MIDDLEWARE: Validar límites internos antes de enviar a Jooble
+      const limitsValidation = await this.limitsMiddleware.validateBeforeSend(
+        'jooble', 
+        campaignData, 
+        payloadToJooble, 
+        internalData
+      );
+      
+      if (!limitsValidation.valid) {
+        console.error('❌ Validación de límites internos falló:', limitsValidation.errors);
+        console.warn('⚠️ Warnings:', limitsValidation.warnings);
+        console.log('🎯 Acciones automáticas aplicadas:', limitsValidation.actions);
+        
+        // Si hay errores críticos, no enviar a Jooble
+        const criticalErrors = limitsValidation.errors.filter(error => 
+          error.includes('excede límite') || error.includes('fuera del rango')
+        );
+        
+        if (criticalErrors.length > 0) {
+          throw new Error(`Límites internos excedidos: ${criticalErrors.join(', ')}`);
+        }
+      } else {
+        console.log('✅ Validación de límites internos exitosa');
+        if (limitsValidation.warnings.length > 0) {
+          console.warn('⚠️ Warnings de límites:', limitsValidation.warnings);
+        }
+      }
+      
       console.log(`📤 Payload-to-jooble: ${JSON.stringify(payloadToJooble, null, 2)}`);
       console.log(`🗄️ Datos internos conservados para control: ${Object.keys(internalData).join(', ')}`);
+      console.log(`✅ SegmentationRules validadas: ${payloadToJooble.segmentationRules.length} reglas`);
       
       if (!this.config.apiKey) {
         // Modo simulación - mostrar ambos payloads y ejemplo de URL
@@ -76,8 +116,20 @@ class JoobleService {
         console.log(`🔍 Verificación - URL ejemplo con UTMs: ${offersWithTracking[0].trackingUrl}`);
       }
       
-      // TODO: Guardar internalData en nuestra BD para control de límites
-      // await this.saveInternalCampaignData(response.data.campaignId, internalData);
+      // Guardar internalData en nuestra BD para control de límites
+      await this.saveInternalCampaignData(campaignData.id, internalData);
+      
+      // ✨ MIDDLEWARE: Iniciar monitoreo post-envío
+      const monitoringResult = await this.limitsMiddleware.monitorAfterSend(
+        'jooble', 
+        campaignData.id, 
+        response.data
+      );
+      
+      console.log('📊 Monitoreo post-envío iniciado:', {
+        alerts: monitoringResult.alerts.length,
+        actions: monitoringResult.actions.length
+      });
       
       return {
         success: true,
@@ -88,6 +140,8 @@ class JoobleService {
         payloadSent: payloadToJooble, // Para auditoría
         offersWithTracking: offersWithTracking, // Ofertas con UTMs aplicados
         exampleTrackingUrl: offersWithTracking[0]?.trackingUrl, // URL ejemplo para verificación
+        limitsValidation: limitsValidation, // Resultado de validación de límites
+        monitoring: monitoringResult, // Resultado de monitoreo inicial
         timestamp: new Date().toISOString()
       };
       
@@ -329,6 +383,9 @@ class JoobleService {
         });
       });
       console.log(`📋 Agregados ${titlesToSend.length}/5 títulos: ${titlesToSend.join(', ')}`);
+      if (uniqueTitles.length > 5) {
+        console.log(`⚠️ ${uniqueTitles.length - 5} títulos omitidos por límite de Jooble`);
+      }
     }
     
     // TIPO 2: Empresas (máx 3, operator=equals)
@@ -343,10 +400,13 @@ class JoobleService {
         });
       });
       console.log(`🏢 Agregadas ${companiesToSend.length}/3 empresas: ${companiesToSend.join(', ')}`);
+      if (uniqueCompanies.length > 3) {
+        console.log(`⚠️ ${uniqueCompanies.length - 3} empresas omitidas por límite de Jooble`);
+      }
     }
     
     // TIPO 4: Regiones (operator=in, sin límite explícito pero deduplicado)
-    const uniqueRegions = [...new Set(offers.map(o => o.City || o.Region).filter(Boolean))];
+    const uniqueRegions = [...new Set(offers.map(o => o.location || o.City || o.Region).filter(Boolean))];
     if (uniqueRegions.length > 0) {
       // Deduplicar y mantener razonable (máx 10 para performance)
       const regionsToSend = uniqueRegions.slice(0, 10);
@@ -356,10 +416,66 @@ class JoobleService {
         operator: 'in'
       });
       console.log(`📍 Agregadas ${regionsToSend.length} regiones: ${regionsToSend.join(', ')}`);
+      if (uniqueRegions.length > 10) {
+        console.log(`⚠️ ${uniqueRegions.length - 10} ubicaciones omitidas por performance`);
+      }
     }
     
     console.log(`✅ SegmentationRules para Jooble: ${rules.length} reglas generadas`);
     return rules;
+  }
+
+  /**
+   * Valida que las segmentationRules cumplan con los límites de Jooble
+   * @param {Array} rules - Reglas de segmentación a validar
+   * @returns {Object} Resultado de validación
+   */
+  validateSegmentationRules(rules) {
+    const validation = {
+      valid: true,
+      errors: [],
+      warnings: []
+    };
+    
+    const titleRules = rules.filter(r => r.type === 1);
+    const companyRules = rules.filter(r => r.type === 2);
+    const locationRules = rules.filter(r => r.type === 4);
+    
+    // Validar límite de títulos
+    if (titleRules.length > 5) {
+      validation.valid = false;
+      validation.errors.push(`Demasiados títulos: ${titleRules.length}/5. Máximo permitido: 5`);
+    }
+    
+    // Validar límite de empresas
+    if (companyRules.length > 3) {
+      validation.valid = false;
+      validation.errors.push(`Demasiadas empresas: ${companyRules.length}/3. Máximo permitido: 3`);
+    }
+    
+    // Validar operadores
+    titleRules.forEach((rule, index) => {
+      if (rule.operator !== 'contains') {
+        validation.errors.push(`Título ${index + 1}: operador debe ser 'contains', encontrado '${rule.operator}'`);
+        validation.valid = false;
+      }
+    });
+    
+    companyRules.forEach((rule, index) => {
+      if (rule.operator !== 'equals') {
+        validation.errors.push(`Empresa ${index + 1}: operador debe ser 'equals', encontrado '${rule.operator}'`);
+        validation.valid = false;
+      }
+    });
+    
+    locationRules.forEach((rule, index) => {
+      if (rule.operator !== 'in') {
+        validation.errors.push(`Ubicación ${index + 1}: operador debe ser 'in', encontrado '${rule.operator}'`);
+        validation.valid = false;
+      }
+    });
+    
+    return validation;
   }
 
   /**
@@ -400,7 +516,7 @@ class JoobleService {
     }
     
     // Regla 4: Regiones incluidas (Region) - SOLO para uso interno
-    const uniqueRegions = [...new Set(offers.map(o => o.City || o.Region).filter(Boolean))];
+    const uniqueRegions = [...new Set(offers.map(o => o.location || o.City || o.Region).filter(Boolean))];
     if (uniqueRegions.length > 0) {
       rules.push({
         type: 4, // Region
@@ -740,6 +856,38 @@ class JoobleService {
       },
       timestamp: new Date().toISOString()
     };
+  }
+
+  /**
+   * Guarda datos internos de la campaña en BD para control de límites
+   * @param {number} campaignId - ID de la campaña en nuestra BD
+   * @param {Object} internalData - Datos internos que NO se envían a Jooble
+   */
+  async saveInternalCampaignData(campaignId, internalData) {
+    if (!campaignId) {
+      console.warn('⚠️ No se puede guardar internalData: campaignId no proporcionado');
+      return;
+    }
+
+    try {
+      const { pool, sql } = require('../db/db');
+      await pool.request()
+        .input('CampaignId', sql.Int, campaignId)
+        .input('InternalConfig', sql.NVarChar(sql.MAX), JSON.stringify(internalData))
+        .query(`
+          UPDATE Campaigns 
+          SET InternalConfig = @InternalConfig,
+              UpdatedAt = GETDATE()
+          WHERE Id = @CampaignId
+        `);
+
+      console.log(`💾 Datos internos guardados para campaña ${campaignId}`);
+      console.log(`🗄️ InternalConfig: ${JSON.stringify(internalData, null, 2)}`);
+
+    } catch (error) {
+      console.error(`❌ Error guardando datos internos de campaña ${campaignId}: ${error.message}`);
+      // No lanzar error para que no falle la creación de campaña
+    }
   }
 
   /**

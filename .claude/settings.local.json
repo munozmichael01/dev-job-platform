@@ -28,7 +28,12 @@
       "Bash(timeout:*)",
       "Bash(time curl:*)",
       "Bash(npx create-next-app:*)",
-      "Bash(-H \"Content-Type: application/json\")"
+      "Bash(-H \"Content-Type: application/json\")",
+      "Bash(sqlcmd:*)",
+      "Bash(start http://localhost:3006/credenciales)",
+      "Bash(start http://localhost:3006)",
+      "Bash(start http://localhost:3000)",
+      "Bash(start http://localhost:3000/login)"
     ],
     "deny": []
   }
