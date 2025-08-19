@@ -1,6 +1,6 @@
 'use client'
 
-import { BarChart3, Briefcase, Database, Home, Megaphone, Settings, Users, Zap, Shield, Moon, Sun } from "lucide-react"
+import { BarChart3, Briefcase, Database, Home, Megaphone, Settings, Users, Zap, Shield, Moon, Sun, LogOut } from "lucide-react"
 import {
   Sidebar,
   SidebarContent,
@@ -18,6 +18,7 @@ import Link from "next/link"
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar"
 import { Button } from "@/components/ui/button"
 import { useTheme } from "next-themes"
+import { useAuth } from "@/contexts/AuthContext"
 
 const menuItems = [
   {
@@ -72,6 +73,7 @@ const adminItems = [
 
 export function AppSidebar() {
   const { theme, setTheme } = useTheme()
+  const { user, logout, isAuthenticated } = useAuth()
 
   return (
     <Sidebar>
@@ -142,16 +144,44 @@ export function AppSidebar() {
             </div>
           </SidebarMenuItem>
           <SidebarMenuItem>
-            <SidebarMenuButton>
-              <Avatar className="h-6 w-6">
-                <AvatarImage src="/placeholder.svg?height=24&width=24" />
-                <AvatarFallback>TJ</AvatarFallback>
-              </Avatar>
-              <div className="flex flex-col">
-                <span className="text-sm">Turijobs</span>
-                <span className="text-xs text-muted-foreground">Cliente</span>
+            <div className="flex items-center justify-between px-2 py-1">
+              <div className="flex items-center gap-2">
+                <Avatar className="h-6 w-6">
+                  <AvatarImage src="/placeholder.svg?height=24&width=24" />
+                  <AvatarFallback>
+                    {isAuthenticated && user 
+                      ? `${user.firstName[0]}${user.lastName[0]}`.toUpperCase()
+                      : 'TJ'
+                    }
+                  </AvatarFallback>
+                </Avatar>
+                <div className="flex flex-col">
+                  <span className="text-sm">
+                    {isAuthenticated && user 
+                      ? `${user.firstName} ${user.lastName}`
+                      : 'Usuario'
+                    }
+                  </span>
+                  <span className="text-xs text-muted-foreground">
+                    {isAuthenticated && user 
+                      ? user.role === 'superadmin' ? 'Super Admin' : 'Usuario'
+                      : 'No autenticado'
+                    }
+                  </span>
+                </div>
               </div>
-            </SidebarMenuButton>
+              {isAuthenticated && (
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  onClick={logout}
+                  className="h-8 w-8 text-muted-foreground hover:text-foreground"
+                  title="Cerrar sesión"
+                >
+                  <LogOut className="h-4 w-4" />
+                </Button>
+              )}
+            </div>
           </SidebarMenuItem>
         </SidebarMenu>
       </SidebarFooter>

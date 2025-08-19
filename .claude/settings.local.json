@@ -33,7 +33,11 @@
       "Bash(start http://localhost:3006/credenciales)",
       "Bash(start http://localhost:3006)",
       "Bash(start http://localhost:3000)",
-      "Bash(start http://localhost:3000/login)"
+      "Bash(start http://localhost:3000/login)",
+      "Bash(start http://localhost:3006/conexiones)",
+      "Bash(start C:/Dev/job-platform/test-login-flow.html)",
+      "Bash(start http://localhost:3006/login)",
+      "Bash(awk:*)"
     ],
     "deny": []
   }

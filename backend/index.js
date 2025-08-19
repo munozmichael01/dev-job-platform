@@ -115,8 +115,6 @@ const corsOptions = {
 };
 
 app.use(cors(corsOptions));
-// Express 5 + path-to-regexp v6 no admite '*', usar '(.*)'
-app.options('(.*)', cors(corsOptions));
 
 // Ensure ACAO is present for allowed origins (production-safe)
 app.use((req, res, next) => {
@@ -196,7 +194,11 @@ app.get('/debug', (req, res) => {
 });
 
 // GET /job-offers/locations - Endpoint para opciones de ubicación con filtros dependientes
-app.get('/job-offers/locations', async (req, res) => {
+app.get('/job-offers/locations', 
+  // ✅ AGREGAR MIDDLEWARE DE AUTENTICACIÓN
+  require('./src/middleware/authMiddleware').addUserToRequest,
+  require('./src/middleware/authMiddleware').requireAuth,
+  async (req, res) => {
   const origin = req.headers.origin;
   const allowedOrigins = ['http://localhost:3007', 'http://127.0.0.1:3007', 'http://localhost:3004', 'http://127.0.0.1:3004', 'http://localhost:3006', 'http://127.0.0.1:3006'];
   
@@ -229,6 +231,16 @@ app.get('/job-offers/locations', async (req, res) => {
     request.timeout = timeoutMs;
     
     let whereConditions = ['(City IS NOT NULL OR Region IS NOT NULL)', 'StatusId = 1'];
+    
+    // ✅ FILTRAR POR USUARIO - Solo superadmin ve todo
+    const { isSuperAdmin } = require('./src/middleware/authMiddleware');
+    if (!isSuperAdmin(req)) {
+      whereConditions.push('UserId = @currentUserId');
+      request.input('currentUserId', sql.BigInt, req.userId);
+      console.log(`🔒 Filtrando locations para usuario ${req.userId} (${req.user.role})`);
+    } else {
+      console.log(`🔑 Super admin: viendo todas las locations sin filtro`);
+    }
 
     // Agregar filtros dependientes
     if (status && status !== 'all') {
@@ -272,7 +284,7 @@ app.get('/job-offers/locations', async (req, res) => {
     const hasSearch = q && q.trim();
     
     const locationQuery = `
-      SELECT DISTINCT TOP 30
+      SELECT DISTINCT TOP 200
         CASE 
           WHEN City IS NOT NULL AND Region IS NOT NULL AND Region != '' 
           THEN CONCAT(City, ', ', Region)
@@ -325,7 +337,11 @@ app.get('/job-offers/locations', async (req, res) => {
 });
 
 // GET /job-offers/sectors - Endpoint para opciones de sector con filtros dependientes
-app.get('/job-offers/sectors', async (req, res) => {
+app.get('/job-offers/sectors', 
+  // ✅ AGREGAR MIDDLEWARE DE AUTENTICACIÓN
+  require('./src/middleware/authMiddleware').addUserToRequest,
+  require('./src/middleware/authMiddleware').requireAuth,
+  async (req, res) => {
   const origin = req.headers.origin;
   const allowedOrigins = ['http://localhost:3007', 'http://127.0.0.1:3007', 'http://localhost:3004', 'http://127.0.0.1:3004', 'http://localhost:3006', 'http://127.0.0.1:3006'];
   
@@ -359,6 +375,16 @@ app.get('/job-offers/sectors', async (req, res) => {
     request.timeout = timeoutMs;
     
     let whereConditions = ['Sector IS NOT NULL', 'Sector != \'\'', 'StatusId = 1'];
+    
+    // ✅ FILTRAR POR USUARIO - Solo superadmin ve todo  
+    const { isSuperAdmin } = require('./src/middleware/authMiddleware');
+    if (!isSuperAdmin(req)) {
+      whereConditions.push('UserId = @currentUserId');
+      request.input('currentUserId', sql.BigInt, req.userId);
+      console.log(`🔒 Filtrando sectors para usuario ${req.userId} (${req.user.role})`);
+    } else {
+      console.log(`🔑 Super admin: viendo todos los sectors sin filtro`);
+    }
 
     // Agregar filtros dependientes
     if (status && status !== 'all') {
@@ -403,7 +429,7 @@ app.get('/job-offers/sectors', async (req, res) => {
     const hasSearch = q && q.trim();
     
     const sectorQuery = `
-      SELECT DISTINCT TOP 25 Sector
+      SELECT DISTINCT TOP 50 Sector
       FROM JobOffers WITH (NOLOCK)
       WHERE ${whereConditions.join(' AND ')}
         AND Sector IS NOT NULL AND Sector != ''
@@ -447,7 +473,11 @@ app.get('/job-offers/sectors', async (req, res) => {
 });
 
 // GET /job-offers/external-ids - Endpoint para opciones de ExternalId con filtros dependientes
-app.get('/job-offers/external-ids', async (req, res) => {
+app.get('/job-offers/external-ids', 
+  // ✅ AGREGAR MIDDLEWARE DE AUTENTICACIÓN
+  require('./src/middleware/authMiddleware').addUserToRequest,
+  require('./src/middleware/authMiddleware').requireAuth,
+  async (req, res) => {
   const origin = req.headers.origin;
   const allowedOrigins = ['http://localhost:3007', 'http://127.0.0.1:3007', 'http://localhost:3004', 'http://127.0.0.1:3004', 'http://localhost:3006', 'http://127.0.0.1:3006'];
   
@@ -480,6 +510,16 @@ app.get('/job-offers/external-ids', async (req, res) => {
     request.timeout = timeoutMs;
     
     let whereConditions = ['ExternalId IS NOT NULL', 'ExternalId != \'\'', 'StatusId = 1'];
+    
+    // ✅ FILTRAR POR USUARIO - Solo superadmin ve todo
+    const { isSuperAdmin } = require('./src/middleware/authMiddleware');
+    if (!isSuperAdmin(req)) {
+      whereConditions.push('UserId = @currentUserId');
+      request.input('currentUserId', sql.BigInt, req.userId);
+      console.log(`🔒 Filtrando external IDs para usuario ${req.userId} (${req.user.role})`);
+    } else {
+      console.log(`🔑 Super admin: viendo todos los external IDs sin filtro`);
+    }
 
     // Agregar filtros dependientes
     if (status && status !== 'all') {
@@ -566,7 +606,11 @@ app.get('/job-offers/external-ids', async (req, res) => {
 });
 
 // GET /job-offers - NUEVA ARQUITECTURA SARGABLE
-app.get('/job-offers', async (req, res) => {
+app.get('/job-offers', 
+  // ✅ AGREGAR MIDDLEWARE DE AUTENTICACIÓN
+  require('./src/middleware/authMiddleware').addUserToRequest,
+  require('./src/middleware/authMiddleware').requireAuth,
+  async (req, res) => {
   // Timeout específico de 30s para este endpoint
   req.setTimeout(30000);
   res.setTimeout(30000);
@@ -580,7 +624,7 @@ app.get('/job-offers', async (req, res) => {
   }
   res.setHeader('Access-Control-Allow-Credentials', 'true');
 
-  console.log("🔍 GET /job-offers - NUEVA ARQUITECTURA SARGABLE from origin:", origin);
+  console.log(`🔍 GET /job-offers - Usuario: ${req.user.email} (${req.user.role}) - ID: ${req.userId}`);
 
   try {
     // Intentar conectar con fallback a mock data
@@ -702,6 +746,16 @@ app.get('/job-offers', async (req, res) => {
     // Construir query SQL dinámico OPTIMIZADO
     let whereConditions = [];
     let queryParams = [];
+    
+    // ✅ FILTRAR POR USUARIO - Solo superadmin ve todo
+    const { isSuperAdmin } = require('./src/middleware/authMiddleware');
+    if (!isSuperAdmin(req)) {
+      whereConditions.push('jo.UserId = @currentUserId');
+      queryParams.push({ name: 'currentUserId', type: sql.BigInt, value: req.userId });
+      console.log(`🔒 Filtrando ofertas para usuario ${req.userId} (${req.user.role})`);
+    } else {
+      console.log(`🔑 Super admin: viendo todas las ofertas sin filtro`);
+    }
     
     // Agregar condición de keyset pagination si aplica
     if (usingKeysetPagination) {
@@ -1173,7 +1227,11 @@ app.get('/job-offers', async (req, res) => {
 });
 
 // ✅ ENDPOINT PARA CAMBIAR ESTADO DE OFERTAS
-app.put('/job-offers/:id/status', async (req, res) => {
+app.put('/job-offers/:id/status', 
+  // ✅ AGREGAR MIDDLEWARE DE AUTENTICACIÓN
+  require('./src/middleware/authMiddleware').addUserToRequest,
+  require('./src/middleware/authMiddleware').requireAuth,
+  async (req, res) => {
   const origin = req.headers.origin;
   console.log(`🔄 PUT /job-offers/:id/status - ID: ${req.params.id} from origin:`, origin);
   
@@ -1213,10 +1271,20 @@ app.put('/job-offers/:id/status', async (req, res) => {
       });
     }
 
-    // Verificar que la oferta existe
-    const checkResult = await pool.request()
-      .input('Id', sql.Int, offerId)
-      .query('SELECT Id, Title, StatusId FROM JobOffers WHERE Id = @Id');
+    // Verificar que la oferta existe Y que pertenece al usuario (o es superadmin)
+    const { isSuperAdmin } = require('./src/middleware/authMiddleware');
+    let checkQuery = 'SELECT Id, Title, StatusId FROM JobOffers WHERE Id = @Id';
+    const checkRequest = pool.request().input('Id', sql.Int, offerId);
+    
+    if (!isSuperAdmin(req)) {
+      checkQuery += ' AND UserId = @currentUserId';
+      checkRequest.input('currentUserId', sql.BigInt, req.userId);
+      console.log(`🔒 Verificando oferta ${offerId} para usuario ${req.userId}`);
+    } else {
+      console.log(`🔑 Super admin: verificando oferta ${offerId} sin filtro`);
+    }
+    
+    const checkResult = await checkRequest.query(checkQuery);
 
     if (checkResult.recordset.length === 0) {
       return res.status(404).json({
@@ -1271,7 +1339,8 @@ app.post('/job-offers', async (req, res) => {
     ExternalId, Title, JobTitle, Description, CompanyName, Sector, Address,
     Country, CountryId, Region, RegionId, City, CityId, Postcode,
     Latitude, Longitude, Vacancies, SalaryMin, SalaryMax, JobType,
-    ExternalUrl, ApplicationUrl, Budget, ApplicationsGoal, PublicationDate
+    ExternalUrl, ApplicationUrl, Budget, ApplicationsGoal, PublicationDate,
+    UserId = 1 // Por defecto user 1, en producción obtener de JWT/session
   } = req.body;
 
   try {
@@ -1301,18 +1370,19 @@ app.post('/job-offers', async (req, res) => {
       .input('Budget', sql.Decimal(10, 2), Budget)
       .input('ApplicationsGoal', sql.Int, ApplicationsGoal)
       .input('PublicationDate', sql.DateTime, PublicationDate)
+      .input('UserId', sql.BigInt, UserId)
       .query(`
         INSERT INTO JobOffers (
           ExternalId, Title, JobTitle, Description, CompanyName, Sector, Address,
           Country, CountryId, Region, RegionId, City, CityId, Postcode,
           Latitude, Longitude, Vacancies, SalaryMin, SalaryMax, JobType,
-          ExternalUrl, ApplicationUrl, Budget, ApplicationsGoal, PublicationDate
+          ExternalUrl, ApplicationUrl, Budget, ApplicationsGoal, PublicationDate, UserId
         )
         VALUES (
           @ExternalId, @Title, @JobTitle, @Description, @CompanyName, @Sector, @Address,
           @Country, @CountryId, @Region, @RegionId, @City, @CityId, @Postcode,
           @Latitude, @Longitude, @Vacancies, @SalaryMin, @SalaryMax, @JobType,
-          @ExternalUrl, @ApplicationUrl, @Budget, @ApplicationsGoal, @PublicationDate
+          @ExternalUrl, @ApplicationUrl, @Budget, @ApplicationsGoal, @PublicationDate, @UserId
         )
       `);
 
@@ -1379,7 +1449,11 @@ app.get('/job-offers/job-types', async (req, res) => {
 });
 
 // GET /job-offers/companies - Empresas (CompanyName) de ofertas ACTIVAS con filtros
-app.get('/job-offers/companies', async (req, res) => {
+app.get('/job-offers/companies', 
+  // ✅ AGREGAR MIDDLEWARE DE AUTENTICACIÓN
+  require('./src/middleware/authMiddleware').addUserToRequest,
+  require('./src/middleware/authMiddleware').requireAuth,
+  async (req, res) => {
   const origin = req.headers.origin;
   const allowedOrigins = ['http://localhost:3007','http://127.0.0.1:3007','http://localhost:3004','http://127.0.0.1:3004','http://localhost:3006','http://127.0.0.1:3006'];
   if (allowedOrigins.includes(origin)) res.setHeader('Access-Control-Allow-Origin', origin);
@@ -1414,6 +1488,16 @@ app.get('/job-offers/companies', async (req, res) => {
     request.timeout = timeoutMs;
     
     const whereConditions = ['CompanyName IS NOT NULL', "CompanyName != ''", 'StatusId = 1'];
+    
+    // ✅ FILTRAR POR USUARIO - Solo superadmin ve todo
+    const { isSuperAdmin } = require('./src/middleware/authMiddleware');
+    if (!isSuperAdmin(req)) {
+      whereConditions.push('UserId = @currentUserId');
+      request.input('currentUserId', sql.BigInt, req.userId);
+      console.log(`🔒 Filtrando companies para usuario ${req.userId} (${req.user.role})`);
+    } else {
+      console.log(`🔑 Super admin: viendo todas las companies sin filtro`);
+    }
 
     // Filtros aplicados
     const cleanStatus = status && status !== 'all' ? status : null;
@@ -1454,7 +1538,7 @@ app.get('/job-offers/companies', async (req, res) => {
     const hasSearch = q && q.trim();
     
     const companyQuery = `
-      SELECT DISTINCT TOP 25 CompanyName
+      SELECT DISTINCT TOP 100 CompanyName
       FROM JobOffers WITH (NOLOCK)
       WHERE ${whereConditions.join(' AND ')}
         AND CompanyName IS NOT NULL AND CompanyName != ''
@@ -1489,5 +1573,51 @@ app.get('/job-offers/companies', async (req, res) => {
     }
     
     res.status(500).json({ success: false, error: 'Error interno del servidor', details: e.message });
+  }
+});
+
+// ✅ GET /api/clients - Obtener clients por usuario
+app.get('/api/clients', async (req, res) => {
+  const { userId } = req.query;
+  
+  // CORS Headers
+  const origin = req.headers.origin;
+  const allowedOrigins = ['http://localhost:3006', 'http://127.0.0.1:3006', 'http://localhost:3000', 'http://127.0.0.1:3000'];
+  
+  if (allowedOrigins.includes(origin)) {
+    res.setHeader('Access-Control-Allow-Origin', origin);
+  }
+  res.setHeader('Access-Control-Allow-Credentials', 'true');
+  
+  console.log(`🔍 GET /api/clients - UserId: ${userId}`);
+  
+  try {
+    await poolConnect;
+    
+    let query = 'SELECT Id, Name, UserId, IsActive, CreatedAt FROM Clients';
+    const params = [];
+    
+    if (userId) {
+      query += ' WHERE UserId = @userId';
+      params.push(['userId', sql.BigInt, parseInt(userId)]);
+    }
+    
+    query += ' ORDER BY CreatedAt DESC';
+    
+    const request = pool.request();
+    params.forEach(([name, type, value]) => {
+      request.input(name, type, value);
+    });
+    
+    const result = await request.query(query);
+    
+    console.log(`✅ Clients encontrados: ${result.recordset.length}`);
+    res.json(result.recordset);
+  } catch (error) {
+    console.error('❌ Error obteniendo clients:', error);
+    res.status(500).json({
+      error: 'Error interno del servidor',
+      details: error.message
+    });
   }
 });

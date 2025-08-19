@@ -8,9 +8,21 @@ const JoobleService = require('../services/channels/joobleService');
 const credentialsManager = new CredentialsManager();
 
 // GET /api/users/:userId/credentials - Obtener credenciales del usuario
-router.get('/:userId/credentials', async (req, res) => {
+router.get('/:userId/credentials', 
+  require('../middleware/authMiddleware').addUserToRequest,
+  require('../middleware/authMiddleware').requireAuth,
+  async (req, res) => {
   try {
     const { userId } = req.params;
+    
+    // ✅ VALIDAR QUE EL USUARIO SOLO VEA SUS PROPIAS CREDENCIALES (o sea superadmin)
+    const { isSuperAdmin } = require('../middleware/authMiddleware');
+    if (!isSuperAdmin(req) && parseInt(userId) !== req.userId) {
+      return res.status(403).json({
+        success: false,
+        error: 'No tienes permisos para ver estas credenciales'
+      });
+    }
     
     await poolPromise;
     const result = await pool.request()
@@ -48,6 +60,67 @@ router.get('/:userId/credentials', async (req, res) => {
       createdAt: row.CreatedAt,
       updatedAt: row.UpdatedAt
     }));
+
+    res.json({
+      success: true,
+      channels
+    });
+
+  } catch (error) {
+    console.error('Error obteniendo credenciales:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Error interno del servidor'
+    });
+  }
+});
+
+// GET /api/credentials - Obtener credenciales del usuario actual (desde JWT)
+router.get('/', 
+  require('../middleware/authMiddleware').addUserToRequest,
+  require('../middleware/authMiddleware').requireAuth,
+  async (req, res) => {
+  try {
+    console.log(`🔍 Obteniendo credenciales para usuario ${req.userId} (${req.user.role})`);
+    
+    await poolPromise;
+    const result = await pool.request()
+      .input('userId', req.userId)
+      .query(`
+        SELECT 
+          ChannelId,
+          ChannelName,
+          IsActive,
+          IsValidated,
+          LastValidated,
+          ValidationError,
+          DailyBudgetLimit,
+          MonthlyBudgetLimit,
+          MaxCPA,
+          CreatedAt,
+          UpdatedAt
+        FROM UserChannelCredentials 
+        WHERE UserId = @userId
+        ORDER BY CreatedAt DESC
+      `);
+
+    const channels = result.recordset.map(row => ({
+      channelId: row.ChannelId,
+      channelName: row.ChannelName,
+      isActive: row.IsActive,
+      isValidated: row.IsValidated,
+      lastValidated: row.LastValidated,
+      validationError: row.ValidationError,
+      limits: {
+        dailyBudgetLimit: row.DailyBudgetLimit,
+        monthlyBudgetLimit: row.MonthlyBudgetLimit,
+        maxCPA: row.MaxCPA
+      },
+      createdAt: row.CreatedAt,
+      updatedAt: row.UpdatedAt
+    }));
+
+    console.log(`✅ Credenciales obtenidas: ${channels.length} canales para usuario ${req.userId}`);
 
     res.json({
       success: true,

@@ -9,7 +9,7 @@ import { SidebarTrigger } from "@/components/ui/sidebar"
 import { ArrowLeft, Edit, Pause, Play, Trash2, Megaphone, Target, DollarSign, Users, Calendar, Activity, TrendingUp, AlertTriangle, CheckCircle, Clock } from "lucide-react"
 import Link from "next/link"
 import { useToast } from "@/hooks/use-toast"
-import { fetchCampaign, pauseCampaign, resumeCampaign, deleteCampaign } from "@/lib/api-temp"
+import { useApi } from "@/lib/api"
 
 type Campaign = {
   Id: number
@@ -41,6 +41,7 @@ export default function VerCampanaPage() {
   const router = useRouter()
   const params = useParams()
   const campaignId = params.id as string
+  const api = useApi()
 
   const [campaign, setCampaign] = useState<Campaign | null>(null)
   const [loading, setLoading] = useState(true)
@@ -64,7 +65,7 @@ export default function VerCampanaPage() {
       }
       
       console.log('🔍 Cargando campaña con ID:', numericId)
-      const data = await fetchCampaign(numericId)
+      const data = await api.fetchCampaign(numericId)
       setCampaign(data)
     } catch (error: any) {
       console.error('❌ Error cargando campaña:', error)
@@ -78,7 +79,7 @@ export default function VerCampanaPage() {
   const handlePauseCampaign = async () => {
     if (!campaign) return
     try {
-      await pauseCampaign(campaign.Id)
+      await api.pauseCampaign(campaign.Id)
       toast({ title: "Campaña pausada", description: `La campaña "${campaign.Name}" ha sido pausada exitosamente` })
       loadCampaignData()
     } catch (error: any) {
@@ -89,7 +90,7 @@ export default function VerCampanaPage() {
   const handleResumeCampaign = async () => {
     if (!campaign) return
     try {
-      await resumeCampaign(campaign.Id)
+      await api.resumeCampaign(campaign.Id)
       toast({ title: "Campaña reactivada", description: `La campaña "${campaign.Name}" ha sido reactivada exitosamente` })
       loadCampaignData()
     } catch (error: any) {
@@ -104,7 +105,7 @@ export default function VerCampanaPage() {
     }
     
     try {
-      await deleteCampaign(campaign.Id)
+      await api.deleteCampaign(campaign.Id)
       toast({ title: "Campaña eliminada", description: `La campaña "${campaign.Name}" ha sido eliminada exitosamente` })
       router.push("/campanas")
     } catch (error: any) {

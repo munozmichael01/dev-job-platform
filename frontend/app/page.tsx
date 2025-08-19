@@ -9,8 +9,10 @@ import { AlertTriangle, Briefcase, Eye, Megaphone, TrendingUp, Users, DollarSign
 import { PieChart as RechartsPieChart, Pie, Cell, ResponsiveContainer, Tooltip, Legend } from "recharts"
 import Link from "next/link"
 import { useState, useEffect } from "react"
+import { useApi } from "@/lib/api"
 
 export default function Dashboard() {
+  const api = useApi()
   const [activeCampaigns, setActiveCampaigns] = useState([])
   const [dashboardMetrics, setDashboardMetrics] = useState(null)
   const [offersStats, setOffersStats] = useState(null)
@@ -23,11 +25,8 @@ export default function Dashboard() {
 
   const loadCampaigns = async () => {
     try {
-      const response = await fetch('http://localhost:3002/api/campaigns')
-      if (response.ok) {
-        const campaigns = await response.json()
-        setActiveCampaigns(campaigns)
-      }
+      const campaigns = await api.fetchCampaigns()
+      setActiveCampaigns(campaigns)
     } catch (error) {
       console.error('Error loading campaigns:', error)
     }
@@ -35,11 +34,8 @@ export default function Dashboard() {
 
   const loadDashboardMetrics = async () => {
     try {
-      const response = await fetch('http://localhost:3002/api/metrics/dashboard')
-      if (response.ok) {
-        const data = await response.json()
-        setDashboardMetrics(data.data)
-      }
+      const data = await api.fetchDashboardMetrics()
+      setDashboardMetrics(data.data)
     } catch (error) {
       console.error('Error loading dashboard metrics:', error)
     }
@@ -47,11 +43,8 @@ export default function Dashboard() {
 
   const loadOffersStats = async () => {
     try {
-      const response = await fetch('http://localhost:3002/api/offers/stats')
-      if (response.ok) {
-        const data = await response.json()
-        setOffersStats(data.data)
-      }
+      const data = await api.fetchOffersStats()
+      setOffersStats(data.data)
     } catch (error) {
       console.error('Error loading offers stats:', error)
     }

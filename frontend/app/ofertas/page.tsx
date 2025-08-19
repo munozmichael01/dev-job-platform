@@ -14,11 +14,11 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip"
 import { useToast } from "@/hooks/use-toast"
 import Link from "next/link"
-import { useKeysetPagination } from "@/hooks/use-keyset-pagination"
+import { useKeysetPaginationAuth } from "@/hooks/use-keyset-pagination-auth"
 // Removed infinite scroll - using simple pagination
 import { ResultsCounter } from "@/components/ui/infinite-loader"
 import { ErrorMessage } from "@/components/ui/error-message"
-import { fetchLocations, fetchSectors, fetchCompanies, fetchExternalIds, type FilterParams } from "@/lib/api-temp"
+import { useApi } from "@/lib/api"
 
 // Tipos TypeScript actualizados para keyset pagination
 interface Oferta {
@@ -98,20 +98,12 @@ export default function OfertasPage() {
   const [searchType, setSearchType] = useState<string>('')
 
   const { toast } = useToast()
+  const api = useApi()
 
   // Función para cambiar estado de ofertas
   const handleOfferStatusChange = async (offerId: number, newStatus: number) => {
     try {
-      const response = await fetch(`http://localhost:3002/job-offers/${offerId}/status`, {
-        method: 'PUT',
-        headers: { 
-          'Content-Type': 'application/json',
-          'Origin': 'http://localhost:3006'
-        },
-        body: JSON.stringify({ status: newStatus })
-      })
-      
-      const result = await response.json()
+      const result = await api.updateOfferStatus(offerId, newStatus)
       
       if (result.success) {
         toast({
@@ -181,7 +173,7 @@ export default function OfertasPage() {
     return JSON.stringify(filters)
   }, [getCleanFilters])
 
-  // Hook de keyset pagination con navegación anterior/siguiente
+  // Hook de keyset pagination con navegación anterior/siguiente - AUTENTICADO
   const {
     items: ofertas,
     isLoading: isInitialLoading,
@@ -197,7 +189,7 @@ export default function OfertasPage() {
     loadPrevious,
     retry,
     reset
-  } = useKeysetPagination({
+  } = useKeysetPaginationAuth({
     limit: 20,
     baseUrl: 'http://localhost:3002/job-offers', // URL completa del backend
     initialParams: getCleanFilters() // Parámetros iniciales
@@ -236,28 +228,28 @@ export default function OfertasPage() {
         console.log('🔍 Cargando opciones con filtros dependientes:', currentFilters)
 
         const [locationsResult, sectorsResult, companiesResult, externalIdsResult] = await Promise.all([
-          fetchLocations({
+          api.fetchLocations({
             status: currentFilters.status,
             sector: currentFilters.sector,
             company: currentFilters.company,
             externalId: currentFilters.externalId,
             q: currentFilters.q
           }),
-          fetchSectors({
+          api.fetchSectors({
             status: currentFilters.status,
             location: currentFilters.location,
             company: currentFilters.company,
             externalId: currentFilters.externalId,
             q: currentFilters.q
           }),
-          fetchCompanies({
+          api.fetchCompanies({
             status: currentFilters.status,
             location: currentFilters.location,
             sector: currentFilters.sector,
             externalId: currentFilters.externalId,
             q: currentFilters.q
           }),
-          fetchExternalIds({
+          api.fetchExternalIds({
             status: currentFilters.status,
             location: currentFilters.location,
             sector: currentFilters.sector,

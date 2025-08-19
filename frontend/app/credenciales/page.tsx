@@ -18,6 +18,8 @@ import {
   RefreshCw
 } from 'lucide-react';
 import ChannelConfigForm from '@/components/credentials/ChannelConfigForm';
+import { useApi } from "@/lib/api";
+import { useAuth } from "@/contexts/AuthContext";
 
 interface ChannelCredentials {
   channelId: string;
@@ -52,8 +54,9 @@ export default function CredencialesPage() {
   const [selectedChannel, setSelectedChannel] = useState<string | null>(null);
   const [showConfigForm, setShowConfigForm] = useState(false);
 
-  // Por ahora simulamos userId = 1, en implementación real vendría del contexto de usuario
-  const userId = 1;
+  // ✅ OBTENER USUARIO REAL DEL CONTEXTO
+  const { user, fetchWithAuth } = useAuth();
+  const api = useApi();
 
   useEffect(() => {
     loadUserChannels();
@@ -62,14 +65,13 @@ export default function CredencialesPage() {
 
   const loadUserChannels = async () => {
     try {
-      const response = await fetch(`http://localhost:3002/api/users/${userId}/credentials`);
-      if (response.ok) {
-        const data = await response.json();
-        setUserChannels(data.channels || []);
-      } else {
-        console.warn('No se pudieron cargar canales del usuario');
+      if (!user?.id) {
         setUserChannels([]);
+        return;
       }
+      
+      const data = await api.fetchUserCredentials();
+      setUserChannels(data.channels || []);
     } catch (error) {
       console.error('Error cargando canales:', error);
       setUserChannels([]);
@@ -78,8 +80,8 @@ export default function CredencialesPage() {
 
   const loadAvailableChannels = async () => {
     try {
-      // Cargar canales desde la API del backend
-      const response = await fetch('http://localhost:3002/api/credentials/channels');
+      // Cargar canales desde la API del backend usando fetch autenticado
+      const response = await fetchWithAuth('http://localhost:3002/api/credentials/channels');
       if (response.ok) {
         const data = await response.json();
         setAvailableChannels(data.channels || {});
@@ -177,7 +179,7 @@ export default function CredencialesPage() {
     }
 
     try {
-      const response = await fetch(`http://localhost:3002/api/users/${userId}/credentials/${channelId}`, {
+      const response = await fetch(`http://localhost:3002/api/users/${user?.id}/credentials/${channelId}`, {
         method: 'DELETE'
       });
 
@@ -195,7 +197,7 @@ export default function CredencialesPage() {
 
   const handleValidateCredentials = async (channelId: string) => {
     try {
-      const response = await fetch(`http://localhost:3002/api/users/${userId}/credentials/${channelId}/validate`, {
+      const response = await fetch(`http://localhost:3002/api/users/${user?.id}/credentials/${channelId}/validate`, {
         method: 'POST'
       });
 
@@ -443,7 +445,7 @@ export default function CredencialesPage() {
           channelId={selectedChannel}
           channelInfo={availableChannels[selectedChannel]}
           existingCredentials={userChannels.find(ch => ch.channelId === selectedChannel)}
-          userId={userId}
+          userId={parseInt(user?.id || '0')}
           onSave={() => {
             setShowConfigForm(false);
             setSelectedChannel(null);

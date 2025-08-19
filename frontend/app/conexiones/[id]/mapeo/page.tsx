@@ -26,6 +26,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger } from "@/components/ui/alert-dialog"
 import { useToast } from "@/hooks/use-toast"
+import { useAuthFetch } from "@/hooks/useAuthFetch"
 import Link from "next/link"
 import { useRouter } from "next/navigation"
 
@@ -63,6 +64,7 @@ interface TargetField {
 export default function MapeoPage({ params }: { params: Promise<{ id: string }> }) {
   const { toast } = useToast()
   const router = useRouter()
+  const { authFetch } = useAuthFetch()
 
   // ✅ Unwrap params usando React.use()
   const resolvedParams = React.use(params)
@@ -116,7 +118,7 @@ export default function MapeoPage({ params }: { params: Promise<{ id: string }> 
           throw new Error(`ID de conexión inválido: ${resolvedParams.id}`)
         }
 
-        const response = await fetch(`http://localhost:3002/api/connections/${connectionId}`)
+        const response = await authFetch(`http://localhost:3002/api/connections/${connectionId}`)
         console.log(`🌐 Petición a: http://localhost:3002/api/connections/${connectionId}`)
 
         if (!response.ok) {
@@ -154,7 +156,7 @@ export default function MapeoPage({ params }: { params: Promise<{ id: string }> 
         setLoadingSourceFields(true)
         console.log(`🔄 Cargando campos origen para conexión ${connectionId}...`)
 
-        const response = await fetch(`http://localhost:3002/api/connections/${connectionId}/fields`)
+        const response = await authFetch(`http://localhost:3002/api/connections/${connectionId}/fields`)
         console.log(`🌐 Petición a: http://localhost:3002/api/connections/${connectionId}/fields`)
 
         if (!response.ok) {
@@ -195,7 +197,7 @@ export default function MapeoPage({ params }: { params: Promise<{ id: string }> 
       try {
         console.log(`🔄 Cargando mapeo actual para conexión ${connectionId}...`)
 
-        const response = await fetch(`http://localhost:3002/api/connections/${connectionId}/mapping`)
+        const response = await authFetch(`http://localhost:3002/api/connections/${connectionId}/mapping`)
         if (response.ok) {
           const mappingData = await response.json()
           console.log("✅ Mapeo actual cargado:", mappingData)
@@ -317,7 +319,7 @@ export default function MapeoPage({ params }: { params: Promise<{ id: string }> 
         TransformationRule: transformations[targetField] || null,
       }))
 
-      const response = await fetch(`http://localhost:3002/api/connections/${connectionId}/mappings`, {
+      const response = await authFetch(`http://localhost:3002/api/connections/${connectionId}/mappings`, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
@@ -358,7 +360,7 @@ export default function MapeoPage({ params }: { params: Promise<{ id: string }> 
       setTesting(true)
       console.log("🔄 Probando mapeo...")
 
-      const response = await fetch(`http://localhost:3002/api/connections/${connectionId}/test-mapping`, {
+      const response = await authFetch(`http://localhost:3002/api/connections/${connectionId}/test-mapping`, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
@@ -397,7 +399,7 @@ export default function MapeoPage({ params }: { params: Promise<{ id: string }> 
       setDeleting(true)
       console.log("🔄 Eliminando conexión...")
 
-      const response = await fetch(`http://localhost:3002/api/connections/${connectionId}`, {
+      const response = await authFetch(`http://localhost:3002/api/connections/${connectionId}`, {
         method: "DELETE",
         headers: {
           "Content-Type": "application/json",

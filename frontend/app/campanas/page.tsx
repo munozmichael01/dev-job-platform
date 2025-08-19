@@ -10,7 +10,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import Link from "next/link"
 import { useToast } from "@/hooks/use-toast"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
-import { fetchCampaigns, deleteCampaign, pauseCampaign, resumeCampaign } from "@/lib/api-temp"
+import { useApi } from "@/lib/api"
 
 type ApiCampaign = {
   Id: number
@@ -34,6 +34,7 @@ type ApiCampaign = {
 export default function CampanasPage() {
   const [statusFilter, setStatusFilter] = useState("all")
   const { toast } = useToast()
+  const api = useApi()
   const [campanas, setCampanas] = useState<any[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
@@ -46,7 +47,7 @@ export default function CampanasPage() {
 
   const handlePauseCampaign = async (id: number, name: string) => {
     try {
-      await pauseCampaign(id)
+      await api.pauseCampaign(id)
       toast({ title: "Campaña pausada", description: `La campaña "${name}" ha sido pausada exitosamente` })
       // Recargar campañas para actualizar estado
       loadCampaigns()
@@ -57,7 +58,7 @@ export default function CampanasPage() {
 
   const handleResumeCampaign = async (id: number, name: string) => {
     try {
-      await resumeCampaign(id)
+      await api.resumeCampaign(id)
       toast({ title: "Campaña reactivada", description: `La campaña "${name}" ha sido reactivada exitosamente` })
       // Recargar campañas para actualizar estado
       loadCampaigns()
@@ -72,7 +73,7 @@ export default function CampanasPage() {
     }
     
     try {
-      await deleteCampaign(id)
+      await api.deleteCampaign(id)
       toast({ title: "Campaña eliminada", description: `La campaña "${name}" ha sido eliminada exitosamente` })
       // Recargar campañas para actualizar lista inmediatamente
       setTimeout(loadCampaigns, 500) // Dar tiempo para que la BD se actualice
@@ -87,7 +88,7 @@ export default function CampanasPage() {
   const loadCampaigns = async () => {
     try {
       setLoading(true)
-      const data: ApiCampaign[] = await fetchCampaigns()
+      const data: ApiCampaign[] = await api.fetchCampaigns()
       setCampanas(
         data.map((c) => ({
           id: c.Id,

@@ -1,6 +1,7 @@
 const express = require('express');
 const router = express.Router();
 const { pool, poolConnect, sql } = require('../db/db');
+const { addUserToRequest, requireAuth, onlyOwnData, isSuperAdmin } = require('../middleware/authMiddleware');
 
 const parseFilters = (filters) => {
   if (!filters) return { jobTitles: [], locations: [], sectors: [], experienceLevels: [], contractTypes: [], companies: [] };
@@ -75,10 +76,12 @@ function buildWhereFromFilters(f, sql) {
   return { where, inputs };
 }
 
-router.get('/', async (_req, res) => {
+router.get('/', addUserToRequest, requireAuth, onlyOwnData(), async (req, res) => {
   try {
     await poolConnect;
-    const result = await pool.request().query(`
+    
+    // Construir query con filtrado por usuario
+    let query = `
       SELECT 
         s.Id, s.Name, s.Description, s.Filters, s.Status, s.OfferCount, s.CreatedAt, s.UpdatedAt,
         COALESCE(c.CampaignCount, 0) AS Campaigns,
@@ -87,19 +90,50 @@ router.get('/', async (_req, res) => {
       LEFT JOIN (
         SELECT SegmentId, COUNT(*) AS CampaignCount
         FROM Campaigns
-        WHERE Status IN ('active', 'scheduled', 'paused')
+        WHERE Status IN ('active', 'scheduled', 'paused')`;
+    
+    const request = pool.request();
+    
+    console.log(`🔍 Segments DEBUG: req.userId = ${req.userId}, req.user.role = ${req.user.role}`);
+    console.log(`🔍 Segments DEBUG: isSuperAdmin(req) = ${isSuperAdmin(req)}`);
+    
+    // Super admin puede ver todos los segmentos, usuarios normales solo los suyos
+    if (!isSuperAdmin(req)) {
+      query += ` AND UserId = @userId`;
+      request.input('userId', sql.BigInt, req.userId);
+      console.log(`🔍 Segments: Agregando filtro UserId = ${req.userId} en subquery`);
+    } else {
+      console.log(`🔍 Segments: Super admin - sin filtro en subquery`);
+    }
+    
+    query += `
         GROUP BY SegmentId
-      ) c ON s.Id = c.SegmentId
-      ORDER BY s.UpdatedAt DESC
-    `);
+      ) c ON s.Id = c.SegmentId`;
+    
+    // Filtrar segmentos por usuario (DEFINITIVO)
+    if (!isSuperAdmin(req)) {
+      query += ` WHERE s.UserId = @userIdSegments`;
+      request.input('userIdSegments', sql.BigInt, req.userId);
+      console.log(`🔍 Segments: Agregando filtro WHERE s.UserId = ${req.userId}`);
+    } else {
+      console.log(`🔍 Segments: Super admin - sin filtro WHERE`);
+    }
+    
+    query += ` ORDER BY s.UpdatedAt DESC`;
+    
+    console.log(`🔍 Segments query para usuario ${req.userId} (${req.user.role}): ${isSuperAdmin(req) ? 'TODOS' : 'FILTRADO'}`);
+    console.log(`🔍 Segments query final:`, query);
+    
+    const result = await request.query(query);
     const rows = result.recordset.map(r => ({ ...r, Filters: parseFilters(r.Filters) }));
     res.json(rows);
   } catch (e) {
+    console.error('❌ Error listando segmentos:', e.message);
     res.status(500).json({ error: 'Error listando segmentos', details: e.message });
   }
 });
 
-router.post('/', async (req, res) => {
+router.post('/', addUserToRequest, requireAuth, async (req, res) => {
   const { name, description = '', filters = {}, status = 'active' } = req.body || {};
   if (!name) return res.status(400).json({ error: 'Campo "name" es requerido' });
   try {

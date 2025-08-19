@@ -4,9 +4,10 @@ const { pool } = require("../db/db")
 const axios = require("axios")
 const xml2js = require("xml2js")
 const sql = require("mssql")
+const { addUserToRequest, requireAuth, onlyOwnData, getUserIdForQuery, isSuperAdmin } = require('../middleware/authMiddleware')
 
-// GET /api/connections - Listar todas las conexiones
-router.get("/", async (req, res) => {
+// GET /api/connections - Listar todas las conexiones (con filtrado por usuario)
+router.get("/", addUserToRequest, requireAuth, onlyOwnData(), async (req, res) => {
   // CORS Headers
   const origin = req.headers.origin;
   const allowedOrigins = ['http://localhost:3007', 'http://127.0.0.1:3007', 'http://localhost:3004', 'http://127.0.0.1:3004', 'http://localhost:3006', 'http://127.0.0.1:3006'];
@@ -16,18 +17,38 @@ router.get("/", async (req, res) => {
   }
   res.setHeader('Access-Control-Allow-Credentials', 'true');
   
-  console.log("🔍 GET /api/connections - Listando conexiones from origin:", origin)
+  console.log(`🔍 GET /api/connections - Usuario: ${req.user.email} (${req.user.role})`)
 
   try {
     await pool
-    const result = await pool.request().query(`
+    
+    // Construir query con filtrado por usuario (super admin ve todo)
+    let query = `
       SELECT 
         id, name, type, url, frequency, status, lastSync, 
-        importedOffers, errorCount, clientId, Method, Headers, Body, CreatedAt
-      FROM Connections 
-      ORDER BY CreatedAt DESC
-    `)
-
+        importedOffers, errorCount, UserId, Method, Headers, Body, 
+        SourceType, Endpoint, PayloadTemplate, FeedUrl, Notes, CreatedAt
+      FROM Connections`;
+    
+    const request = pool.request();
+    
+    console.log(`🔍 Connections DEBUG: req.userId = ${req.userId}, req.user.role = ${req.user.role}`);
+    console.log(`🔍 Connections DEBUG: isSuperAdmin(req) = ${isSuperAdmin(req)}`);
+    
+    if (!isSuperAdmin(req)) {
+      // Usuario normal: solo sus conexiones
+      query += ` WHERE UserId = @userId`;
+      request.input('userId', sql.BigInt, req.userId);
+      console.log(`🔒 Filtrando conexiones para usuario ${req.userId}`);
+    } else {
+      console.log(`🔑 Super admin: mostrando todas las conexiones`);
+    }
+    
+    query += ` ORDER BY CreatedAt DESC`;
+    
+    console.log(`🔍 Connections query final:`, query);
+    const result = await request.query(query);
+    
     console.log(`✅ Encontradas ${result.recordset.length} conexiones`)
     res.json(result.recordset)
   } catch (error) {
@@ -40,7 +61,7 @@ router.get("/", async (req, res) => {
 })
 
 // GET /api/connections/:id - Obtener una conexión específica
-router.get("/:id", async (req, res) => {
+router.get("/:id", addUserToRequest, requireAuth, onlyOwnData(), async (req, res) => {
   // CORS Headers
   const origin = req.headers.origin;
   const allowedOrigins = ['http://localhost:3007', 'http://127.0.0.1:3007', 'http://localhost:3004', 'http://127.0.0.1:3004', 'http://localhost:3006', 'http://127.0.0.1:3006'];
@@ -55,15 +76,30 @@ router.get("/:id", async (req, res) => {
 
   try {
     await pool
-    const result = await pool.request()
-      .input('id', sql.Int, id)
-      .query(`
-        SELECT 
-          id, name, type, url, frequency, status, lastSync, 
-          importedOffers, errorCount, clientId, Method, Headers, Body, CreatedAt
-        FROM Connections 
-        WHERE id = @id
-      `)
+    
+    console.log(`🔍 GET /api/connections/${id} - Usuario: ${req.user.email} (${req.user.role})`)
+    
+    // Construir query con filtrado por usuario (super admin ve todo)
+    let query = `
+      SELECT 
+        id, name, type, url, frequency, status, lastSync, 
+        importedOffers, errorCount, UserId, Method, Headers, Body, 
+        SourceType, Endpoint, PayloadTemplate, FeedUrl, Notes, CreatedAt
+      FROM Connections 
+      WHERE id = @id`;
+    
+    const request = pool.request().input('id', sql.Int, id);
+    
+    if (!isSuperAdmin(req)) {
+      // Usuario normal: solo sus conexiones
+      query += ` AND UserId = @userId`;
+      request.input('userId', sql.BigInt, req.userId);
+      console.log(`🔒 Filtrando conexión ${id} para usuario ${req.userId}`);
+    } else {
+      console.log(`🔑 Super admin: accediendo a conexión ${id} sin filtro`);
+    }
+    
+    const result = await request.query(query);
 
     if (result.recordset.length === 0) {
       return res.status(404).json({ error: "Conexión no encontrada" })
@@ -82,7 +118,7 @@ router.get("/:id", async (req, res) => {
 })
 
 // POST /api/connections - Crear nueva conexión
-router.post("/", async (req, res) => {
+router.post("/", addUserToRequest, requireAuth, onlyOwnData(), async (req, res) => {
   // CORS Headers
   const origin = req.headers.origin;
   const allowedOrigins = ['http://localhost:3007', 'http://127.0.0.1:3007', 'http://localhost:3004', 'http://127.0.0.1:3004', 'http://localhost:3006', 'http://127.0.0.1:3006'];
@@ -92,22 +128,39 @@ router.post("/", async (req, res) => {
   }
   res.setHeader('Access-Control-Allow-Credentials', 'true');
   
-  const { name, type, url, frequency, clientId, method, headers, body } = req.body
+  const { 
+    name, 
+    type, 
+    url, 
+    frequency, 
+    method, 
+    headers, 
+    body,
+    // Campos técnicos nuevos
+    sourceType,
+    endpoint,
+    payloadTemplate,
+    feedUrl,
+    notes
+  } = req.body
+  console.log(`🔍 POST /api/connections - Usuario: ${req.user.email} (${req.user.role})`)
   console.log("🔍 POST /api/connections - Creando nueva conexión from origin:", origin, {
     name,
     type,
     url,
     frequency,
-    clientId,
+    sourceType,
+    endpoint,
+    method
   })
 
   try {
     // Validaciones básicas
-    if (!name || !type || !url || !frequency || !clientId) {
+    if (!name || !type || !url || !frequency) {
       console.log("❌ Faltan campos requeridos")
       return res.status(400).json({
         error: "Faltan campos requeridos",
-        required: ["name", "type", "url", "frequency", "clientId"],
+        required: ["name", "type", "url", "frequency"],
       })
     }
 
@@ -130,6 +183,26 @@ router.post("/", async (req, res) => {
     }
 
     await pool
+    
+    // Usar UserId del usuario autenticado
+    const userId = req.userId;
+    console.log(`🔐 Creando conexión para usuario ${userId} (${req.user.email})`)
+    
+    // Obtener clientId del usuario - cada usuario tiene su cliente asociado
+    const clientQuery = await pool.request()
+      .input('userId', sql.BigInt, userId)
+      .query('SELECT Id FROM Clients WHERE UserId = @userId');
+    
+    let clientId;
+    if (clientQuery.recordset.length > 0) {
+      clientId = clientQuery.recordset[0].Id;
+      console.log(`🔐 Usuario ${userId} tiene clientId = ${clientId}`);
+    } else {
+      // Fallback: usar clientId = 1 (cliente por defecto)
+      clientId = 1;
+      console.log(`⚠️ Usuario ${userId} sin cliente asociado, usando clientId por defecto = ${clientId}`);
+    }
+    
     const result = await pool
       .request()
       .input("name", sql.NVarChar(255), name)
@@ -139,20 +212,27 @@ router.post("/", async (req, res) => {
       .input("status", sql.NVarChar(50), "pending")
       .input("importedOffers", sql.Int, 0)
       .input("errorCount", sql.Int, 0)
+
+      .input("userId", sql.BigInt, userId)
       .input("clientId", sql.Int, clientId)
-      .input("method", sql.NVarChar(10), method || null)
-      .input("headers", sql.NVarChar(sql.MAX), headers ? JSON.stringify(headers) : null)
+      .input("method", sql.NVarChar(10), method || "GET")
+      .input("headers", sql.NVarChar(sql.MAX), headers || null)
       .input("body", sql.NVarChar(sql.MAX), body || null)
+      .input("sourceType", sql.NVarChar(500), sourceType || null)
+      .input("endpoint", sql.NVarChar(500), endpoint || null)
+      .input("payloadTemplate", sql.NVarChar(sql.MAX), payloadTemplate || null)
+      .input("feedUrl", sql.NVarChar(500), feedUrl || null)
+      .input("notes", sql.NVarChar(sql.MAX), notes || null)
       .input("createdAt", sql.DateTime, new Date())
       .query(`
         INSERT INTO Connections (
-          name, type, url, frequency, status, importedOffers, errorCount, clientId,
-          Method, Headers, Body, CreatedAt
+          name, type, url, frequency, status, importedOffers, errorCount, clientId, UserId,
+          Method, Headers, Body, SourceType, Endpoint, PayloadTemplate, FeedUrl, Notes, CreatedAt
         )
         OUTPUT INSERTED.*
         VALUES (
-          @name, @type, @url, @frequency, @status, @importedOffers, @errorCount, @clientId,
-          @method, @headers, @body, @createdAt
+          @name, @type, @url, @frequency, @status, @importedOffers, @errorCount, @clientId, @userId,
+          @method, @headers, @body, @sourceType, @endpoint, @payloadTemplate, @feedUrl, @notes, @createdAt
         )
       `)
 
@@ -170,24 +250,47 @@ router.post("/", async (req, res) => {
 })
 
 // PUT /api/connections/:id - Actualizar conexión
-router.put("/:id", async (req, res) => {
+router.put("/:id", addUserToRequest, requireAuth, onlyOwnData(), async (req, res) => {
   const { id } = req.params
-  const { name, type, url, frequency, method, headers, body } = req.body
+  const { 
+    name, 
+    type, 
+    url, 
+    frequency, 
+    method, 
+    headers, 
+    body,
+    // Campos técnicos nuevos
+    sourceType,
+    endpoint,
+    payloadTemplate,
+    feedUrl,
+    notes 
+  } = req.body
 
-  console.log(`🔍 PUT /api/connections/:id - ID: ${id}`, {
+  console.log(`🔍 PUT /api/connections/:id - Usuario: ${req.user.email} (${req.user.role}) - ID: ${id}`, {
     name,
     type,
     url,
     frequency,
+    sourceType,
+    endpoint
   })
 
   try {
-    // Validar que la conexión existe
     await pool
-    const existingResult = await pool
-      .request()
-      .input("id", sql.Int, id)
-      .query("SELECT id FROM Connections WHERE id = @id")
+    
+    // Verificar que la conexión existe y pertenece al usuario (excepto super admin)
+    let existingQuery = "SELECT id, UserId FROM Connections WHERE id = @id";
+    const existingRequest = pool.request().input("id", sql.Int, id);
+    
+    if (!isSuperAdmin(req)) {
+      existingQuery += " AND UserId = @userId";
+      existingRequest.input("userId", sql.BigInt, req.userId);
+      console.log(`🔒 Verificando conexión ${id} para usuario ${req.userId}`);
+    }
+    
+    const existingResult = await existingRequest.query(existingQuery);
 
     if (existingResult.recordset.length === 0) {
       console.log(`❌ Conexión no encontrada: ${id}`)
@@ -203,8 +306,13 @@ router.put("/:id", async (req, res) => {
       .input("url", sql.NVarChar(sql.MAX), url)
       .input("frequency", sql.NVarChar(50), frequency)
       .input("method", sql.NVarChar(10), method || null)
-      .input("headers", sql.NVarChar(sql.MAX), headers ? JSON.stringify(headers) : null)
+      .input("headers", sql.NVarChar(sql.MAX), headers || null)
       .input("body", sql.NVarChar(sql.MAX), body || null)
+      .input("sourceType", sql.NVarChar(500), sourceType || null)
+      .input("endpoint", sql.NVarChar(500), endpoint || null)
+      .input("payloadTemplate", sql.NVarChar(sql.MAX), payloadTemplate || null)
+      .input("feedUrl", sql.NVarChar(500), feedUrl || null)
+      .input("notes", sql.NVarChar(sql.MAX), notes || null)
       .query(`
         UPDATE Connections 
         SET 
@@ -214,7 +322,12 @@ router.put("/:id", async (req, res) => {
           frequency = @frequency,
           Method = @method,
           Headers = @headers,
-          Body = @body
+          Body = @body,
+          SourceType = @sourceType,
+          Endpoint = @endpoint,
+          PayloadTemplate = @payloadTemplate,
+          FeedUrl = @feedUrl,
+          Notes = @notes
         OUTPUT INSERTED.*
         WHERE id = @id
       `)
@@ -233,18 +346,24 @@ router.put("/:id", async (req, res) => {
 })
 
 // DELETE /api/connections/:id - Eliminar conexión
-router.delete("/:id", async (req, res) => {
+router.delete("/:id", addUserToRequest, requireAuth, onlyOwnData(), async (req, res) => {
   const { id } = req.params
-  console.log(`🔍 DELETE /api/connections/:id - ID: ${id}`)
+  console.log(`🔍 DELETE /api/connections/:id - Usuario: ${req.user.email} (${req.user.role}) - ID: ${id}`)
 
   try {
     await pool
 
-    // Verificar que la conexión existe
-    const existingResult = await pool
-      .request()
-      .input("id", sql.Int, id)
-      .query("SELECT id FROM Connections WHERE id = @id")
+    // Verificar que la conexión existe y pertenece al usuario (excepto super admin)
+    let existingQuery = "SELECT id, UserId FROM Connections WHERE id = @id";
+    const existingRequest = pool.request().input("id", sql.Int, id);
+    
+    if (!isSuperAdmin(req)) {
+      existingQuery += " AND UserId = @userId";
+      existingRequest.input("userId", sql.BigInt, req.userId);
+      console.log(`🔒 Verificando conexión ${id} para eliminación por usuario ${req.userId}`);
+    }
+    
+    const existingResult = await existingRequest.query(existingQuery);
 
     if (existingResult.recordset.length === 0) {
       console.log(`❌ Conexión no encontrada: ${id}`)
@@ -272,7 +391,7 @@ router.delete("/:id", async (req, res) => {
 })
 
 // POST /api/connections/:id/import - Importar ofertas de una conexión
-router.post("/:id/import", async (req, res) => {
+router.post("/:id/import", addUserIdToRequest, requireAuth, onlyOwnData('UserId'), async (req, res) => {
   console.log("🚀 CLAUDE DEBUG: /import ENDPOINT CALLED!")
   console.log("🚀 CLAUDE DEBUG: Request params:", JSON.stringify(req.params))
   // CORS Headers
@@ -290,13 +409,27 @@ router.post("/:id/import", async (req, res) => {
   try {
     await pool
 
+    // ✅ PROTECCIÓN: Verificar que la conexión no esté ya importando
+    const statusCheck = await pool
+      .request()
+      .input("id", sql.Int, id)
+      .query("SELECT status FROM Connections WHERE id = @id")
+
+    if (statusCheck.recordset.length > 0 && statusCheck.recordset[0].status === 'importing') {
+      console.log(`⚠️ Importación ya en progreso para conexión ${id}`)
+      return res.status(409).json({ 
+        error: "Importación ya en progreso", 
+        message: "Esta conexión ya se está procesando. Espera a que termine." 
+      })
+    }
+
     // Obtener la conexión
     const connectionResult = await pool
       .request()
       .input("id", sql.Int, id)
       .query(`
         SELECT 
-          id, name, type, url, frequency, status, lastSync, importedOffers, errorCount, clientId,
+          id, name, type, url, frequency, status, lastSync, importedOffers, errorCount, 
           Method, Headers, Body, CreatedAt
         FROM Connections 
         WHERE id = @id
@@ -457,7 +590,7 @@ router.post("/:id/upload", async (req, res) => {
       .input("id", sql.Int, id)
       .query(`
         SELECT 
-          id, name, type, url, frequency, status, lastSync, importedOffers, errorCount, clientId,
+          id, name, type, url, frequency, status, lastSync, importedOffers, errorCount, 
           Method, Headers, Body, CreatedAt
         FROM Connections 
         WHERE id = @id
@@ -641,7 +774,7 @@ router.post("/:id/test-mapping", async (req, res) => {
       .input("id", sql.Int, id)
       .query(`
         SELECT 
-          id, name, type, url, frequency, status, lastSync, importedOffers, errorCount, clientId,
+          id, name, type, url, frequency, status, lastSync, importedOffers, errorCount, 
           Method, Headers, Body, CreatedAt
         FROM Connections 
         WHERE id = @id
@@ -715,7 +848,7 @@ router.get("/:id/fields", async (req, res) => {
       .input("id", sql.Int, id)
       .query(`
         SELECT 
-          id, name, type, url, frequency, status, lastSync, importedOffers, errorCount, clientId,
+          id, name, type, url, frequency, status, lastSync, importedOffers, errorCount, 
           Method, Headers, Body, CreatedAt
         FROM Connections 
         WHERE id = @id
@@ -887,7 +1020,7 @@ router.post("/:id/test", async (req, res) => {
       .input("id", sql.Int, id)
       .query(`
         SELECT 
-          id, name, type, url, frequency, status, lastSync, importedOffers, errorCount, clientId,
+          id, name, type, url, frequency, status, lastSync, importedOffers, errorCount, 
           Method, Headers, Body, CreatedAt
         FROM Connections 
         WHERE id = @id
@@ -1019,7 +1152,7 @@ router.get("/:id/mappings", async (req, res) => {
       .query(`
         SELECT 
           ConnectionId,
-          ClientId,
+          
           SourceField,
           TargetField,
           TransformationType,
@@ -1262,7 +1395,7 @@ router.post("/bulk-import", async (req, res) => {
     // Obtener todas las conexiones activas
     const connectionsResult = await pool.request().query(`
       SELECT 
-        id, name, type, url, frequency, status, lastSync, importedOffers, errorCount, clientId,
+        id, name, type, url, frequency, status, lastSync, importedOffers, errorCount, 
         Method, Headers, Body, CreatedAt
       FROM Connections 
       WHERE status IN ('active', 'pending')

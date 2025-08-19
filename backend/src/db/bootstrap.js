@@ -397,6 +397,46 @@ async function ensureTables() {
     END
   `);
 
+  // Agregar relación UserId a tabla JobOffers para vincular ofertas con gestores
+  await pool.request().query(`
+    IF NOT EXISTS (SELECT * FROM sys.columns WHERE object_id = OBJECT_ID('JobOffers') AND name = 'UserId')
+    BEGIN
+      ALTER TABLE JobOffers ADD UserId BIGINT NULL
+      PRINT 'Columna UserId agregada a tabla JobOffers'
+    END
+    ELSE
+    BEGIN
+      PRINT 'Columna UserId ya existe en tabla JobOffers'
+    END
+  `);
+
+  // Crear foreign keys si no existen
+  await pool.request().query(`
+    IF NOT EXISTS (SELECT * FROM sys.foreign_keys WHERE name = 'FK_Campaigns_Users')
+    BEGIN
+      ALTER TABLE Campaigns
+      ADD CONSTRAINT FK_Campaigns_Users FOREIGN KEY (UserId) REFERENCES Users(Id)
+      PRINT 'Foreign key FK_Campaigns_Users creado'
+    END
+    ELSE
+    BEGIN
+      PRINT 'Foreign key FK_Campaigns_Users ya existe'
+    END
+  `);
+
+  await pool.request().query(`
+    IF NOT EXISTS (SELECT * FROM sys.foreign_keys WHERE name = 'FK_JobOffers_Users')
+    BEGIN
+      ALTER TABLE JobOffers
+      ADD CONSTRAINT FK_JobOffers_Users FOREIGN KEY (UserId) REFERENCES Users(Id)
+      PRINT 'Foreign key FK_JobOffers_Users creado'
+    END
+    ELSE
+    BEGIN
+      PRINT 'Foreign key FK_JobOffers_Users ya existe'
+    END
+  `);
+
   console.log('🎯 Todas las tablas están disponibles');
 }
 

@@ -2,24 +2,54 @@ const express = require('express');
 const router = express.Router();
 const { pool, poolConnect, sql } = require('../db/db');
 const CampaignDistributionService = require('../services/campaignDistributionService');
+const { addUserToRequest, requireAuth, onlyOwnData, isSuperAdmin } = require('../middleware/authMiddleware');
 
 const parseJSON = (val) => {
   if (!val) return [];
   try { return typeof val === 'string' ? JSON.parse(val) : val; } catch { return []; }
 };
 
-router.get('/', async (_req, res) => {
+// Aplicar middleware de autenticación a todas las rutas
+router.use(addUserToRequest);
+router.use(requireAuth);
+
+router.get('/', async (req, res) => {
   try {
     await poolConnect;
-    const r = await pool.request().query(`
+    
+    // Construir query con filtrado por usuario o super admin
+    let query = `
       SELECT 
         c.*,
         s.Name as SegmentName,
-        s.OfferCount as SegmentOffers
+        s.OfferCount as SegmentOffers,
+        u.FirstName + ' ' + u.LastName as UserName,
+        u.Email as UserEmail,
+        u.Company as UserCompany
       FROM Campaigns c
       LEFT JOIN Segments s ON c.SegmentId = s.Id 
-      ORDER BY c.CreatedAt DESC
-    `);
+      LEFT JOIN Users u ON c.UserId = u.Id`;
+    
+    const request = pool.request();
+    
+    console.log(`🔍 Campaigns DEBUG: req.userId = ${req.userId}, req.user.role = ${req.user.role}`);
+    console.log(`🔍 Campaigns DEBUG: isSuperAdmin(req) = ${isSuperAdmin(req)}`);
+    
+    // Super admin puede ver todas las campañas, usuarios normales solo las suyas
+    if (!isSuperAdmin(req)) {
+      query += ` WHERE c.UserId = @UserId`;
+      request.input('UserId', sql.BigInt, req.userId);
+      console.log(`🔍 Campaigns: Agregando filtro WHERE c.UserId = ${req.userId}`);
+    } else {
+      console.log(`🔍 Campaigns: Super admin - sin filtro WHERE`);
+    }
+    
+    query += ` ORDER BY c.CreatedAt DESC`;
+    
+    console.log(`🔍 Campaigns query para usuario ${req.userId} (${req.user.role}): ${isSuperAdmin(req) ? 'TODOS' : 'FILTRADO'}`);
+    console.log(`🔍 Campaigns query final:`, query);
+    
+    const r = await request.query(query);
     
     // Para cada campaña, obtener todos sus segmentos
     const campaigns = [];
@@ -64,6 +94,9 @@ router.post('/', async (req, res) => {
     channels = [], bidStrategy = 'automatic', manualBid = null,
     priority = 'medium', autoOptimization = true
   } = req.body || {};
+  
+  // Usar el userId del middleware de autenticación
+  const userId = req.userId;
   
   // Soporte para segmentId (legacy) o segmentIds (nuevo)
   const segments = segmentIds && Array.isArray(segmentIds) && segmentIds.length > 0 
@@ -114,14 +147,15 @@ router.post('/', async (req, res) => {
       .input('Priority', sql.NVarChar(20), priority)
       .input('AutoOptimization', sql.Bit, !!autoOptimization)
       .input('Status', sql.NVarChar(50), 'active')
+      .input('UserId', sql.BigInt, userId)
       .input('CreatedAt', sql.DateTime, now)
       .input('UpdatedAt', sql.DateTime, now)
       .query(`
         INSERT INTO Campaigns
-        (Name, Description, SegmentId, DistributionType, StartDate, EndDate, Budget, TargetApplications, MaxCPA, Channels, BidStrategy, ManualBid, Priority, AutoOptimization, Status, CreatedAt, UpdatedAt)
+        (Name, Description, SegmentId, DistributionType, StartDate, EndDate, Budget, TargetApplications, MaxCPA, Channels, BidStrategy, ManualBid, Priority, AutoOptimization, Status, UserId, CreatedAt, UpdatedAt)
         OUTPUT INSERTED.*
         VALUES
-        (@Name, @Description, @SegmentId, @DistributionType, @StartDate, @EndDate, @Budget, @TargetApplications, @MaxCPA, @Channels, @BidStrategy, @ManualBid, @Priority, @AutoOptimization, @Status, @CreatedAt, @UpdatedAt)
+        (@Name, @Description, @SegmentId, @DistributionType, @StartDate, @EndDate, @Budget, @TargetApplications, @MaxCPA, @Channels, @BidStrategy, @ManualBid, @Priority, @AutoOptimization, @Status, @UserId, @CreatedAt, @UpdatedAt)
       `);
     
     const campaign = ins.recordset[0];

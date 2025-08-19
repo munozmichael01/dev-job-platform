@@ -32,7 +32,8 @@ import { Label } from "@/components/ui/label"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { useToast } from "@/hooks/use-toast"
 import Link from "next/link"
-import { fetchConnections, createConnection, importConnection, uploadFile } from "@/lib/api-temp"
+import { useApi } from "@/lib/api"
+import { useAuth } from "@/contexts/AuthContext"
 
 interface Conexion {
   id: number
@@ -57,6 +58,8 @@ interface Conexion {
 
 export default function ConexionesPage() {
   const { toast } = useToast()
+  const api = useApi()
+  const { user } = useAuth()
   const [isDialogOpen, setIsDialogOpen] = useState(false)
   const [conexiones, setConexiones] = useState<Conexion[]>([])
   const [loading, setLoading] = useState(true)
@@ -69,9 +72,50 @@ export default function ConexionesPage() {
     type: "",
     url: "",
     frequency: "daily",
-    clientId: 1,
+    // Campos técnicos ahora en Connections
+    sourceType: "",
+    endpoint: "",
+    headers: "",
+    payloadTemplate: "",
+    method: "GET",
+    feedUrl: "",
+    notes: ""
   })
+
+  // Función para limpiar campos según el tipo
+  const handleTypeChange = (type: string) => {
+    setNewConnection(prev => ({
+      ...prev,
+      type,
+      // Limpiar campos según el tipo
+      url: type === "Manual" ? "-" : "",
+      frequency: type === "Manual" ? "manual" : "daily",
+      method: type === "Manual" ? "GET" : "GET",
+      headers: "",
+      payloadTemplate: "",
+      sourceType: "",
+      endpoint: "",
+      feedUrl: "",
+      notes: ""
+    }))
+    
+    // Limpiar archivo seleccionado si cambia de Manual a otro tipo
+    if (type !== "Manual") {
+      setSelectedFile(null)
+    }
+  }
   const [selectedFile, setSelectedFile] = useState<File | null>(null)
+
+  // ✅ OBTENER INFORMACIÓN DEL USUARIO AUTENTICADO
+  const fetchUserInfo = async () => {
+    try {
+      // TODO: Obtener userId de la autenticación real cuando esté implementada
+      const userId = 1 // Temporal hasta implementar JWT
+      console.log(`✅ Usuario autenticado: ${userId}`)
+    } catch (error) {
+      console.error('❌ Error obteniendo información del usuario:', error)
+    }
+  }
 
   // ✅ FETCH CONEXIONES DESDE TU BACKEND REAL
   const fetchConexiones = async () => {
@@ -79,7 +123,7 @@ export default function ConexionesPage() {
       setLoading(true)
       console.log("🔄 Fetching conexiones...")
 
-      const data = await fetchConnections()
+      const data = await api.fetchConnections()
       console.log("✅ Conexiones recibidas:", data)
 
       setConexiones(data)
@@ -99,43 +143,49 @@ export default function ConexionesPage() {
   }
 
   useEffect(() => {
+    fetchUserInfo()
     fetchConexiones()
   }, [])
 
   // ✅ CREAR NUEVA CONEXIÓN
   const handleCreateConnection = async () => {
+    // Validación básica
     if (!newConnection.name || !newConnection.type) {
       toast({
         title: "Error",
-        description: "Por favor completa todos los campos obligatorios",
+        description: "Por favor completa todos los campos obligatorios (nombre y tipo)",
         variant: "destructive",
       })
       return
     }
 
-    if (newConnection.type === "Manual" && !selectedFile) {
-      toast({
-        title: "Error",
-        description: "Por favor selecciona un archivo para la conexión manual",
-        variant: "destructive",
-      })
-      return
-    }
-
-    if (newConnection.type !== "Manual" && !newConnection.url) {
-      toast({
-        title: "Error", 
-        description: "Por favor proporciona una URL para la conexión",
-        variant: "destructive",
-      })
-      return
+    // Validación específica por tipo
+    if (newConnection.type === "Manual") {
+      if (!selectedFile) {
+        toast({
+          title: "Error",
+          description: "Por favor selecciona un archivo para la conexión manual",
+          variant: "destructive",
+        })
+        return
+      }
+    } else {
+      // Para XML y API: URL es obligatoria
+      if (!newConnection.url || newConnection.url.trim() === "") {
+        toast({
+          title: "Error", 
+          description: "Por favor proporciona una URL para la conexión",
+          variant: "destructive",
+        })
+        return
+      }
     }
 
     try {
       setCreating(true)
       console.log("🔄 Creando conexión:", newConnection)
 
-      const createdConnection = await createConnection(newConnection)
+      const createdConnection = await api.createConnection(newConnection)
       console.log("✅ Conexión creada:", createdConnection)
 
       toast({
@@ -160,7 +210,7 @@ export default function ConexionesPage() {
           try {
             console.log(`🔄 Ejecutando importación automática para conexión ${createdConnection.id} (tipo: ${newConnection.type})...`)
 
-            const importResult = await importConnection(createdConnection.id)
+            const importResult = await api.importConnection(createdConnection.id)
             console.log("✅ Importación automática completada:", importResult)
 
             toast({
@@ -193,7 +243,7 @@ export default function ConexionesPage() {
           setTimeout(async () => {
             try {
               console.log(`📁 Subiendo archivo para conexión manual ${createdConnection.id}...`)
-              const uploadResult = await uploadFile(createdConnection.id, selectedFile)
+              const uploadResult = await api.uploadFile(createdConnection.id, selectedFile)
               console.log("✅ Upload automático completado:", uploadResult)
 
               toast({
@@ -221,7 +271,20 @@ export default function ConexionesPage() {
       }
 
       // Limpiar formulario y cerrar dialog
-      setNewConnection({ name: "", type: "", url: "", frequency: "daily", clientId: 1 })
+      setNewConnection({ 
+        name: "", 
+        type: "", 
+        url: "", 
+        frequency: "daily", 
+        // clientId se asigna automáticamente en el backend
+        sourceType: "",
+        endpoint: "",
+        headers: "",
+        payloadTemplate: "",
+        method: "GET",
+        feedUrl: "",
+        notes: ""
+      })
       setSelectedFile(null)
       setIsDialogOpen(false)
 
@@ -375,7 +438,7 @@ export default function ConexionesPage() {
       console.log(`🔄 Importando ofertas para conexión ${connectionId}...`)
 
       // Para conexiones XML/API, usar importación normal
-      const result = await importConnection(connectionId)
+      const result = await api.importConnection(connectionId)
       console.log("✅ Importación completada:", result)
 
       // Actualización optimista inmediata del estado local
@@ -495,6 +558,21 @@ export default function ConexionesPage() {
         return <Badge variant="destructive">Error</Badge>
       case "pending":
         return <Badge variant="secondary">Pendiente</Badge>
+      case "importing":
+        return <Badge className="bg-blue-100 text-blue-800">
+          <RefreshCw className="h-3 w-3 mr-1 animate-spin" />
+          Procesando...
+        </Badge>
+      case "processing_offers":
+        return <Badge className="bg-orange-100 text-orange-800">
+          <RefreshCw className="h-3 w-3 mr-1 animate-spin" />
+          Procesando ofertas
+        </Badge>
+      case "detecting_fields":
+        return <Badge className="bg-purple-100 text-purple-800">
+          <RefreshCw className="h-3 w-3 mr-1 animate-spin" />
+          Detectando campos
+        </Badge>
       default:
         return <Badge variant="outline">Desconocido</Badge>
     }
@@ -611,7 +689,7 @@ export default function ConexionesPage() {
                   <Label htmlFor="type">Tipo de conexión *</Label>
                   <Select
                     value={newConnection.type}
-                    onValueChange={(value) => setNewConnection((prev) => ({ ...prev, type: value }))}
+                    onValueChange={handleTypeChange}
                   >
                     <SelectTrigger>
                       <SelectValue placeholder="Selecciona el tipo" />
@@ -624,7 +702,9 @@ export default function ConexionesPage() {
                   </Select>
                 </div>
                 <div className="space-y-2">
-                  <Label htmlFor="url">URL o Archivo *</Label>
+                  <Label htmlFor="url">
+                    {newConnection.type === "Manual" ? "Archivo" : "URL"} *
+                  </Label>
                   {newConnection.type === "Manual" ? (
                     <div className="space-y-2">
                       <Input
@@ -649,6 +729,8 @@ export default function ConexionesPage() {
                     />
                   )}
                 </div>
+
+
                 <div className="space-y-2">
                   <Label htmlFor="frequency">Frecuencia de actualización</Label>
                   <Select
@@ -666,6 +748,156 @@ export default function ConexionesPage() {
                     </SelectContent>
                   </Select>
                 </div>
+
+                {/* Campos técnicos específicos por tipo */}
+                {newConnection.type !== "Manual" && newConnection.type !== "" && (
+                  <>
+                    <div className="border-t pt-4">
+                      <h3 className="text-sm font-medium mb-3">Configuración Técnica</h3>
+                      
+                      <div className="space-y-4">
+                        {/* Campos para XML Feed */}
+                        {newConnection.type === "XML" && (
+                          <>
+                            <div className="space-y-2">
+                              <Label htmlFor="sourceType">Tipo de Fuente XML</Label>
+                              <Select
+                                value={newConnection.sourceType}
+                                onValueChange={(value) => setNewConnection((prev) => ({ ...prev, sourceType: value }))}
+                              >
+                                <SelectTrigger>
+                                  <SelectValue placeholder="Selecciona el tipo de XML" />
+                                </SelectTrigger>
+                                <SelectContent>
+                                  <SelectItem value="RSS">RSS Feed</SelectItem>
+                                  <SelectItem value="ATOM">ATOM Feed</SelectItem>
+                                  <SelectItem value="XML_CUSTOM">XML Personalizado</SelectItem>
+                                </SelectContent>
+                              </Select>
+                            </div>
+
+                            <div className="space-y-2">
+                              <Label htmlFor="method">Método HTTP</Label>
+                              <Select
+                                value={newConnection.method}
+                                onValueChange={(value) => setNewConnection((prev) => ({ ...prev, method: value }))}
+                              >
+                                <SelectTrigger>
+                                  <SelectValue />
+                                </SelectTrigger>
+                                <SelectContent>
+                                  <SelectItem value="GET">GET (Recomendado para XML)</SelectItem>
+                                  <SelectItem value="POST">POST (Si requiere autenticación)</SelectItem>
+                                </SelectContent>
+                              </Select>
+                            </div>
+
+                            <div className="space-y-2">
+                              <Label htmlFor="headers">Headers HTTP (Opcional)</Label>
+                              <textarea
+                                id="headers"
+                                className="w-full min-h-[80px] px-3 py-2 text-sm ring-offset-background placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 border border-input bg-background rounded-md"
+                                value={newConnection.headers}
+                                onChange={(e) => setNewConnection((prev) => ({ ...prev, headers: e.target.value }))}
+                                placeholder='{"Authorization": "Bearer token", "User-Agent": "JobPlatform/1.0"}'
+                              />
+                              <p className="text-xs text-muted-foreground">
+                                Solo si el feed requiere autenticación o headers especiales
+                              </p>
+                            </div>
+                          </>
+                        )}
+
+                        {/* Campos para API REST */}
+                        {newConnection.type === "API" && (
+                          <>
+                            <div className="space-y-2">
+                              <Label htmlFor="sourceType">Tipo de API</Label>
+                              <Select
+                                value={newConnection.sourceType}
+                                onValueChange={(value) => setNewConnection((prev) => ({ ...prev, sourceType: value }))}
+                              >
+                                <SelectTrigger>
+                                  <SelectValue placeholder="Selecciona el tipo de API" />
+                                </SelectTrigger>
+                                <SelectContent>
+                                  <SelectItem value="REST">REST API</SelectItem>
+                                  <SelectItem value="GRAPHQL">GraphQL</SelectItem>
+                                  <SelectItem value="SOAP">SOAP</SelectItem>
+                                </SelectContent>
+                              </Select>
+                            </div>
+
+                            <div className="space-y-2">
+                              <Label htmlFor="endpoint">Endpoint</Label>
+                              <Input
+                                id="endpoint"
+                                value={newConnection.endpoint}
+                                onChange={(e) => setNewConnection((prev) => ({ ...prev, endpoint: e.target.value }))}
+                                placeholder="Endpoint específico para la API"
+                              />
+                            </div>
+
+                            <div className="space-y-2">
+                              <Label htmlFor="method">Método HTTP</Label>
+                                                              <Select
+                                  value={newConnection.method}
+                                  onValueChange={(value) => setNewConnection((prev) => ({ ...prev, method: value }))}
+                                >
+                                  <SelectTrigger>
+                                    <SelectValue />
+                                  </SelectTrigger>
+                                  <SelectContent>
+                                    <SelectItem value="GET">GET</SelectItem>
+                                    <SelectItem value="POST">POST</SelectItem>
+                                    <SelectItem value="PUT">PUT</SelectItem>
+                                    <SelectItem value="PATCH">PATCH</SelectItem>
+                                  </SelectContent>
+                                </Select>
+                            </div>
+
+                            <div className="space-y-2">
+                              <Label htmlFor="headers">Headers HTTP</Label>
+                              <textarea
+                                id="headers"
+                                className="w-full min-h-[80px] px-3 py-2 text-sm ring-offset-background placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 border border-input bg-background rounded-md"
+                                value={newConnection.headers}
+                                onChange={(e) => setNewConnection((prev) => ({ ...prev, headers: e.target.value }))}
+                                placeholder='{"Authorization": "Bearer token", "Content-Type": "application/json"}'
+                              />
+                            </div>
+
+                            <div className="space-y-2">
+                              <Label htmlFor="payloadTemplate">Payload Template (JSON)</Label>
+                              <textarea
+                                id="payloadTemplate"
+                                className="w-full min-h-[100px] px-3 py-2 text-sm ring-offset-background placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 border border-input bg-background rounded-md"
+                                value={newConnection.notes}
+                                onChange={(e) => setNewConnection((prev) => ({ ...prev, payloadTemplate: e.target.value }))}
+                                placeholder='{"query": "{query}", "limit": 100}'
+                              />
+                              <p className="text-xs text-muted-foreground">
+                                Solo para métodos POST/PUT/PATCH
+                              </p>
+                            </div>
+                          </>
+                        )}
+
+                        {/* Campo común para todos los tipos */}
+                        <div className="space-y-2">
+                          <Label htmlFor="notes">Notas</Label>
+                          <textarea
+                            id="notes"
+                            className="w-full min-h-[60px] px-3 py-2 text-sm ring-offset-background placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 border border-input bg-background rounded-md"
+                            value={newConnection.payloadTemplate}
+                            onChange={(e) => setNewConnection((prev) => ({ ...prev, notes: e.target.value }))}
+                            placeholder="Notas sobre esta conexión..."
+                          />
+                        </div>
+                      </div>
+                    </div>
+                  </>
+                )}
                 <div className="flex gap-2 pt-4">
                   <Button onClick={handleCreateConnection} className="flex-1" disabled={creating}>
                     {creating ? (

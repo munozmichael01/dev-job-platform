@@ -5,6 +5,8 @@ import { SidebarProvider } from "@/components/ui/sidebar"
 import { AppSidebar } from "@/components/app-sidebar"
 import { Toaster } from "@/components/ui/toaster"
 import { ThemeProvider } from "@/components/theme-provider"
+import { AuthProvider } from "@/contexts/AuthContext"
+import ProtectedRoute from "@/components/ProtectedRoute"
 
 export const metadata: Metadata = {
   title: "Plataforma de Distribución de Ofertas",
@@ -18,18 +20,19 @@ export default function RootLayout({
 }) {
   return (
     <html lang="es" suppressHydrationWarning>
-      <body className="font-sans">
+      <body className="font-sans" suppressHydrationWarning>
         <ThemeProvider
           attribute="class"
           defaultTheme="system"
           enableSystem
           disableTransitionOnChange
         >
-          <SidebarProvider>
-            <AppSidebar />
-            <main className="flex-1 overflow-auto">{children}</main>
+          <AuthProvider>
+            <ProtectedRoute>
+              {children}
+            </ProtectedRoute>
             <Toaster />
-          </SidebarProvider>
+          </AuthProvider>
         </ThemeProvider>
       </body>
     </html>

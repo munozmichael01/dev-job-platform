@@ -11,7 +11,7 @@ import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, 
 import Link from "next/link"
 import { useRouter } from "next/navigation"
 import { useToast } from "@/hooks/use-toast"
-import { fetchSegments, deleteSegment, recalculateSegment, duplicateSegment } from "@/lib/api-temp"
+import { useApi } from "@/lib/api"
 
 type ApiSegment = {
   Id: number
@@ -28,6 +28,7 @@ type ApiSegment = {
 export default function SegmentosPage() {
   const { toast } = useToast()
   const router = useRouter()
+  const api = useApi()
   const [segmentos, setSegmentos] = useState<ApiSegment[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
@@ -37,7 +38,7 @@ export default function SegmentosPage() {
 
   const loadSegments = async () => {
     try {
-      const data = await fetchSegments()
+      const data = await api.fetchSegments()
       setSegmentos(data)
     } catch (e: any) {
       setError(e.message || "Error al cargar segmentos")
@@ -53,7 +54,7 @@ export default function SegmentosPage() {
   const handleRecalculate = async (segment: ApiSegment) => {
     setRecalculatingId(segment.Id)
     try {
-      const result = await recalculateSegment(segment.Id)
+      const result = await api.recalculateSegment(segment.Id)
       toast({
         title: "Recalculado exitosamente",
         description: `${result.message}. Ofertas: ${result.data.oldCount} → ${result.data.newCount}`
@@ -78,7 +79,7 @@ export default function SegmentosPage() {
   const handleDuplicate = async (segment: ApiSegment) => {
     setDuplicatingId(segment.Id)
     try {
-      const result = await duplicateSegment(segment.Id)
+      const result = await api.duplicateSegment(segment.Id)
       toast({
         title: "Segmento duplicado",
         description: result.message
@@ -107,7 +108,7 @@ export default function SegmentosPage() {
         return
       }
       
-      await deleteSegment(segment.Id)
+      await api.deleteSegment(segment.Id)
       toast({
         title: "Segmento eliminado",
         description: `"${segment.Name}" ha sido eliminado exitosamente`

@@ -1,0 +1,257 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Test Login Flow - Job Platform</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            max-width: 800px;
+            margin: 0 auto;
+            padding: 20px;
+            background-color: #f5f5f5;
+        }
+        .container {
+            background: white;
+            padding: 30px;
+            border-radius: 10px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+        }
+        .form-group {
+            margin-bottom: 15px;
+        }
+        label {
+            display: block;
+            margin-bottom: 5px;
+            font-weight: bold;
+        }
+        input, select {
+            width: 100%;
+            padding: 10px;
+            border: 1px solid #ddd;
+            border-radius: 5px;
+            box-sizing: border-box;
+        }
+        button {
+            background: #007bff;
+            color: white;
+            padding: 12px 24px;
+            border: none;
+            border-radius: 5px;
+            cursor: pointer;
+            font-size: 16px;
+            margin-right: 10px;
+        }
+        button:hover {
+            background: #0056b3;
+        }
+        button:disabled {
+            background: #ccc;
+            cursor: not-allowed;
+        }
+        .logs {
+            background: #f8f9fa;
+            border: 1px solid #dee2e6;
+            border-radius: 5px;
+            padding: 15px;
+            margin-top: 20px;
+            height: 300px;
+            overflow-y: scroll;
+            font-family: monospace;
+            font-size: 12px;
+        }
+        .success {
+            color: #28a745;
+        }
+        .error {
+            color: #dc3545;
+        }
+        .info {
+            color: #17a2b8;
+        }
+        .user-box {
+            background: #e7f3ff;
+            border: 1px solid #b3d9ff;
+            border-radius: 5px;
+            padding: 15px;
+            margin: 10px 0;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>🧪 Test de Flujo de Login - Job Platform</h1>
+        <p>Esta página simula exactamente el flujo de login de la landing page para debugging.</p>
+        
+        <div class="user-box">
+            <h3>👥 Usuarios disponibles para testing:</h3>
+            <div class="form-group">
+                <label>Seleccionar usuario predefinido:</label>
+                <select id="userSelect">
+                    <option value="">-- Seleccionar usuario --</option>
+                    <option value="juan@miempresa.com,password123">Juan Pérez (Propietario de datos)</option>
+                    <option value="michael.munoz@turijobs.com,Turijobs-2021">Michael Munoz (Usuario regular)</option>
+                    <option value="superadmin@jobplatform.com,admin123">Super Admin (Ve todo)</option>
+                </select>
+            </div>
+        </div>
+
+        <form id="loginForm">
+            <div class="form-group">
+                <label for="email">Email:</label>
+                <input type="email" id="email" required>
+            </div>
+            <div class="form-group">
+                <label for="password">Password:</label>
+                <input type="password" id="password" required>
+            </div>
+            <button type="submit" id="loginBtn">🔑 Hacer Login</button>
+            <button type="button" id="clearBtn">🗑️ Limpiar Logs</button>
+            <button type="button" id="checkBtn">🔍 Verificar localStorage</button>
+            <button type="button" id="dashboardBtn">🏠 Ir al Dashboard</button>
+        </form>
+
+        <div class="logs" id="logs"></div>
+    </div>
+
+    <script>
+        const logs = document.getElementById('logs');
+        const loginForm = document.getElementById('loginForm');
+        const loginBtn = document.getElementById('loginBtn');
+        const userSelect = document.getElementById('userSelect');
+        const emailInput = document.getElementById('email');
+        const passwordInput = document.getElementById('password');
+
+        function log(message, type = 'info') {
+            const timestamp = new Date().toLocaleTimeString();
+            const logEntry = document.createElement('div');
+            logEntry.className = type;
+            logEntry.textContent = `[${timestamp}] ${message}`;
+            logs.appendChild(logEntry);
+            logs.scrollTop = logs.scrollHeight;
+            console.log(`[${timestamp}] ${message}`);
+        }
+
+        // Auto-fill cuando se selecciona un usuario
+        userSelect.addEventListener('change', (e) => {
+            if (e.target.value) {
+                const [email, password] = e.target.value.split(',');
+                emailInput.value = email;
+                passwordInput.value = password;
+                log(`Usuario auto-completado: ${email}`, 'info');
+            }
+        });
+
+        // Limpiar logs
+        document.getElementById('clearBtn').addEventListener('click', () => {
+            logs.innerHTML = '';
+            log('Logs limpiados', 'info');
+        });
+
+        // Verificar localStorage
+        document.getElementById('checkBtn').addEventListener('click', () => {
+            const token = localStorage.getItem('auth_token');
+            const user = localStorage.getItem('auth_user');
+            
+            log('=== ESTADO ACTUAL DEL LOCALSTORAGE ===', 'info');
+            log(`Token existente: ${!!token}`, token ? 'success' : 'error');
+            log(`Usuario existente: ${!!user}`, user ? 'success' : 'error');
+            
+            if (token) {
+                log(`Token length: ${token.length}`, 'info');
+                log(`Token (primeros 50 chars): ${token.substring(0, 50)}...`, 'info');
+            }
+            
+            if (user) {
+                try {
+                    const userData = JSON.parse(user);
+                    log(`Usuario: ${userData.email} (${userData.role})`, 'success');
+                    log(`UserID: ${userData.id}`, 'info');
+                } catch (error) {
+                    log(`Error parseando user data: ${error.message}`, 'error');
+                }
+            }
+        });
+
+        // Ir al dashboard
+        document.getElementById('dashboardBtn').addEventListener('click', () => {
+            log('Redirigiendo al dashboard...', 'info');
+            window.open('http://localhost:3006', '_blank');
+        });
+
+        // Manejar login
+        loginForm.addEventListener('submit', async (e) => {
+            e.preventDefault();
+            
+            const email = emailInput.value;
+            const password = passwordInput.value;
+            
+            if (!email || !password) {
+                log('Error: Email y contraseña son requeridos', 'error');
+                return;
+            }
+
+            loginBtn.disabled = true;
+            loginBtn.textContent = '⏳ Iniciando sesión...';
+            
+            log('=== INICIANDO FLUJO DE LOGIN ===', 'info');
+            log(`Email: ${email}`, 'info');
+            log('Enviando request al backend...', 'info');
+
+            try {
+                // Simular exactamente el mismo fetch que hace la landing page
+                const response = await fetch('http://localhost:3002/api/auth/login', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({ email, password })
+                });
+
+                log(`Response status: ${response.status}`, response.ok ? 'success' : 'error');
+                
+                const data = await response.json();
+                log(`Response data received`, 'info');
+                log(`Success: ${data.success}`, data.success ? 'success' : 'error');
+
+                if (!data.success) {
+                    throw new Error(data.error || 'Error en autenticación');
+                }
+
+                log('✅ Login exitoso!', 'success');
+                log(`Usuario: ${data.user.email} (${data.user.role})`, 'success');
+                log(`UserID: ${data.user.id}`, 'info');
+                
+                // Guardar en localStorage
+                log('Guardando token en localStorage...', 'info');
+                localStorage.setItem('auth_token', data.token);
+                localStorage.setItem('auth_user', JSON.stringify(data.user));
+                
+                // Verificar que se guardó
+                const savedToken = localStorage.getItem('auth_token');
+                const savedUser = localStorage.getItem('auth_user');
+                log(`Token guardado: ${!!savedToken}`, savedToken ? 'success' : 'error');
+                log(`Usuario guardado: ${!!savedUser}`, savedUser ? 'success' : 'error');
+                
+                if (savedToken) {
+                    log(`Token length: ${savedToken.length}`, 'info');
+                }
+
+                log('🎉 FLUJO DE LOGIN COMPLETADO EXITOSAMENTE!', 'success');
+                log('Puedes hacer clic en "Ir al Dashboard" para probar el acceso', 'info');
+
+            } catch (error) {
+                log(`❌ Error en login: ${error.message}`, 'error');
+            } finally {
+                loginBtn.disabled = false;
+                loginBtn.textContent = '🔑 Hacer Login';
+            }
+        });
+
+        // Log inicial
+        log('🧪 Test de Login Flow inicializado', 'success');
+        log('Selecciona un usuario o ingresa credenciales manualmente', 'info');
+    </script>
+</body>
+</html>

@@ -1,9 +1,12 @@
 // API base
 const API_URL = 'http://localhost:3002';
 
+// Import fetchWithAuth from AuthContext
+// Esta función será inyectada desde el componente que use estas funciones
+
 // -------- Conexiones --------
-export async function fetchConnections() {
-  const res = await fetch(`${API_URL}/api/connections`, { cache: 'no-store' });
+export async function fetchConnections(fetchWithAuth: any) {
+  const res = await fetchWithAuth(`${API_URL}/api/connections`, { cache: 'no-store' });
   if (!res.ok) throw new Error('Error al obtener conexiones');
   return res.json();
 }
