@@ -122,3 +122,4 @@ export function ChannelCapabilitiesBanner({ channelId, className }: ChannelCapab
 
 export default ChannelCapabilitiesBanner;
 
+

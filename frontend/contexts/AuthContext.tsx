@@ -211,8 +211,9 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       localStorage.removeItem('auth_token')
       localStorage.removeItem('auth_user')
       
-      // Redirigir a página de login interna
-      window.location.href = '/login'
+      // Redirigir al login de la landing page
+      const landingUrl = process.env.NEXT_PUBLIC_LANDING_URL || 'http://localhost:3000'
+      window.location.href = `${landingUrl}/login`
     }
   }
 

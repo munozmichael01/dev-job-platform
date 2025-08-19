@@ -37,8 +37,9 @@ export default function ProtectedRoute({ children }: ProtectedRouteProps) {
     
     // Solo verificar autenticación cuando la inicialización haya terminado
     if (!isLoading && !isAuthenticated && !publicRoutes.includes(pathname)) {
-      console.log('🛡️ ProtectedRoute: Inicialización completa y usuario no autenticado, redirigiendo al login interno...')
-      window.location.href = '/login'
+      console.log('🛡️ ProtectedRoute: Inicialización completa y usuario no autenticado, redirigiendo al login de la landing...')
+      const landingUrl = process.env.NEXT_PUBLIC_LANDING_URL || 'http://localhost:3000'
+      window.location.href = `${landingUrl}/login`
       return
     }
   }, [isLoading, isAuthenticated, pathname])

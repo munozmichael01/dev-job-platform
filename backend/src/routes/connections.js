@@ -4,7 +4,7 @@ const { pool } = require("../db/db")
 const axios = require("axios")
 const xml2js = require("xml2js")
 const sql = require("mssql")
-const { addUserToRequest, requireAuth, onlyOwnData, getUserIdForQuery, isSuperAdmin } = require('../middleware/authMiddleware')
+const { addUserToRequest, requireAuth, onlyOwnData, getUserIdForQuery, isSuperAdmin, addUserIdToRequest } = require('../middleware/authMiddleware')
 
 // GET /api/connections - Listar todas las conexiones (con filtrado por usuario)
 router.get("/", addUserToRequest, requireAuth, onlyOwnData(), async (req, res) => {

@@ -37,8 +37,16 @@
       "Bash(start http://localhost:3006/conexiones)",
       "Bash(start C:/Dev/job-platform/test-login-flow.html)",
       "Bash(start http://localhost:3006/login)",
-      "Bash(awk:*)"
+      "Bash(awk:*)",
+      "Bash(mv:*)",
+      "Bash(JWT_TOKEN=\"eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJ1c2VySWQiOiIxMSIsImVtYWlsIjoibWljaGFlbC5tdW5vekB0dXJpam9icy5jb20iLCJyb2xlIjoidXNlciIsImZpcnN0TmFtZSI6Ik1pY2hhZWwiLCJsYXN0TmFtZSI6Ik11bm96IiwiY29tcGFueSI6IlR1cmlqb2JzIiwiaWF0IjoxNzU1NjMxNTA5LCJleHAiOjE3NTU3MTc5MDksImF1ZCI6ImpvYi1wbGF0Zm9ybS11c2VycyIsImlzcyI6ImpvYi1wbGF0Zm9ybSJ9.ph9Bs2ERZo01mkjq74LtYMfVSAGZeX11r-tjgsjAOz0\")",
+      "Bash(JWT_TOKEN=\"eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJ1c2VySWQiOiIxNSIsImVtYWlsIjoidGVzdC5uZXcudXNlckBleGFtcGxlLmNvbSIsInJvbGUiOiJ1c2VyIiwiZmlyc3ROYW1lIjoiVGVzdCIsImxhc3ROYW1lIjoiVXNlciIsImNvbXBhbnkiOiJUZXN0IENvbXBhbnkiLCJpYXQiOjE3NTU2MzI3NjksImV4cCI6MTc1NTcxOTE2OSwiYXVkIjoiam9iLXBsYXRmb3JtLXVzZXJzIiwiaXNzIjoiam9iLXBsYXRmb3JtIn0.uWeX82O_gOyDi2wIXylf8QjbrW9qw4780V88ThdaMm0\")",
+      "Bash(JWT_TOKEN=\"eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJ1c2VySWQiOiIxNiIsImVtYWlsIjoicHJvZHVjdGlvbi51c2VyQGV4YW1wbGUuY29tIiwicm9sZSI6InVzZXIiLCJmaXJzdE5hbWUiOiJQcm9kdWN0aW9uIiwibGFzdE5hbWUiOiJVc2VyIiwiY29tcGFueSI6IlRlc3QgUHJvZHVjdGlvbiBDbyIsImlhdCI6MTc1NTYzMzQ2MywiZXhwIjoxNzU1NzE5ODYzLCJhdWQiOiJqb2ItcGxhdGZvcm0tdXNlcnMiLCJpc3MiOiJqb2ItcGxhdGZvcm0ifQ.TRa9RzIfLv5-pkOrD6o_e5aCCAQRuDyOMZvFSazbUCs\")",
+      "Bash(start http://localhost:3006/)"
     ],
-    "deny": []
+    "deny": [],
+    "additionalDirectories": [
+      "C:\\Dev\\landing-page"
+    ]
   }
 }

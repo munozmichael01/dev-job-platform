@@ -68,11 +68,6 @@ export default function LoginPage() {
     }
   }
 
-  // Quick login buttons para testing
-  const quickLogin = (userEmail: string, userPassword: string) => {
-    setEmail(userEmail)
-    setPassword(userPassword)
-  }
 
   return (
     <div className="min-h-screen bg-white">
@@ -103,53 +98,14 @@ export default function LoginPage() {
                   <Zap className="h-6 w-6 text-white" />
                 </div>
                 <h2 className="text-3xl font-bold text-gray-900">
-                  Iniciar Sesión
+                  Bienvenido de vuelta
                 </h2>
                 <p className="mt-2 text-sm text-gray-600">
-                  Accede a tu cuenta de Job<span className="font-bold text-blue-600">Platform</span>
+                  Accede a tu cuenta de <span className="font-bold text-blue-600">Job Distribution Platform</span>
                 </p>
               </div>
 
               <div className="mt-8 space-y-6">
-                {/* Quick Login Buttons para Testing */}
-                <div className="space-y-3">
-                  <Label className="text-sm font-medium text-gray-600">🧪 Usuarios de prueba (hacer clic para auto-completar):</Label>
-                  <div className="grid grid-cols-1 gap-2">
-                    <button
-                      type="button"
-                      onClick={() => quickLogin('juan@miempresa.com', 'password123')}
-                      className="text-left px-3 py-2 text-xs bg-green-50 border border-green-200 rounded-lg hover:bg-green-100 transition-colors"
-                    >
-                      <div className="font-medium text-green-800">👑 Juan Pérez (Propietario)</div>
-                      <div className="text-green-600">Ve sus 9 campañas • juan@miempresa.com</div>
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => quickLogin('michael.munoz@turijobs.com', 'Turijobs-2021')}
-                      className="text-left px-3 py-2 text-xs bg-blue-50 border border-blue-200 rounded-lg hover:bg-blue-100 transition-colors"
-                    >
-                      <div className="font-medium text-blue-800">👤 Michael Munoz (Usuario regular)</div>
-                      <div className="text-blue-600">Ve datos vacíos • michael.munoz@turijobs.com</div>
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => quickLogin('superadmin@jobplatform.com', 'admin123')}
-                      className="text-left px-3 py-2 text-xs bg-purple-50 border border-purple-200 rounded-lg hover:bg-purple-100 transition-colors"
-                    >
-                      <div className="font-medium text-purple-800">🌍 Super Admin (Global)</div>
-                      <div className="text-purple-600">Ve todos los datos • superadmin@jobplatform.com</div>
-                    </button>
-                  </div>
-                </div>
-
-                <div className="relative">
-                  <div className="absolute inset-0 flex items-center">
-                    <div className="w-full border-t border-gray-300" />
-                  </div>
-                  <div className="relative flex justify-center text-sm">
-                    <span className="px-2 bg-white text-gray-500">o iniciar sesión manualmente</span>
-                  </div>
-                </div>
 
                 {/* Login Form */}
                 <form className="space-y-4" onSubmit={handleSubmit}>

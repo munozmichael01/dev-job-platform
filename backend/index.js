@@ -143,6 +143,17 @@ app.use((req, res, next) => {
   next();
 });
 
+// ⚡ AUTH CACHE STATS ENDPOINT
+app.get('/api/auth/cache-stats', (req, res) => {
+  const { getCacheStats } = require('./src/middleware/authMiddleware');
+  const stats = getCacheStats();
+  res.json({
+    success: true,
+    cache: stats,
+    timestamp: new Date().toISOString()
+  });
+});
+
 console.log("🔧 Montando router en /api/connections");
 app.use('/api/connections', connectionsRouter);
 app.use('/api/mappings', mappingsRouter);
