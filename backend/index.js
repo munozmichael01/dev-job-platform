@@ -1,7 +1,7 @@
 const express = require('express');
 const { pool, poolConnect, sql } = require('./src/db/db');
 const JobOffersSearchService = require('./src/services/jobOffersSearchService');
-const trackRoutes = require('./track');
+// const trackRoutes = require('./track'); // Archivo no encontrado - comentado temporalmente
 const connectionsRouter = require('./src/routes/connections');
 const mappingsRouter = require('./src/routes/mappings');
 const segmentsRouter = require('./src/routes/segments');
@@ -99,6 +99,7 @@ setTimeout(() => {
 // CORS configuration (production-ready)
 const allowedOrigins = [
   'http://localhost:3000', 'http://127.0.0.1:3000', // Landing (Next.js)
+  'http://localhost:3001', 'http://127.0.0.1:3001', // Landing alternativo
   'http://localhost:3004', 'http://127.0.0.1:3004',
   'http://localhost:3006', 'http://127.0.0.1:3006',
   'http://localhost:3007', 'http://127.0.0.1:3007',
@@ -134,7 +135,7 @@ app.use(fileUpload({
   abortOnLimit: true,
   responseOnLimit: "File size limit has been reached",
 }));
-app.use('/', trackRoutes);
+// app.use('/', trackRoutes); // Comentado temporalmente - archivo no encontrado
 // Logging middleware para debug
 app.use((req, res, next) => {
   if (req.method === 'POST') {

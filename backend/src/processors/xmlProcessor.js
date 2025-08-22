@@ -421,11 +421,18 @@ class XMLProcessor {
             value = this.getValueFromPath(offer, mapping.SourceField)
           }
 
-          standardOffer[mapping.TargetField] = this.transformValue(
+          let transformedValue = this.transformValue(
             value,
             mapping.TransformationType || "STRING",
             mapping.TransformationRule,
           )
+          
+          // Aplicar limpieza de HTML automáticamente para descripciones
+          if (mapping.TargetField === 'description' && transformedValue && typeof transformedValue === 'string') {
+            transformedValue = this.cleanHtmlContent(transformedValue)
+          }
+          
+          standardOffer[mapping.TargetField] = transformedValue
         } catch (error) {
           standardOffer[mapping.TargetField] = null
         }
@@ -435,7 +442,8 @@ class XMLProcessor {
       standardOffer.ExternalId = String(offer.id || offer.ID || offer.Id || Math.random().toString(36).substr(2, 9))
       standardOffer.Title = String(offer.title || offer.jobtitle || offer.job_title || "")
       standardOffer.JobTitle = String(offer.jobtitle || offer.job_title || offer.title || "")
-      standardOffer.Description = String(offer.content || offer.description || offer.job_description || "")
+      const rawDescription = String(offer.content || offer.description || offer.job_description || "")
+      standardOffer.Description = this.cleanHtmlContent(rawDescription)
       standardOffer.CompanyName = String(offer.company || offer.company_name || "")
       standardOffer.Sector = String(offer.category || offer.sector || "")
       standardOffer.Address = String(offer.address || offer.location || "")
@@ -482,6 +490,44 @@ class XMLProcessor {
     return path.split(".").reduce((current, part) => current?.[part], obj)
   }
 
+  // ✅ LIMPIAR ETIQUETAS HTML Y ENTIDADES
+  cleanHtmlContent(content) {
+    if (!content || typeof content !== 'string') return content
+
+    try {
+      // Limpiar etiquetas HTML comunes
+      let cleaned = content
+        .replace(/<br\s*\/?>/gi, '\n')           // <br> -> salto de línea
+        .replace(/<\/p>/gi, '\n\n')             // </p> -> doble salto
+        .replace(/<p[^>]*>/gi, '')              // <p> tags
+        .replace(/<div[^>]*>/gi, '\n')          // <div> -> salto
+        .replace(/<\/div>/gi, '')               // </div>
+        .replace(/<ul[^>]*>/gi, '\n')           // <ul>
+        .replace(/<\/ul>/gi, '\n')              // </ul>
+        .replace(/<li[^>]*>/gi, '• ')           // <li> -> bullet
+        .replace(/<\/li>/gi, '\n')              // </li>
+        .replace(/<strong[^>]*>(.*?)<\/strong>/gi, '**$1**')  // <strong> -> **text**
+        .replace(/<b[^>]*>(.*?)<\/b>/gi, '**$1**')            // <b> -> **text**
+        .replace(/<em[^>]*>(.*?)<\/em>/gi, '*$1*')            // <em> -> *text*
+        .replace(/<i[^>]*>(.*?)<\/i>/gi, '*$1*')              // <i> -> *text*
+        .replace(/<[^>]+>/g, '')                              // Quitar todas las demás etiquetas
+        .replace(/&nbsp;/g, ' ')                              // &nbsp; -> espacio
+        .replace(/&amp;/g, '&')                               // &amp; -> &
+        .replace(/&lt;/g, '<')                                // &lt; -> <
+        .replace(/&gt;/g, '>')                                // &gt; -> >
+        .replace(/&quot;/g, '"')                              // &quot; -> "
+        .replace(/&#39;/g, "'")                               // &#39; -> '
+        .replace(/\n\s*\n\s*\n/g, '\n\n')                    // Múltiples saltos -> doble
+        .replace(/^\s+|\s+$/g, '')                            // Trim espacios inicio/fin
+        .replace(/\s{2,}/g, ' ')                              // Múltiples espacios -> uno
+
+      return cleaned
+    } catch (error) {
+      console.warn('⚠️ Error limpiando HTML:', error.message)
+      return content
+    }
+  }
+
   transformValue(value, type, rule) {
     if (value === undefined || value === null) return null
 
@@ -499,7 +545,12 @@ class XMLProcessor {
         return value || null
       case "STRING":
       default:
-        return String(value || "")
+        const stringValue = String(value || "")
+        // Si es content/description, limpiar HTML
+        if (rule === 'clean_html' || (stringValue.includes('<') && stringValue.includes('>'))) {
+          return this.cleanHtmlContent(stringValue)
+        }
+        return stringValue
     }
   }
 
@@ -688,15 +739,15 @@ class XMLProcessor {
 
       // ✅ MAPEO ESTÁNDAR CORREGIDO con PRIORIDADES INTELIGENTES
       const standardMappings = {
-        'id': 'apply_url',           // ID -> campo temporal 
+        'id': 'url',                 // ID -> URL externa
         'title': 'title',            // Título
         'jobtitle': 'title',         
-        'content': 'description',    // Descripción
+        'content': 'description',    // Descripción con limpieza HTML
         'description': 'description',
         'company': 'company',        // Empresa
         'category': 'sector',        // Sector
-        'url': 'apply_url',          // URL de aplicación
-        'url_apply': 'apply_url',
+        'url': 'url',                // URL externa
+        'url_apply': 'apply_url',    // URL de aplicación
         'application_url': 'apply_url',
         'apply_url': 'apply_url',
         'publication': 'published_at', // Fecha de publicación
@@ -705,9 +756,10 @@ class XMLProcessor {
         'salary': 'salary_min',      // Salario
         'salary_min': 'salary_min',
         'salary_max': 'salary_max',
-        'jobtype': 'contract_type',  // Tipo de contrato
+        'jobtype': 'contract_type',  // Tipo de contrato/modalidad
         'job_type': 'contract_type',
         'tipo': 'contract_type',
+        'modalidad': 'contract_type',
         'vacancies': 'contract_type', // temporal
         'num_vacancies': 'contract_type'
       }
@@ -770,6 +822,7 @@ class XMLProcessor {
       console.log(`🚀 CLAUDE DEBUG: Inserting ${mappings.length} mappings to ClientFieldMappings...`)
       for (const mapping of mappings) {
         console.log(`🚀 CLAUDE DEBUG: Inserting mapping: ${mapping.SourceField} → ${mapping.TargetField}`)
+        console.log(`🚀 CLAUDE DEBUG: ClientId = ${mapping.ClientId}, ConnectionId = ${mapping.ConnectionId}`)
         
         try {
           await pool

@@ -10,9 +10,11 @@ import { PieChart as RechartsPieChart, Pie, Cell, ResponsiveContainer, Tooltip, 
 import Link from "next/link"
 import { useState, useEffect } from "react"
 import { useApi } from "@/lib/api"
+import { useAuth } from "@/contexts/AuthContext"
 
 export default function Dashboard() {
   const api = useApi()
+  const { login } = useAuth()
   const [activeCampaigns, setActiveCampaigns] = useState([])
   const [dashboardMetrics, setDashboardMetrics] = useState(null)
   const [offersStats, setOffersStats] = useState(null)

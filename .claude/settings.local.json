@@ -42,7 +42,11 @@
       "Bash(JWT_TOKEN=\"eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJ1c2VySWQiOiIxMSIsImVtYWlsIjoibWljaGFlbC5tdW5vekB0dXJpam9icy5jb20iLCJyb2xlIjoidXNlciIsImZpcnN0TmFtZSI6Ik1pY2hhZWwiLCJsYXN0TmFtZSI6Ik11bm96IiwiY29tcGFueSI6IlR1cmlqb2JzIiwiaWF0IjoxNzU1NjMxNTA5LCJleHAiOjE3NTU3MTc5MDksImF1ZCI6ImpvYi1wbGF0Zm9ybS11c2VycyIsImlzcyI6ImpvYi1wbGF0Zm9ybSJ9.ph9Bs2ERZo01mkjq74LtYMfVSAGZeX11r-tjgsjAOz0\")",
       "Bash(JWT_TOKEN=\"eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJ1c2VySWQiOiIxNSIsImVtYWlsIjoidGVzdC5uZXcudXNlckBleGFtcGxlLmNvbSIsInJvbGUiOiJ1c2VyIiwiZmlyc3ROYW1lIjoiVGVzdCIsImxhc3ROYW1lIjoiVXNlciIsImNvbXBhbnkiOiJUZXN0IENvbXBhbnkiLCJpYXQiOjE3NTU2MzI3NjksImV4cCI6MTc1NTcxOTE2OSwiYXVkIjoiam9iLXBsYXRmb3JtLXVzZXJzIiwiaXNzIjoiam9iLXBsYXRmb3JtIn0.uWeX82O_gOyDi2wIXylf8QjbrW9qw4780V88ThdaMm0\")",
       "Bash(JWT_TOKEN=\"eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJ1c2VySWQiOiIxNiIsImVtYWlsIjoicHJvZHVjdGlvbi51c2VyQGV4YW1wbGUuY29tIiwicm9sZSI6InVzZXIiLCJmaXJzdE5hbWUiOiJQcm9kdWN0aW9uIiwibGFzdE5hbWUiOiJVc2VyIiwiY29tcGFueSI6IlRlc3QgUHJvZHVjdGlvbiBDbyIsImlhdCI6MTc1NTYzMzQ2MywiZXhwIjoxNzU1NzE5ODYzLCJhdWQiOiJqb2ItcGxhdGZvcm0tdXNlcnMiLCJpc3MiOiJqb2ItcGxhdGZvcm0ifQ.TRa9RzIfLv5-pkOrD6o_e5aCCAQRuDyOMZvFSazbUCs\")",
-      "Bash(start http://localhost:3006/)"
+      "Bash(start http://localhost:3006/)",
+      "Bash(sc query:*)",
+      "Bash(start http://localhost:3001/login)",
+      "Bash(JWT_TOKEN=\"eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJ1c2VySWQiOiIxMSIsImVtYWlsIjoibWljaGFlbC5tdW5vekB0dXJpam9icy5jb20iLCJyb2xlIjoidXNlciIsImZpcnN0TmFtZSI6Ik1pY2hhZWwiLCJsYXN0TmFtZSI6Ik11bm96IiwiY29tcGFueSI6IlR1cmlqb2JzIiwiaWF0IjoxNzU1ODQ4ODA2LCJleHAiOjE3NTU5MzUyMDYsImF1ZCI6ImpvYi1wbGF0Zm9ybS11c2VycyIsImlzcyI6ImpvYi1wbGF0Zm9ybSJ9.Jpm7R8TuL24xFAiJj7WDWoJv56bHUcE7U0ghvXZp7YM\")",
+      "Bash(start http://localhost:3006/conexiones/2089/mapeo)"
     ],
     "deny": [],
     "additionalDirectories": [

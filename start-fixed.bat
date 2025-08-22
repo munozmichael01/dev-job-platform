@@ -1,5 +1,5 @@
 @echo off
-echo 🚀 INICIANDO JOB PLATFORM - ARQUITECTURA COMPLETA
+echo 🚀 INICIANDO JOB PLATFORM - ARQUITECTURA COMPLETA (CORREGIDA)
 echo.
 echo ⏳ Verificando puertos...
 netstat -ano | findstr :3000 >nul
@@ -30,19 +30,19 @@ echo ✅ Puertos libres. Continuando...
 echo.
 
 echo 🌍 INICIANDO LANDING PAGE (Puerto 3000)...
-start "Landing-Page" cmd /k "cd ..\landing-page && echo 🌍 INICIANDO LANDING PAGE... && npm run dev"
+start "Landing-Page" cmd /k "cd /d C:\Dev\landing-page && echo 🌍 INICIANDO LANDING PAGE... && \"C:\Program Files\nodejs\npm.cmd\" run dev"
 
-echo ⏳ Esperando 2 segundos...
-timeout /t 2 /nobreak >nul
+echo ⏳ Esperando 3 segundos...
+timeout /t 3 /nobreak >nul
 
 echo 🔧 INICIANDO BACKEND (Puerto 3002)...
-start "Backend-API" cmd /k "cd backend && echo 🚀 SERVIDOR BACKEND... && node index.js"
+start "Backend-API" cmd /k "cd /d C:\Dev\job-platform\backend && echo 🚀 SERVIDOR BACKEND... && \"C:\Program Files\nodejs\node.exe\" index.js"
 
 echo ⏳ Esperando 3 segundos para que el backend se inicie...
 timeout /t 3 /nobreak >nul
 
 echo 🌐 INICIANDO FRONTEND (Puerto 3006)...
-start "Frontend-NextJS" cmd /k "cd frontend && echo 🎯 INICIANDO FRONTEND... && npm run dev"
+start "Frontend-NextJS" cmd /k "cd /d C:\Dev\job-platform\frontend && echo 🎯 INICIANDO FRONTEND... && \"C:\Program Files\nodejs\npm.cmd\" run dev"
 
 echo.
 echo ✅ SERVIDORES INICIADOS:
@@ -59,3 +59,4 @@ echo.
 echo 🎉 ¡Listo para usar!
 echo Presiona cualquier tecla para salir...
 pause >nul
+

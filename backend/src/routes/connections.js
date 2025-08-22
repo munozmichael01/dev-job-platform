@@ -835,7 +835,7 @@ router.post("/:id/test-mapping", async (req, res) => {
 })
 
 // GET /api/connections/:id/fields - Detectar campos de origen
-router.get("/:id/fields", async (req, res) => {
+router.get("/:id/fields", addUserToRequest, requireAuth, async (req, res) => {
   const { id } = req.params
   console.log(`🔍 GET /api/connections/:id/fields - ID: ${id}`)
 
@@ -1096,7 +1096,7 @@ router.post("/:id/test", async (req, res) => {
 })
 
 // GET /api/connections/:id/mapping - Obtener mapeos de campos (alias singular)
-router.get("/:id/mapping", async (req, res) => {
+router.get("/:id/mapping", addUserToRequest, requireAuth, async (req, res) => {
   const { id } = req.params
   console.log(`🔍 GET /api/connections/:id/mapping - ID: ${id}`)
 
@@ -1139,7 +1139,7 @@ router.get("/:id/mapping", async (req, res) => {
 })
 
 // GET /api/connections/:id/mappings - Obtener mapeos de campos
-router.get("/:id/mappings", async (req, res) => {
+router.get("/:id/mappings", addUserToRequest, requireAuth, async (req, res) => {
   const { id } = req.params
   console.log(`🚀 CLAUDE DEBUG: GET /mappings endpoint called for connection ${id}`)
   console.log(`🔍 GET /api/connections/:id/mappings - ID: ${id}`)
@@ -1176,11 +1176,13 @@ router.get("/:id/mappings", async (req, res) => {
 })
 
 // POST /api/connections/:id/mappings - Guardar mapeos de campos
-router.post("/:id/mappings", async (req, res) => {
+router.post("/:id/mappings", addUserToRequest, requireAuth, async (req, res) => {
   const { id } = req.params
   const { mappings } = req.body
 
-  console.log(`🔍 POST /api/connections/:id/mappings - ID: ${id}`, JSON.stringify(mappings, null, 2))
+  console.log(`🔍 POST /api/connections/:id/mappings - ID: ${id}`)
+  console.log(`🔍 UserId: ${req.userId}, User:`, req.user)
+  console.log(`🔍 Mappings recibidos:`, JSON.stringify(mappings, null, 2))
 
   try {
     if (!Array.isArray(mappings)) {
@@ -1189,35 +1191,50 @@ router.post("/:id/mappings", async (req, res) => {
 
     await pool
 
+    // Obtener ClientId de la conexión
+    const connectionQuery = await pool
+      .request()
+      .input("connectionId", sql.Int, id)
+      .query("SELECT clientId FROM Connections WHERE id = @connectionId")
+    
+    const clientId = connectionQuery.recordset[0]?.clientId
+    if (!clientId) {
+      throw new Error("ClientId no encontrado para esta conexión")
+    }
+    
+    console.log(`🔐 Usando ClientId = ${clientId} para conexión ${id}`)
+
     // Usar la tabla ClientFieldMappings que existe
     for (const mapping of mappings) {
       const sourceField = mapping.sourceField || mapping.SourceField
       const targetField = mapping.targetField || mapping.TargetField
       const transformation = mapping.transformation || mapping.TransformationRule || "STRING"
       
-      console.log("🔄 Guardando mapeo:", { sourceField, targetField, transformation })
+      console.log("🔄 Guardando mapeo:", { sourceField, targetField, transformation, clientId })
       
       try {
         await pool
           .request()
           .input("ConnectionId", sql.Int, id)
+          .input("ClientId", sql.Int, clientId)
           .input("SourceField", sql.NVarChar(255), sourceField)
           .input("TargetField", sql.NVarChar(255), targetField)
           .input("TransformationType", sql.NVarChar(50), transformation)
           .input("TransformationRule", sql.NVarChar(sql.MAX), null)
           .query(`
             MERGE INTO ClientFieldMappings WITH (HOLDLOCK) AS Target
-            USING (VALUES (@ConnectionId, @SourceField, @TargetField)) AS Source(ConnectionId, SourceField, TargetField)
+            USING (VALUES (@ConnectionId, @ClientId, @SourceField, @TargetField)) AS Source(ConnectionId, ClientId, SourceField, TargetField)
             ON Target.ConnectionId = Source.ConnectionId 
             AND Target.SourceField = Source.SourceField
             AND Target.TargetField = Source.TargetField
             WHEN MATCHED THEN
                 UPDATE SET 
+                    ClientId = @ClientId,
                     TransformationType = @TransformationType,
                     TransformationRule = @TransformationRule
             WHEN NOT MATCHED THEN
-                INSERT (ConnectionId, SourceField, TargetField, TransformationType, TransformationRule)
-                VALUES (@ConnectionId, @SourceField, @TargetField, @TransformationType, @TransformationRule);
+                INSERT (ConnectionId, ClientId, SourceField, TargetField, TransformationType, TransformationRule)
+                VALUES (@ConnectionId, @ClientId, @SourceField, @TargetField, @TransformationType, @TransformationRule);
           `)
       } catch (dbError) {
         console.error("❌ Error guardando mapeo individual:", dbError)

@@ -1,6 +1,11 @@
 const express = require('express');
 const { pool, poolConnect, sql } = require('../db/db');
+const { addUserToRequest, requireAuth } = require('../middleware/authMiddleware');
 const router = express.Router();
+
+// Aplicar middleware de autenticación a todas las rutas  
+router.use(addUserToRequest);
+router.use(requireAuth);
 
 /**
  * GET /api/metrics/dashboard
@@ -8,47 +13,57 @@ const router = express.Router();
  */
 router.get('/dashboard', async (req, res) => {
   try {
-    console.log('📊 Obteniendo métricas del dashboard...');
+    const userId = req.userId;
+    console.log(`📊 Obteniendo métricas del dashboard para usuario ${userId}...`);
     
     await poolConnect;
     
-    // 1. Distribución de presupuesto por canal (datos reales + simulados si no hay datos)
-    const budgetDistributionQuery = await pool.request().query(`
+    // 1. Distribución de presupuesto por canal (filtrado por UserId)
+    const budgetDistributionQuery = await pool.request()
+      .input('userId', sql.Int, userId)
+      .query(`
       SELECT 
-        ChannelId,
-        SUM(AllocatedBudget) as TotalBudget,
-        SUM(SpentBudget) as SpentBudget,
+        cc.ChannelId,
+        SUM(cc.AllocatedBudget) as TotalBudget,
+        SUM(cc.SpentBudget) as SpentBudget,
         COUNT(*) as ActiveCampaigns
-      FROM CampaignChannels 
-      WHERE Status = 'active'
-      GROUP BY ChannelId
+      FROM CampaignChannels cc
+      INNER JOIN Campaigns c ON cc.CampaignId = c.Id
+      WHERE cc.Status = 'active' AND c.UserId = @userId
+      GROUP BY cc.ChannelId
       ORDER BY TotalBudget DESC
     `);
     
-    // 2. Métricas generales
-    const generalMetricsQuery = await pool.request().query(`
+    // 2. Métricas generales (filtrado por UserId)
+    const generalMetricsQuery = await pool.request()
+      .input('userId', sql.Int, userId)
+      .query(`
       SELECT 
-        COUNT(DISTINCT CampaignId) as ActiveCampaigns,
-        COUNT(DISTINCT OfferId) as ActiveOffers,
-        SUM(AllocatedBudget) as TotalBudget,
-        SUM(SpentBudget) as TotalSpent,
-        SUM(AchievedApplications) as TotalApplications,
-        AVG(CurrentCPA) as AvgCPA
-      FROM CampaignChannels 
-      WHERE Status = 'active'
+        COUNT(DISTINCT cc.CampaignId) as ActiveCampaigns,
+        COUNT(DISTINCT cc.OfferId) as ActiveOffers,
+        SUM(cc.AllocatedBudget) as TotalBudget,
+        SUM(cc.SpentBudget) as TotalSpent,
+        SUM(cc.AchievedApplications) as TotalApplications,
+        AVG(CASE WHEN cc.CurrentCPA > 0 THEN cc.CurrentCPA END) as AvgCPA
+      FROM CampaignChannels cc
+      INNER JOIN Campaigns c ON cc.CampaignId = c.Id
+      WHERE cc.Status = 'active' AND c.UserId = @userId
     `);
     
-    // 3. Performance por canal
-    const channelPerformanceQuery = await pool.request().query(`
+    // 3. Performance por canal (filtrado por UserId)
+    const channelPerformanceQuery = await pool.request()
+      .input('userId', sql.Int, userId)
+      .query(`
       SELECT 
-        ChannelId,
-        AVG(CurrentCPA) as AvgCPA,
-        AVG(ConversionRate) as AvgConversionRate,
-        SUM(AchievedApplications) as TotalApplications,
+        cc.ChannelId,
+        AVG(CASE WHEN cc.CurrentCPA > 0 THEN cc.CurrentCPA END) as AvgCPA,
+        AVG(CASE WHEN cc.ConversionRate > 0 THEN cc.ConversionRate END) as AvgConversionRate,
+        SUM(cc.AchievedApplications) as TotalApplications,
         COUNT(*) as ActiveCampaigns
-      FROM CampaignChannels 
-      WHERE Status = 'active' AND CurrentCPA IS NOT NULL
-      GROUP BY ChannelId
+      FROM CampaignChannels cc
+      INNER JOIN Campaigns c ON cc.CampaignId = c.Id
+      WHERE cc.Status = 'active' AND c.UserId = @userId AND cc.CurrentCPA IS NOT NULL
+      GROUP BY cc.ChannelId
     `);
     
     // Procesar datos de distribución de presupuesto
@@ -68,9 +83,7 @@ router.get('/dashboard', async (req, res) => {
       color: getChannelColor(row.ChannelId)
     }));
     
-    // Si no hay datos reales, usar datos simulados para demostración
-    const hasApplicationsData = applicationsDistribution.some(app => app.value > 0);
-    
+    // Si no hay datos reales de campañas, usar datos simulados
     if (budgetDistribution.length === 0) {
       console.log('⚠️ No hay datos reales de campañas, usando datos simulados para demo');
       budgetDistribution = [
@@ -86,25 +99,42 @@ router.get('/dashboard', async (req, res) => {
         { name: 'WhatJobs', value: 76, campaigns: 2, color: '#f59e0b' },
         { name: 'JobRapido', value: 52, campaigns: 1, color: '#8b5cf6' }
       ];
-    } else if (!hasApplicationsData && applicationsDistribution.length > 0) {
-      // Tenemos campañas reales pero sin aplicaciones aún - usar datos de demo para aplicaciones
-      console.log('📊 Campañas reales encontradas pero sin aplicaciones aún - usando datos de demo para gráfico');
-      applicationsDistribution = [
-        { name: 'Talent.com', value: 145, campaigns: 3, color: '#3b82f6' },
-        { name: 'Jooble', value: 98, campaigns: 2, color: '#10b981' },
-        { name: 'WhatJobs', value: 76, campaigns: 2, color: '#f59e0b' },
-        { name: 'JobRapido', value: 52, campaigns: 1, color: '#8b5cf6' }
-      ];
     }
     
-    // Procesar métricas generales
-    const generalMetrics = generalMetricsQuery.recordset[0] || {
-      ActiveCampaigns: budgetDistribution.length > 0 ? budgetDistribution.reduce((sum, ch) => sum + ch.campaigns, 0) : 3,
-      ActiveOffers: 80,
-      TotalBudget: budgetDistribution.reduce((sum, ch) => sum + ch.value, 0),
-      TotalSpent: budgetDistribution.reduce((sum, ch) => sum + ch.spent, 0),
-      TotalApplications: 312,
-      AvgCPA: 16.5
+    // Si tenemos distribución de presupuesto pero no aplicaciones reales, mostrar 0 aplicaciones por canal
+    const hasApplicationsData = applicationsDistribution.some(app => app.value > 0);
+    if (budgetDistribution.length > 0 && !hasApplicationsData) {
+      console.log('📊 Usando datos reales de campañas, mostrando 0 aplicaciones por canal (aún no hay aplicaciones)');
+      applicationsDistribution = budgetDistribution.map(budget => ({
+        name: budget.name,
+        value: 0,
+        campaigns: budget.campaigns,
+        color: budget.color
+      }));
+    }
+    
+    // Calcular ofertas activas reales del usuario
+    const activeOffersQuery = await pool.request()
+      .input('userId', sql.Int, userId)
+      .query(`
+      SELECT COUNT(DISTINCT jo.Id) as ActiveOffers
+      FROM JobOffers jo
+      INNER JOIN CampaignChannels cc ON jo.Id = cc.OfferId
+      INNER JOIN Campaigns c ON cc.CampaignId = c.Id
+      WHERE cc.Status = 'active' AND c.UserId = @userId
+    `);
+    
+    // Procesar métricas generales con datos reales
+    const generalMetricsRaw = generalMetricsQuery.recordset[0];
+    const activeOffersCount = activeOffersQuery.recordset[0]?.ActiveOffers || 0;
+    
+    const generalMetrics = {
+      ActiveCampaigns: parseInt(generalMetricsRaw?.ActiveCampaigns || 0),
+      ActiveOffers: parseInt(activeOffersCount),
+      TotalBudget: parseFloat(generalMetricsRaw?.TotalBudget || 0),
+      TotalSpent: parseFloat(generalMetricsRaw?.TotalSpent || 0),
+      TotalApplications: parseInt(generalMetricsRaw?.TotalApplications || 0),
+      AvgCPA: parseFloat(generalMetricsRaw?.AvgCPA || 0)
     };
     
     // Procesar performance por canal
@@ -117,7 +147,7 @@ router.get('/dashboard', async (req, res) => {
       campaigns: row.ActiveCampaigns
     }));
     
-    console.log(`✅ Métricas obtenidas: ${budgetDistribution.length} canales, ${generalMetrics.ActiveCampaigns} campañas activas`);
+    console.log(`✅ Métricas obtenidas para usuario ${userId}: ${budgetDistribution.length} canales, ${generalMetrics.ActiveCampaigns} campañas activas, ${generalMetrics.ActiveOffers} ofertas activas`);
     
     res.json({
       success: true,

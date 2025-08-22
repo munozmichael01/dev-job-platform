@@ -1,0 +1,15 @@
+{
+  "name": "job-platform",
+  "version": "1.0.0",
+  "description": "Plataforma multi-tenant para distribución de ofertas de trabajo",
+  "main": "index.js",
+  "scripts": {
+    "dev:all": "node scripts/dev.js",
+    "start:all": "node scripts/dev.js",
+    "dev": "echo 'Use npm run dev:all para levantar todos los servicios'"
+  },
+  "keywords": ["job-platform", "multi-tenant", "job-offers", "campaigns"],
+  "author": "Job Platform Team",
+  "license": "ISC"
+}
+

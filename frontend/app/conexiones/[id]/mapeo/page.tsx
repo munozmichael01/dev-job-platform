@@ -99,11 +99,12 @@ export default function MapeoPage({ params }: { params: Promise<{ id: string }> 
     { name: "location", type: "string", required: true, description: "Ubicación" },
     { name: "salary_min", type: "number", required: false, description: "Salario mínimo" },
     { name: "salary_max", type: "number", required: false, description: "Salario máximo" },
-    { name: "contract_type", type: "string", required: false, description: "Tipo de contrato" },
+    { name: "contract_type", type: "string", required: false, description: "Tipo de contrato/modalidad" },
     { name: "work_mode", type: "string", required: false, description: "Modalidad de trabajo" },
     { name: "experience_level", type: "string", required: false, description: "Experiencia requerida" },
     { name: "published_at", type: "date", required: true, description: "Fecha de publicación" },
     { name: "apply_url", type: "url", required: true, description: "URL de aplicación" },
+    { name: "url", type: "url", required: false, description: "URL externa de la oferta" },
     { name: "sector", type: "string", required: false, description: "Sector o categoría" },
   ])
 
@@ -218,13 +219,15 @@ export default function MapeoPage({ params }: { params: Promise<{ id: string }> 
           setFieldMapping(mappingObj)
           setTransformations(transformObj)
         } else {
-          console.log("ℹ️ No hay mapeo existente, iniciando con mapeo vacío")
-          // Mapeo inicial sugerido basado en nombres similares
-          if (sourceFields.length > 0) {
-            const initialMapping: { [key: string]: string } = {}
+          console.log("ℹ️ No hay mapeo existente, iniciando con mapeo inteligente")
+        }
+        
+        // ✅ MAPEO INTELIGENTE SIEMPRE - Se ejecuta tanto con mapeo vacío como existente
+        if (sourceFields.length > 0) {
+          const initialMapping: { [key: string]: string } = {}
 
-            // ✅ MAPEO AUTOMÁTICO MEJORADO - Más patrones y campos
-            sourceFields.forEach((sourceField) => {
+          // ✅ MAPEO AUTOMÁTICO MEJORADO - Más patrones y campos
+          sourceFields.forEach((sourceField) => {
               const sourceName = sourceField.name.toLowerCase()
               const sourceDesc = sourceField.description.toLowerCase()
               
@@ -282,17 +285,103 @@ export default function MapeoPage({ params }: { params: Promise<{ id: string }> 
               }
             })
 
-            setFieldMapping(initialMapping)
-            console.log("✅ Mapeo inicial sugerido:", initialMapping)
+            // Solo aplicar mapeo inteligente si no hay mapeo existente
+            if (Object.keys(fieldMapping).length === 0) {
+              setFieldMapping(initialMapping)
+              console.log("✅ Mapeo inteligente aplicado:", initialMapping)
+            } else {
+              console.log("💡 Mapeo inteligente disponible (no aplicado porque ya existe mapeo):", initialMapping)
+            }
           }
+        } catch (err) {
+          console.error("❌ Error cargando mapeo:", err)
         }
-      } catch (err) {
-        console.error("❌ Error cargando mapeo:", err)
       }
     }
 
     fetchMapping()
   }, [conexion, connectionId, sourceFields])
+
+  // ✅ FORZAR MAPEO INTELIGENTE
+  const forceIntelligentMapping = () => {
+    if (sourceFields.length === 0) {
+      toast({
+        title: "No se puede ejecutar mapeo inteligente",
+        description: "No hay campos detectados de la fuente de datos",
+        variant: "destructive",
+      })
+      return
+    }
+    
+    const initialMapping: { [key: string]: string } = {}
+
+    // ✅ MAPEO AUTOMÁTICO - Misma lógica que arriba
+    sourceFields.forEach((sourceField) => {
+      const sourceName = sourceField.name.toLowerCase()
+      const sourceDesc = sourceField.description.toLowerCase()
+      
+      // Mapear title
+      if (sourceName.includes("title") || sourceName.includes("jobtitle") || 
+          sourceDesc.includes("título") || sourceDesc.includes("puesto")) {
+        initialMapping.title = sourceField.name
+      }
+      // Mapear company  
+      else if (sourceName.includes("company") || sourceName.includes("employer") ||
+               sourceDesc.includes("empresa") || sourceDesc.includes("compañía")) {
+        initialMapping.company = sourceField.name
+      }
+      // Mapear location/city
+      else if (sourceName.includes("location") || sourceName.includes("city") || 
+               sourceName.includes("ciudad") || sourceDesc.includes("ubicación") || 
+               sourceDesc.includes("ciudad")) {
+        initialMapping.location = sourceField.name
+      }
+      // Mapear published_at
+      else if (sourceName.includes("date") || sourceName.includes("publish") || 
+               sourceName.includes("publication") || sourceDesc.includes("fecha") ||
+               sourceDesc.includes("publicación")) {
+        initialMapping.published_at = sourceField.name
+      }
+      // Mapear apply_url  
+      else if (sourceName.includes("url") || sourceName.includes("link") || 
+               sourceName.includes("apply") || sourceDesc.includes("aplicación") ||
+               sourceDesc.includes("enlace")) {
+        initialMapping.apply_url = sourceField.name
+      }
+      // Mapear description
+      else if (sourceName.includes("description") || sourceName.includes("content") ||
+               sourceDesc.includes("descripción") || sourceDesc.includes("contenido")) {
+        initialMapping.description = sourceField.name
+      }
+      // Mapear sector
+      else if (sourceName.includes("sector") || sourceName.includes("category") ||
+               sourceDesc.includes("sector") || sourceDesc.includes("categoría")) {
+        initialMapping.sector = sourceField.name
+      }
+      // Mapear contract_type
+      else if (sourceName.includes("contract") || sourceName.includes("jobtype") ||
+               sourceDesc.includes("contrato") || sourceDesc.includes("tipo")) {
+        initialMapping.contract_type = sourceField.name
+      }
+      // Mapear salary fields
+      else if (sourceName.includes("salary") || sourceName.includes("min") ||
+               sourceDesc.includes("salario")) {
+        if (sourceName.includes("min") || sourceDesc.includes("mínimo")) {
+          initialMapping.salary_min = sourceField.name
+        } else if (sourceName.includes("max") || sourceDesc.includes("máximo")) {
+          initialMapping.salary_max = sourceField.name
+        }
+      }
+    })
+    
+    setFieldMapping(initialMapping)
+    console.log("🤖 Mapeo inteligente forzado:", initialMapping)
+    
+    toast({
+      title: "Mapeo inteligente aplicado",
+      description: `Se mapearon ${Object.keys(initialMapping).length} campos automáticamente`,
+    })
+  }
 
   // ✅ GUARDAR MAPEO
   const saveMapping = async () => {
@@ -801,6 +890,10 @@ export default function MapeoPage({ params }: { params: Promise<{ id: string }> 
 
           {/* Acciones */}
           <div className="space-y-2">
+            <Button onClick={forceIntelligentMapping} variant="outline" className="w-full">
+              <Zap className="h-4 w-4 mr-2" />
+              Mapeo Inteligente
+            </Button>
             <Button onClick={() => setShowPreview(!showPreview)} variant="outline" className="w-full">
               <Eye className="h-4 w-4 mr-2" />
               {showPreview ? "Ocultar" : "Ver"} Vista Previa
