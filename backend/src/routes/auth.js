@@ -11,7 +11,7 @@ const express = require('express');
 const router = express.Router();
 const { poolConnect, pool, sql } = require('../db/db');
 const bcrypt = require('bcryptjs');
-const { generateToken } = require('../middleware/authMiddleware');
+const { generateToken, addUserToRequest, requireAuth } = require('../middleware/authMiddleware');
 
 /**
  * POST /api/auth/google
@@ -1074,6 +1074,156 @@ router.post('/create-superadmin', async (req, res) => {
       success: false,
       error: 'Error interno del servidor',
       details: error.message
+    });
+  }
+});
+
+/**
+ * GET /api/auth/verify
+ * Verifica si el token JWT es válido
+ */
+router.get('/verify', addUserToRequest, requireAuth, async (req, res) => {
+  try {
+    // Si llegamos aquí, el token es válido (authMiddleware lo verificó)
+    const userId = req.user.Id;
+    
+    // Verificar que el usuario aún existe y está activo
+    await poolConnect;
+    
+    const userResult = await pool.request()
+      .input('UserId', sql.Int, userId)
+      .query(`
+        SELECT 
+          Id, 
+          Email, 
+          FirstName,
+          LastName,
+          Company,
+          Role,
+          IsActive
+        FROM Users 
+        WHERE Id = @UserId AND IsActive = 1
+      `);
+    
+    if (userResult.recordset.length === 0) {
+      return res.status(401).json({
+        success: false,
+        error: 'Usuario no encontrado o inactivo'
+      });
+    }
+    
+    const user = userResult.recordset[0];
+    
+    res.json({
+      success: true,
+      valid: true,
+      user: {
+        id: user.Id,
+        email: user.Email,
+        firstName: user.FirstName,
+        lastName: user.LastName,
+        company: user.Company,
+        role: user.Role
+      },
+      message: 'Token válido'
+    });
+    
+  } catch (error) {
+    console.error('❌ Error verificando token:', error.message);
+    res.status(500).json({
+      success: false,
+      error: 'Error verificando token'
+    });
+  }
+});
+
+/**
+ * POST /api/auth/refresh
+ * Refresca el token JWT (genera uno nuevo)
+ */
+router.post('/refresh', addUserToRequest, requireAuth, async (req, res) => {
+  try {
+    const userId = req.user.Id;
+    
+    // Obtener datos actualizados del usuario
+    await poolConnect;
+    
+    const userResult = await pool.request()
+      .input('UserId', sql.Int, userId)
+      .query(`
+        SELECT 
+          Id, 
+          Email, 
+          FirstName,
+          LastName,
+          Company,
+          Website,
+          Phone,
+          Image,
+          Role,
+          IsActive
+        FROM Users 
+        WHERE Id = @UserId AND IsActive = 1
+      `);
+    
+    if (userResult.recordset.length === 0) {
+      return res.status(401).json({
+        success: false,
+        error: 'Usuario no encontrado o inactivo'
+      });
+    }
+    
+    const user = userResult.recordset[0];
+    
+    // Generar nuevo token
+    const newToken = generateToken(user);
+    
+    res.json({
+      success: true,
+      token: newToken,
+      user: {
+        id: user.Id,
+        email: user.Email,
+        firstName: user.FirstName,
+        lastName: user.LastName,
+        company: user.Company,
+        website: user.Website,
+        phone: user.Phone,
+        image: user.Image,
+        role: user.Role
+      },
+      message: 'Token refrescado exitosamente'
+    });
+    
+  } catch (error) {
+    console.error('❌ Error refrescando token:', error.message);
+    res.status(500).json({
+      success: false,
+      error: 'Error refrescando token'
+    });
+  }
+});
+
+/**
+ * POST /api/auth/logout
+ * Logout (opcional - principalmente para logging)
+ */
+router.post('/logout', addUserToRequest, requireAuth, async (req, res) => {
+  try {
+    // En una implementación con blacklist de tokens, aquí agregaríamos el token a la blacklist
+    // Por ahora, solo logueamos el evento
+    console.log(`🚪 Usuario ${req.user.Email} (ID: ${req.user.Id}) cerró sesión`);
+    
+    res.json({
+      success: true,
+      message: 'Sesión cerrada exitosamente'
+    });
+    
+  } catch (error) {
+    console.error('❌ Error en logout:', error.message);
+    res.status(500).json({
+      success: false,
+      error: 'Error cerrando sesión'
     });
   }
 });

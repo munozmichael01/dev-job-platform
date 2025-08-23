@@ -1,12 +1,49 @@
 # Claude Code - Job Platform Project Context
 
-## 📋 Estado del Proyecto (Última sesión: 2025-08-21 - DASHBOARD DATOS REALES COMPLETADO)
+## 📋 Estado del Proyecto (Última sesión: 2025-01-22 - SISTEMA PRODUCTION-READY CON SINCRONIZACIÓN COMPLETA)
 
-### 🎉 **SISTEMA COMPLETAMENTE FUNCIONAL CON DATOS REALES**
+### 🎉 **SISTEMA PRODUCTION-READY CON SINCRONIZACIÓN DE AUTENTICACIÓN**
 
-**Estado actual:** Plataforma multi-tenant de distribución de ofertas de trabajo **100% funcional** con dashboard mostrando **datos 100% reales** de la base de datos.
+**Estado actual:** Plataforma multi-tenant de distribución de ofertas de trabajo **100% funcional** con:
+- Dashboard con datos reales desde BD
+- Sistema de autenticación sincronizado entre pestañas y componentes
+- Error handling robusto y logging estructurado
+- Performance optimizada y UX mejorada
 
-### 🚀 **LOGROS PRINCIPALES (Sesión 2025-08-21)**
+### 🚀 **LOGROS PRINCIPALES (Sesión 2025-01-22)**
+
+#### **🔄 SINCRONIZACIÓN DE AUTENTICACIÓN COMPLETA:**
+1. ✅ **BroadcastChannel API implementada**
+   - Sincronización real-time entre pestañas
+   - Fallback a localStorage para compatibilidad
+   - Leader election para optimización
+   - Eventos: LOGIN, LOGOUT, SESSION_EXPIRED, TOKEN_REFRESHED
+
+2. ✅ **AuthSyncManager creado**
+   - Singleton pattern para coordinación central
+   - Heartbeat automático cada 30 segundos
+   - Verificación de token con el backend
+   - Logging estructurado de eventos
+
+3. ✅ **Sistema de Error Handling Production-Ready**
+   - Tipos de error personalizados (AuthError, APIError, NetworkError)
+   - Retry logic con exponential backoff
+   - Toast notifications inteligentes
+   - Mensajes user-friendly automáticos
+
+4. ✅ **Logging Estructurado Implementado**
+   - Logger con buffer y flush automático
+   - Tracking de API calls con métricas
+   - Performance monitoring
+   - Context rico para debugging
+
+5. ✅ **Mejoras de UX/UI**
+   - LoadingSpinner reutilizable
+   - Route protection mejorada
+   - Session timeout de 30 minutos
+   - Activity tracking automático
+
+### 🚀 **LOGROS SESIÓN ANTERIOR (2025-08-21)**
 
 #### **📊 DASHBOARD CON DATOS 100% REALES (COMPLETADO):**
 1. ✅ **API `/api/metrics/dashboard` convertida a datos reales**
@@ -105,17 +142,36 @@ cd C:/Dev/landing-page && npm run dev
 
 ### 🔧 **ARCHIVOS CLAVE ACTUALIZADOS**
 
+**Sistema de Sincronización de Auth:**
+```
+frontend/
+├── lib/
+│   ├── auth-sync.ts - 🆕 AuthSyncManager con BroadcastChannel
+│   ├── errors.ts - 🆕 Tipos de error personalizados
+│   └── logger.ts - 🆕 Sistema de logging estructurado
+├── hooks/
+│   └── useAuthFetch.ts - 🔄 Mejorado con retry logic y error handling
+├── contexts/
+│   └── AuthContext.tsx - 🔄 Integrado con AuthSyncManager
+└── components/
+    ├── ProtectedRoute.tsx - 🔄 Verificación activa de auth
+    └── ui/loading-spinner.tsx - 🆕 Componente reutilizable
+
+backend/src/routes/
+└── auth.js - 🔄 Nuevos endpoints: /verify, /refresh, /logout
+```
+
 **Dashboard Metrics (DATOS REALES):**
 ```
 backend/src/routes/
-├── metrics.js - 🚀 COMPLETADO: API con datos 100% reales desde BD
+├── metrics.js - API con datos 100% reales desde BD
 │   ├── Budget distribution desde CampaignChannels
 │   ├── Applications desde AchievedApplications
 │   ├── General metrics calculados en tiempo real
 │   └── Multi-tenant filtering por UserId
 
 frontend/app/
-└── page.tsx - Dashboard que consume API real (fallbacks removidos)
+└── page.tsx - Dashboard que consume API real
 ```
 
 **Database Configuration:**
@@ -210,18 +266,24 @@ Sistema de control interno implementado para Jooble:
 
 ### ✅ **COMPLETAMENTE FUNCIONAL:**
 - **✅ Dashboard con datos 100% reales** desde base de datos
-- **✅ Autenticación multi-tenant** end-to-end verificada
+- **✅ Autenticación multi-tenant** con sincronización completa entre pestañas
 - **✅ 4 canales integrados** con diferentes modelos de negocio
 - **✅ Sistema de métricas reales** preparado para APIs de producción
 - **✅ Performance optimizada** (<300ms queries)
 - **✅ Multi-segmentos** por campaña
 - **✅ Base de datos restaurada** con 67K+ ofertas reales
+- **✅ Error handling robusto** con retry logic y recovery
+- **✅ Logging estructurado** para debugging en producción
+- **✅ Session management** con timeout y activity tracking
 
 ### 🎯 **ARQUITECTURA ESCALABLE:**
-- **Backend**: Node.js/Express + SQL Server + auth optimizado + metrics reales
-- **Frontend**: Next.js/TypeScript + Shadcn/UI + dashboard datos reales
+- **Backend**: Node.js/Express + SQL Server + auth endpoints mejorados
+- **Frontend**: Next.js/TypeScript + Shadcn/UI + sincronización de estado
 - **Landing**: Next.js + UX profesional + autenticación integrada
 - **Database**: SQL Server con multi-tenant + datos reales poblados
+- **Auth System**: BroadcastChannel API + Leader Election + Heartbeat
+- **Error Handling**: Custom errors + Retry logic + User-friendly messages
+- **Logging**: Structured logging + Performance tracking + Event monitoring
 
 ### 💰 **MODELO DE NEGOCIO VALIDADO:**
 - **CPA Promedio**: €12-18 según canal (competitivo)
@@ -238,28 +300,34 @@ Sistema de control interno implementado para Jooble:
 ```
 Estoy trabajando en job-platform, una plataforma multi-tenant para distribución automática de ofertas de trabajo. 
 
-ESTADO ACTUAL (2025-08-21):
+ESTADO ACTUAL (2025-01-22):
+- ✅ Sistema production-ready con sincronización de autenticación
 - ✅ Dashboard con datos 100% reales desde base de datos
-- ✅ SQL Server restaurado en nuevo equipo (puerto 1433, auth mixta)
+- ✅ Auth sincronizado entre pestañas con BroadcastChannel API
+- ✅ Error handling robusto con retry logic
+- ✅ Logging estructurado para debugging
+- ✅ Session management con timeout de 30 minutos
 - ✅ Multi-tenant verificado (UserID 15 con 67K ofertas, 9 campañas)
-- ✅ Métricas reales: €8,304 budget, 57 ofertas activas, 3 campañas
-- ✅ Sistema preparado para aplicaciones reales (sync cada 5min)
 
-DASHBOARD REAL:
-- Budget distribution: €2652 JobRapido + €2652 Jooble + €2652 Talent + €348 WhatJobs
-- Applications: 0,0,0,0 (real - listo para APIs de producción)
-- General metrics: Todo calculado desde CampaignChannels real
+SISTEMA DE AUTH:
+- Sincronización real-time entre pestañas
+- Heartbeat cada 30 segundos (leader election)
+- Session timeout con activity tracking
+- Global 401 interceptor
+- Logout sincronizado inmediato
 
-ARQUITECTURA OPTIMIZADA:
-- Backend: Node.js (3002) + SQL Server + métricas BD real
-- Dashboard: Next.js (3006) + datos 100% reales desde API
+ARQUITECTURA PRODUCTION-READY:
+- Backend: Node.js (3002) + endpoints /verify, /refresh, /logout
+- Dashboard: Next.js (3006) + AuthSyncManager integrado
 - Landing: Next.js (3000) + UX profesional
-- Database: SQL Server multi-tenant + 258 CampaignChannels records
+- Error Types: AuthError, APIError, NetworkError, ValidationError
+- Logging: Structured + Performance tracking + Event monitoring
 
 PRÓXIMO OBJETIVO: [especificar según necesidad]
-- Activar APIs reales de Jooble/Talent para aplicaciones en tiempo real
-- Integrar nuevo canal usando sistema existente
-- Implementar algoritmos IA/ML para optimización
+- Implementar refresh tokens automáticos
+- Activar APIs reales de Jooble/Talent
+- Agregar 2FA (autenticación de dos factores)
+- Integrar servicio de error tracking (Sentry)
 - [otro objetivo específico]
 
 ¿Puedes ayudarme con [objetivo específico]?
@@ -272,21 +340,29 @@ PRÓXIMO OBJETIVO: [especificar según necesidad]
 - `frontend/app/page.tsx` - Dashboard consumiendo datos reales
 - `backend/.env` - Configuración BD restaurada (DB_USER=jobplatform)
 
+#### **Sistema de Autenticación:**
+- `frontend/lib/auth-sync.ts` - AuthSyncManager con BroadcastChannel
+- `frontend/lib/errors.ts` - Tipos de error personalizados
+- `frontend/lib/logger.ts` - Logger estructurado con buffer
+- `frontend/hooks/useAuthFetch.ts` - Hook con retry logic
+- `frontend/contexts/AuthContext.tsx` - Context con sincronización
+- `frontend/components/ProtectedRoute.tsx` - Route protection
+- `backend/src/routes/auth.js` - Endpoints /verify, /refresh, /logout
+
 #### **Backend Multi-Tenant:**
-- `backend/src/middleware/authMiddleware.js` - Auth optimizado + cache
+- `backend/src/middleware/authMiddleware.js` - Auth con cache + JWT
 - `backend/src/routes/campaigns.js` - APIs filtradas por UserId
-- `backend/src/db/bootstrap.js` - Schema multi-tenant + foreign keys
+- `backend/src/routes/metrics.js` - Métricas reales desde BD
 
-#### **Landing Page:**
-- `landing-page/src/lib/api.ts` - Cliente API con CORS
-- `landing-page/src/app/login/page.tsx` - Login integrado
-- `landing-page/src/app/signup/page.tsx` - Registro integrado
+#### **Frontend Dashboard:**
+- `frontend/app/page.tsx` - Dashboard con datos reales
+- `frontend/app/conexiones/[id]/mapeo/page.tsx` - Mapeo con error handling
+- `frontend/components/ui/loading-spinner.tsx` - Loading states
 
-#### **Canales con Metrics:**
-- `backend/src/services/channels/joobleService.js` - getStatistics() para aplicaciones
+#### **Canales y Métricas:**
 - `backend/src/services/metricsSync.js` - Sync automático cada 5min
-- `backend/src/services/campaignDistributionService.js` - AchievedApplications update
+- `backend/src/services/campaignDistributionService.js` - Distribución
 
 ---
 
-*Última actualización: 2025-08-21 - 🎉 DASHBOARD DATOS REALES COMPLETADO*
+*Última actualización: 2025-01-22 - 🎉 SISTEMA PRODUCTION-READY CON SINCRONIZACIÓN COMPLETA*

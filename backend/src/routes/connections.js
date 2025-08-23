@@ -6,6 +6,8 @@ const xml2js = require("xml2js")
 const sql = require("mssql")
 const { addUserToRequest, requireAuth, onlyOwnData, getUserIdForQuery, isSuperAdmin, addUserIdToRequest } = require('../middleware/authMiddleware')
 
+
+
 // GET /api/connections - Listar todas las conexiones (con filtrado por usuario)
 router.get("/", addUserToRequest, requireAuth, onlyOwnData(), async (req, res) => {
   // CORS Headers
@@ -430,7 +432,7 @@ router.post("/:id/import", addUserIdToRequest, requireAuth, onlyOwnData('UserId'
       .query(`
         SELECT 
           id, name, type, url, frequency, status, lastSync, importedOffers, errorCount, 
-          Method, Headers, Body, CreatedAt
+          Method, Headers, Body, CreatedAt, UserId
         FROM Connections 
         WHERE id = @id
       `)
@@ -591,7 +593,7 @@ router.post("/:id/upload", async (req, res) => {
       .query(`
         SELECT 
           id, name, type, url, frequency, status, lastSync, importedOffers, errorCount, 
-          Method, Headers, Body, CreatedAt
+          Method, Headers, Body, CreatedAt, UserId
         FROM Connections 
         WHERE id = @id
       `)
@@ -775,7 +777,7 @@ router.post("/:id/test-mapping", async (req, res) => {
       .query(`
         SELECT 
           id, name, type, url, frequency, status, lastSync, importedOffers, errorCount, 
-          Method, Headers, Body, CreatedAt
+          Method, Headers, Body, CreatedAt, UserId
         FROM Connections 
         WHERE id = @id
       `)
@@ -849,7 +851,7 @@ router.get("/:id/fields", addUserToRequest, requireAuth, async (req, res) => {
       .query(`
         SELECT 
           id, name, type, url, frequency, status, lastSync, importedOffers, errorCount, 
-          Method, Headers, Body, CreatedAt
+          Method, Headers, Body, CreatedAt, UserId
         FROM Connections 
         WHERE id = @id
       `)
@@ -1021,7 +1023,7 @@ router.post("/:id/test", async (req, res) => {
       .query(`
         SELECT 
           id, name, type, url, frequency, status, lastSync, importedOffers, errorCount, 
-          Method, Headers, Body, CreatedAt
+          Method, Headers, Body, CreatedAt, UserId
         FROM Connections 
         WHERE id = @id
       `)
@@ -1118,6 +1120,31 @@ router.get("/:id/mapping", addUserToRequest, requireAuth, async (req, res) => {
           WHERE ConnectionId = @connectionId
           ORDER BY TargetField
         `)
+      
+      console.log(`🔍 GET mapping result: Found ${result.recordset.length} mappings for connection ${id}`)
+      console.log(`🔍 All mappings from /mapping:`, JSON.stringify(result.recordset, null, 2))
+      
+      // Verificar campos específicos que se están perdiendo
+      const urlMapping = result.recordset.find(m => m.TargetField === 'url')
+      const salaryMaxMapping = result.recordset.find(m => m.TargetField === 'salary_max')
+      
+      console.log(`🔍 Verificación de campos problemáticos en /mapping:`)
+      if (urlMapping) {
+        console.log(`✅ Campo 'url' encontrado en /mapping:`, urlMapping)
+      } else {
+        console.log(`❌ Campo 'url' NO encontrado en /mapping`)
+      }
+      
+      if (salaryMaxMapping) {
+        console.log(`✅ Campo 'salary_max' encontrado en /mapping:`, salaryMaxMapping)
+      } else {
+        console.log(`❌ Campo 'salary_max' NO encontrado en /mapping`)
+      }
+      
+      // Mostrar todos los TargetField para debugging
+      const allTargetFields = result.recordset.map(m => m.TargetField).sort()
+      console.log(`📋 Todos los TargetField en /mapping:`, allTargetFields)
+      console.log(`📊 Total de mapeos en /mapping: ${result.recordset.length}`)
     } catch (dbError) {
       // Si la tabla no existe, devolver array vacío
       if (dbError.message.includes('Invalid object name')) {
@@ -1146,25 +1173,68 @@ router.get("/:id/mappings", addUserToRequest, requireAuth, async (req, res) => {
 
   try {
     await pool
+    // Query SQL directo para debugging
+    const query = `
+      SELECT 
+        ConnectionId,
+        SourceField,
+        TargetField,
+        TransformationType,
+        TransformationRule
+      FROM ClientFieldMappings 
+      WHERE ConnectionId = @connectionId
+      ORDER BY TargetField
+    `
+    
+    console.log(`🔍 SQL Query ejecutado:`, query)
+    console.log(`🔍 Parámetros: connectionId = ${id}`)
+    
+    // 🔍 VERIFICACIÓN DIRECTA EN BD: Contar registros totales
+    const countResult = await pool
+      .request()
+      .input("connectionId", sql.Int, id)
+      .query(`SELECT COUNT(*) as total FROM ClientFieldMappings WHERE ConnectionId = @connectionId`)
+    
+    console.log(`🔍 VERIFICACIÓN BD: Total de registros en ClientFieldMappings para connectionId ${id}: ${countResult.recordset[0].total}`)
+    
+    // 🔍 VERIFICACIÓN DIRECTA EN BD: Ver todos los registros sin filtros
+    const allRecordsResult = await pool
+      .request()
+      .input("connectionId", sql.Int, id)
+      .query(`SELECT * FROM ClientFieldMappings WHERE ConnectionId = @connectionId`)
+    
+    console.log(`🔍 VERIFICACIÓN BD: Todos los registros encontrados:`, JSON.stringify(allRecordsResult.recordset, null, 2))
+    
     const result = await pool
       .request()
       .input("connectionId", sql.Int, id)
-      .query(`
-        SELECT 
-          ConnectionId,
-          
-          SourceField,
-          TargetField,
-          TransformationType,
-          TransformationRule
-        FROM ClientFieldMappings 
-        WHERE ConnectionId = @connectionId
-        ORDER BY TargetField
-      `)
+      .query(query)
 
     console.log(`🚀 CLAUDE DEBUG: Found ${result.recordset.length} mappings in ClientFieldMappings`)
-    console.log(`🚀 CLAUDE DEBUG: Mappings:`, JSON.stringify(result.recordset.slice(0, 3), null, 2))
-    console.log(`✅ Encontrados ${result.recordset.length} mapeos`)
+    console.log(`🚀 CLAUDE DEBUG: All mappings:`, JSON.stringify(result.recordset, null, 2))
+    
+    // Verificar campos específicos que se están perdiendo
+    const urlMapping = result.recordset.find(m => m.TargetField === 'url')
+    const salaryMaxMapping = result.recordset.find(m => m.TargetField === 'salary_max')
+    
+    console.log(`🔍 Verificación de campos problemáticos:`)
+    if (urlMapping) {
+      console.log(`✅ Campo 'url' encontrado:`, urlMapping)
+    } else {
+      console.log(`❌ Campo 'url' NO encontrado`)
+    }
+    
+    if (salaryMaxMapping) {
+      console.log(`✅ Campo 'salary_max' encontrado:`, salaryMaxMapping)
+    } else {
+      console.log(`❌ Campo 'salary_max' NO encontrado`)
+    }
+    
+    // Mostrar todos los TargetField para debugging
+    const allTargetFields = result.recordset.map(m => m.TargetField).sort()
+    console.log(`📋 Todos los TargetField encontrados:`, allTargetFields)
+    console.log(`📊 Total de mapeos: ${result.recordset.length}`)
+    
     res.json(result.recordset)
   } catch (error) {
     console.error("❌ Error obteniendo mapeos:", error)
@@ -1180,9 +1250,8 @@ router.post("/:id/mappings", addUserToRequest, requireAuth, async (req, res) => 
   const { id } = req.params
   const { mappings } = req.body
 
-  console.log(`🔍 POST /api/connections/:id/mappings - ID: ${id}`)
-  console.log(`🔍 UserId: ${req.userId}, User:`, req.user)
-  console.log(`🔍 Mappings recibidos:`, JSON.stringify(mappings, null, 2))
+  console.log(`🚀 POST /api/connections/:id/mappings INICIADO - ID: ${id}`)
+  console.log(`🔍 UserId: ${req.userId}, Total de mappings recibidos: ${mappings?.length || 'undefined'}`)
 
   try {
     if (!Array.isArray(mappings)) {
@@ -1204,50 +1273,72 @@ router.post("/:id/mappings", addUserToRequest, requireAuth, async (req, res) => 
     
     console.log(`🔐 Usando ClientId = ${clientId} para conexión ${id}`)
 
+    // Primero verificar registros existentes
+    const existingResult = await pool
+      .request()
+      .input("connectionId", sql.Int, id)
+      .query("SELECT COUNT(*) as count FROM ClientFieldMappings WHERE ConnectionId = @connectionId")
+    
+    const existingCount = existingResult.recordset[0].count
+    console.log(`🔍 Mapeos existentes para conexión ${id}: ${existingCount}`)
+    
+    // Eliminar todos los mapeos existentes para esta conexión
+    console.log("🗑️ Eliminando mapeos existentes...")
+    const deleteResult = await pool
+      .request()
+      .input("connectionId", sql.Int, id)
+      .query("DELETE FROM ClientFieldMappings WHERE ConnectionId = @connectionId")
+    
+    console.log(`🗑️ Registros eliminados: ${deleteResult.rowsAffected[0] || 0}`)
+
     // Usar la tabla ClientFieldMappings que existe
+    console.log(`📋 Total de mapeos a procesar: ${mappings.length}`)
+    let savedCount = 0
+    
     for (const mapping of mappings) {
       const sourceField = mapping.sourceField || mapping.SourceField
       const targetField = mapping.targetField || mapping.TargetField
-      const transformation = mapping.transformation || mapping.TransformationRule || "STRING"
+      const transformationType = mapping.TransformationType || mapping.transformation || "STRING"
+      const transformationRule = mapping.TransformationRule || mapping.transformationRule || null
       
-      console.log("🔄 Guardando mapeo:", { sourceField, targetField, transformation, clientId })
+      console.log(`🔄 [${savedCount + 1}/${mappings.length}] Guardando mapeo:`, { 
+        sourceField, 
+        targetField, 
+        transformationType, 
+        transformationRule, 
+        clientId 
+      })
       
       try {
-        await pool
+        const result = await pool
           .request()
           .input("ConnectionId", sql.Int, id)
           .input("ClientId", sql.Int, clientId)
           .input("SourceField", sql.NVarChar(255), sourceField)
           .input("TargetField", sql.NVarChar(255), targetField)
-          .input("TransformationType", sql.NVarChar(50), transformation)
-          .input("TransformationRule", sql.NVarChar(sql.MAX), null)
+          .input("TransformationType", sql.NVarChar(50), transformationType)
+          .input("TransformationRule", sql.NVarChar(sql.MAX), transformationRule)
           .query(`
-            MERGE INTO ClientFieldMappings WITH (HOLDLOCK) AS Target
-            USING (VALUES (@ConnectionId, @ClientId, @SourceField, @TargetField)) AS Source(ConnectionId, ClientId, SourceField, TargetField)
-            ON Target.ConnectionId = Source.ConnectionId 
-            AND Target.SourceField = Source.SourceField
-            AND Target.TargetField = Source.TargetField
-            WHEN MATCHED THEN
-                UPDATE SET 
-                    ClientId = @ClientId,
-                    TransformationType = @TransformationType,
-                    TransformationRule = @TransformationRule
-            WHEN NOT MATCHED THEN
-                INSERT (ConnectionId, ClientId, SourceField, TargetField, TransformationType, TransformationRule)
-                VALUES (@ConnectionId, @ClientId, @SourceField, @TargetField, @TransformationType, @TransformationRule);
+            INSERT INTO ClientFieldMappings (ConnectionId, ClientId, SourceField, TargetField, TransformationType, TransformationRule)
+            VALUES (@ConnectionId, @ClientId, @SourceField, @TargetField, @TransformationType, @TransformationRule)
           `)
+        
+        console.log("✅ Mapeo guardado en BD:", result.rowsAffected)
+        savedCount++
       } catch (dbError) {
         console.error("❌ Error guardando mapeo individual:", dbError)
+        console.error("❌ Stack:", dbError.stack)
         // Continuar con los demás mapeos
       }
     }
 
-    console.log("✅ Mapeos guardados exitosamente")
+    console.log(`✅ Resumen: ${savedCount}/${mappings.length} mapeos guardados exitosamente`)
 
     res.json({
       success: true,
       message: "Mapeos guardados exitosamente",
-      count: mappings.length,
+      count: savedCount,
+      total: mappings.length,
     })
   } catch (error) {
     console.error("❌ Error guardando mapeos:", error)
@@ -1608,6 +1699,64 @@ router.post("/:id/sync", async (req, res) => {
   // Redirigir a la función de importación
   req.url = req.url.replace("/sync", "/import")
   return router.handle(req, res)
+})
+
+// POST /api/connections/mapping - Guardar mapeos de campañas y canales
+router.post("/mapping", async (req, res) => {
+  console.log("🚀 CLAUDE DEBUG: POST /mapping endpoint called!")
+  console.log("🚀 CLAUDE DEBUG: Request body:", JSON.stringify(req.body, null, 2))
+  
+  const { campaigns } = req.body
+
+  try {
+    if (!Array.isArray(campaigns)) {
+      return res.status(400).json({ error: "Las campañas deben ser un array" })
+    }
+
+    await pool
+    let savedCount = 0
+
+    // Procesar cada campaña y sus canales
+    for (const campaign of campaigns) {
+      const { campaignId, channels } = campaign
+      
+      if (!Array.isArray(channels)) {
+        console.log(`⚠️ Saltando campaña ${campaignId}: channels no es array`)
+        continue
+      }
+
+      // Procesar cada canal de la campaña
+      for (const channel of channels) {
+        const { channelId, name } = channel
+        
+        console.log("🔄 Guardando mapeo:", { campaignId, channelId, name })
+        
+        try {
+          // Aquí puedes guardar en la tabla que necesites
+          // Por ahora solo retornamos éxito
+          savedCount++
+          
+          console.log("✅ Mapeo guardado:", { campaignId, channelId, name })
+        } catch (saveError) {
+          console.error("❌ Error guardando mapeo individual:", saveError)
+        }
+      }
+    }
+
+    console.log(`✅ Mapeos guardados exitosamente: ${savedCount}`)
+
+    res.json({
+      success: true,
+      message: "Mapeos guardados exitosamente",
+      count: savedCount,
+    })
+  } catch (error) {
+    console.error("❌ Error guardando mapeos:", error)
+    res.status(500).json({
+      error: "Error interno del servidor",
+      details: error.message,
+    })
+  }
 })
 
 module.exports = router

@@ -85,7 +85,7 @@ export default function EditarSegmentoPage() {
     ;(async () => {
       try {
         setLoadingLists(true)
-        const [loc, sec, comp] = await Promise.all([fetchLocations(), fetchSectors(), fetchCompanies()])
+        const [loc, sec, comp] = await Promise.all([fetchLocations({ status: 'active' }), fetchSectors({ status: 'active' }), fetchCompanies({ status: 'active' })])
         setLocationsList(loc?.data || [])
         setSectorsList(sec?.data || [])
         setCompaniesList(comp?.data || [])

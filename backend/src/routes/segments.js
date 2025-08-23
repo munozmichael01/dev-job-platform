@@ -140,8 +140,19 @@ router.post('/', addUserToRequest, requireAuth, async (req, res) => {
     await poolConnect;
     const f = parseFilters(filters);
     const { where, inputs } = buildWhereFromFilters(f, sql);
+    
+    // ✅ FILTRAR POR USUARIO - Solo ofertas del usuario autenticado
+    if (!isSuperAdmin(req)) {
+      where.push('UserId = @currentUserId');
+      inputs.push({ name: 'currentUserId', type: sql.BigInt, value: req.userId });
+      console.log(`🔒 Create segment filtrando para usuario ${req.userId} (${req.user.role})`);
+    } else {
+      console.log(`🔑 Super admin: create segment sin filtro de usuario`);
+    }
+    
     const whereClause = where.length ? `WHERE ${where.join(' AND ')}` : '';
-    const reqSql = pool.request(); inputs.forEach(p => reqSql.input(p.name, p.type, p.value));
+    const reqSql = pool.request(); 
+    inputs.forEach(p => reqSql.input(p.name, p.type, p.value));
     const countRes = await reqSql.query(`SELECT COUNT(*) AS total FROM JobOffers WITH (READPAST) ${whereClause}`);
     const offerCount = countRes.recordset[0].total || 0;
 
@@ -179,7 +190,7 @@ router.get('/:id', async (req, res) => {
   }
 });
 
-router.put('/:id', async (req, res) => {
+router.put('/:id', addUserToRequest, requireAuth, async (req, res) => {
   const id = parseInt(req.params.id);
   const { name, description, filters, status } = req.body || {};
   try {
@@ -190,8 +201,19 @@ router.put('/:id', async (req, res) => {
 
     const newFilters = filters ? parseFilters(filters) : parseFilters(prev.Filters);
     const { where, inputs } = buildWhereFromFilters(newFilters, sql);
+    
+    // ✅ FILTRAR POR USUARIO - Solo ofertas del usuario autenticado
+    if (!isSuperAdmin(req)) {
+      where.push('UserId = @currentUserId');
+      inputs.push({ name: 'currentUserId', type: sql.BigInt, value: req.userId });
+      console.log(`🔒 Update segment filtrando para usuario ${req.userId} (${req.user.role})`);
+    } else {
+      console.log(`🔑 Super admin: update segment sin filtro de usuario`);
+    }
+    
     const whereClause = where.length ? `WHERE ${where.join(' AND ')}` : '';
-    const reqSql = pool.request(); inputs.forEach(p => reqSql.input(p.name, p.type, p.value));
+    const reqSql = pool.request(); 
+    inputs.forEach(p => reqSql.input(p.name, p.type, p.value));
     const countRes = await reqSql.query(`SELECT COUNT(*) AS total FROM JobOffers WITH (READPAST) ${whereClause}`);
     const offerCount = countRes.recordset[0].total || 0;
 
@@ -230,7 +252,7 @@ router.delete('/:id', async (req, res) => {
 });
 
 // Estimación por id
-router.get('/:id/estimate', async (req, res) => {
+router.get('/:id/estimate', addUserToRequest, requireAuth, async (req, res) => {
   const id = parseInt(req.params.id);
   try {
     await poolConnect;
@@ -238,32 +260,60 @@ router.get('/:id/estimate', async (req, res) => {
     if (r.recordset.length === 0) return res.status(404).json({ error: 'Segmento no encontrado' });
     const f = parseFilters(r.recordset[0].Filters);
     const { where, inputs } = buildWhereFromFilters(f, sql);
+    
+    // ✅ FILTRAR POR USUARIO - Solo ofertas del usuario autenticado
+    if (!isSuperAdmin(req)) {
+      where.push('UserId = @currentUserId');
+      inputs.push({ name: 'currentUserId', type: sql.BigInt, value: req.userId });
+      console.log(`🔒 Estimate by ID filtrando para usuario ${req.userId} (${req.user.role})`);
+    } else {
+      console.log(`🔑 Super admin: estimate by ID sin filtro de usuario`);
+    }
+    
     const whereClause = where.length ? `WHERE ${where.join(' AND ')}` : '';
-    const reqSql = pool.request(); inputs.forEach(p => reqSql.input(p.name, p.type, p.value));
+    const reqSql = pool.request(); 
+    inputs.forEach(p => reqSql.input(p.name, p.type, p.value));
     const result = await reqSql.query(`SELECT COUNT(*) AS total FROM JobOffers WITH (READPAST) ${whereClause}`);
+    
+    console.log(`✅ Estimate by ID: ${result.recordset[0].total || 0} ofertas encontradas para usuario ${req.userId}`);
     res.json({ success: true, count: result.recordset[0].total || 0 });
   } catch (e) {
+    console.error('❌ Error en estimate by ID:', e.message);
     res.status(500).json({ error: 'Error estimando ofertas', details: e.message });
   }
 });
 
 // Estimación para preview (sin guardar)
-router.post('/estimate-preview', async (req, res) => {
+router.post('/estimate-preview', addUserToRequest, requireAuth, async (req, res) => {
   const filters = parseFilters(req.body?.filters || {});
   try {
     await poolConnect;
     const { where, inputs } = buildWhereFromFilters(filters, sql);
+    
+    // ✅ FILTRAR POR USUARIO - Solo ofertas del usuario autenticado
+    if (!isSuperAdmin(req)) {
+      where.push('UserId = @currentUserId');
+      inputs.push({ name: 'currentUserId', type: sql.BigInt, value: req.userId });
+      console.log(`🔒 Estimate preview filtrando para usuario ${req.userId} (${req.user.role})`);
+    } else {
+      console.log(`🔑 Super admin: estimate preview sin filtro de usuario`);
+    }
+    
     const whereClause = where.length ? `WHERE ${where.join(' AND ')}` : '';
-    const reqSql = pool.request(); inputs.forEach(p => reqSql.input(p.name, p.type, p.value));
+    const reqSql = pool.request(); 
+    inputs.forEach(p => reqSql.input(p.name, p.type, p.value));
     const result = await reqSql.query(`SELECT COUNT(*) AS total FROM JobOffers WITH (READPAST) ${whereClause}`);
+    
+    console.log(`✅ Estimate preview: ${result.recordset[0].total || 0} ofertas encontradas para usuario ${req.userId}`);
     res.json({ success: true, count: result.recordset[0].total || 0 });
   } catch (e) {
+    console.error('❌ Error en estimate-preview:', e.message);
     res.status(500).json({ error: 'Error en estimate-preview', details: e.message });
   }
 });
 
 // Recalcular ofertas de un segmento específico
-router.post('/:id/recalculate', async (req, res) => {
+router.post('/:id/recalculate', addUserToRequest, requireAuth, async (req, res) => {
   const id = parseInt(req.params.id);
   try {
     await poolConnect;

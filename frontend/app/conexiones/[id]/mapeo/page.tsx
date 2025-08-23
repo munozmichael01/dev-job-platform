@@ -29,6 +29,9 @@ import { useToast } from "@/hooks/use-toast"
 import { useAuthFetch } from "@/hooks/useAuthFetch"
 import Link from "next/link"
 import { useRouter } from "next/navigation"
+import { useAuth } from "@/contexts/AuthContext"
+import { PageLoadingSpinner } from "@/components/ui/loading-spinner"
+import { getErrorMessage, logError } from "@/lib/errors"
 
 interface Conexion {
   id: number
@@ -62,16 +65,15 @@ interface TargetField {
 }
 
 export default function MapeoPage({ params }: { params: Promise<{ id: string }> }) {
+  // Hooks - must be called at top level
   const { toast } = useToast()
   const router = useRouter()
-  const { authFetch } = useAuthFetch()
+  const { authFetch, authFetchJSON } = useAuthFetch()
+  const { user, isLoading: authLoading, isAuthenticated } = useAuth()
 
-  // ✅ Unwrap params usando React.use()
+  // Unwrap params
   const resolvedParams = React.use(params)
   const connectionId = Number.parseInt(resolvedParams.id)
-
-  console.log("🔍 URL params.id:", resolvedParams.id)
-  console.log("🔍 Parsed connectionId:", connectionId)
 
   // Estados
   const [conexion, setConexion] = useState<Conexion | null>(null)
@@ -88,10 +90,10 @@ export default function MapeoPage({ params }: { params: Promise<{ id: string }> 
   const [fieldMapping, setFieldMapping] = useState<{ [key: string]: string }>({})
   const [transformations, setTransformations] = useState<{ [key: string]: string }>({})
 
-  // ✅ CAMPOS DINÁMICOS: Ahora se cargan desde el backend
+  // Campos dinámicos
   const [sourceFields, setSourceFields] = useState<SourceField[]>([])
 
-  // Esquema estándar de nuestra plataforma
+  // Esquema estándar
   const [targetFields] = useState<TargetField[]>([
     { name: "title", type: "string", required: true, description: "Título de la oferta" },
     { name: "company", type: "string", required: true, description: "Nombre de la empresa" },
@@ -104,37 +106,57 @@ export default function MapeoPage({ params }: { params: Promise<{ id: string }> 
     { name: "experience_level", type: "string", required: false, description: "Experiencia requerida" },
     { name: "published_at", type: "date", required: true, description: "Fecha de publicación" },
     { name: "apply_url", type: "url", required: true, description: "URL de aplicación" },
-    { name: "url", type: "url", required: false, description: "URL externa de la oferta" },
+    { name: "url", type: "url", required: false, description: "URL de la oferta" },
     { name: "sector", type: "string", required: false, description: "Sector o categoría" },
   ])
 
-  // ✅ CARGAR CONEXIÓN
+  // Route protection
+  useEffect(() => {
+    if (!authLoading && !isAuthenticated) {
+      console.log('🛡️ MapeoPage: Usuario no autenticado, redirigiendo...')
+      toast({
+        title: "Acceso denegado",
+        description: "Debes iniciar sesión para acceder a esta página",
+        variant: "destructive",
+      })
+      const landingUrl = process.env.NEXT_PUBLIC_LANDING_URL || 'http://localhost:3000'
+      window.location.href = `${landingUrl}/login`
+    }
+  }, [authLoading, isAuthenticated, toast])
+
+  // Show loading while checking auth
+  if (authLoading) {
+    return <PageLoadingSpinner />
+  }
+
+  // Ensure user is authenticated
+  if (!isAuthenticated || !user) {
+    return <PageLoadingSpinner />
+  }
+
+  // Load connection data
   useEffect(() => {
     const fetchConnection = async () => {
+      if (!connectionId || isNaN(connectionId)) {
+        setError("ID de conexión inválido")
+        setLoading(false)
+        return
+      }
+
       try {
         setLoading(true)
         console.log(`🔄 Cargando conexión ${connectionId}...`)
 
-        if (!connectionId || isNaN(connectionId)) {
-          throw new Error(`ID de conexión inválido: ${resolvedParams.id}`)
-        }
-
-        const response = await authFetch(`http://localhost:3002/api/connections/${connectionId}`)
-        console.log(`🌐 Petición a: http://localhost:3002/api/connections/${connectionId}`)
-
-        if (!response.ok) {
-          throw new Error(`Error al cargar conexión: ${response.status}`)
-        }
-
-        const conexionData = await response.json()
+        const conexionData = await authFetchJSON<Conexion>(`http://localhost:3002/api/connections/${connectionId}`)
         setConexion(conexionData)
         console.log("✅ Conexión cargada:", conexionData)
-
         setError(null)
       } catch (err) {
+        const errorMessage = getErrorMessage(err)
         console.error("❌ Error cargando conexión:", err)
-        const errorMessage = err instanceof Error ? err.message : "Error desconocido"
+        logError(err, { context: 'fetchConnection', connectionId })
         setError(errorMessage)
+        
         toast({
           title: "Error al cargar conexión",
           description: errorMessage,
@@ -146,9 +168,9 @@ export default function MapeoPage({ params }: { params: Promise<{ id: string }> 
     }
 
     fetchConnection()
-  }, [connectionId, toast, resolvedParams.id])
+  }, [connectionId])
 
-  // ✅ CARGAR CAMPOS ORIGEN
+  // Load source fields
   useEffect(() => {
     const fetchSourceFields = async () => {
       if (!conexion) return
@@ -157,15 +179,9 @@ export default function MapeoPage({ params }: { params: Promise<{ id: string }> 
         setLoadingSourceFields(true)
         console.log(`🔄 Cargando campos origen para conexión ${connectionId}...`)
 
-        const response = await authFetch(`http://localhost:3002/api/connections/${connectionId}/fields`)
-        console.log(`🌐 Petición a: http://localhost:3002/api/connections/${connectionId}/fields`)
-
-        if (!response.ok) {
-          throw new Error(`Error al cargar campos origen: ${response.status}`)
-        }
-
-        const data = await response.json()
-        console.log("✅ Campos origen recibidos:", data)
+        const data = await authFetchJSON<{ success: boolean; fields: SourceField[] }>(
+          `http://localhost:3002/api/connections/${connectionId}/fields`
+        )
 
         if (data.success && data.fields && Array.isArray(data.fields)) {
           setSourceFields(data.fields)
@@ -175,10 +191,13 @@ export default function MapeoPage({ params }: { params: Promise<{ id: string }> 
           setSourceFields([])
         }
       } catch (err) {
+        const errorMessage = getErrorMessage(err)
         console.error("❌ Error cargando campos origen:", err)
+        logError(err, { context: 'fetchSourceFields', connectionId })
+        
         toast({
-          title: "Error al cargar campos origen",
-          description: "No se pudieron detectar los campos de la fuente de datos",
+          title: "Error al cargar campos",
+          description: errorMessage,
           variant: "destructive",
         })
         setSourceFields([])
@@ -188,28 +207,29 @@ export default function MapeoPage({ params }: { params: Promise<{ id: string }> 
     }
 
     fetchSourceFields()
-  }, [conexion, connectionId, toast])
+  }, [conexion, connectionId])
 
-  // ✅ CARGAR MAPEO ACTUAL
+  // Load existing mappings
   useEffect(() => {
     const fetchMapping = async () => {
-      if (!conexion) return
+      if (!conexion || sourceFields.length === 0) return
 
       try {
         console.log(`🔄 Cargando mapeo actual para conexión ${connectionId}...`)
 
-        const response = await authFetch(`http://localhost:3002/api/connections/${connectionId}/mapping`)
+        const response = await authFetch(`http://localhost:3002/api/connections/${connectionId}/mappings`)
+        
         if (response.ok) {
-          const mappingData = await response.json()
-          console.log("✅ Mapeo actual cargado:", mappingData)
+          const existingMappings = await response.json()
+          console.log("✅ Mapeo actual cargado:", existingMappings)
 
-          setCurrentMappings(mappingData)
+          setCurrentMappings(existingMappings)
 
-          // Convertir a formato para la UI
+          // Convert to UI format
           const mappingObj: { [key: string]: string } = {}
           const transformObj: { [key: string]: string } = {}
 
-          mappingData.forEach((mapping: FieldMapping) => {
+          existingMappings.forEach((mapping: FieldMapping) => {
             mappingObj[mapping.TargetField] = mapping.SourceField
             if (mapping.TransformationRule) {
               transformObj[mapping.TargetField] = mapping.TransformationRule
@@ -218,91 +238,115 @@ export default function MapeoPage({ params }: { params: Promise<{ id: string }> 
 
           setFieldMapping(mappingObj)
           setTransformations(transformObj)
-        } else {
-          console.log("ℹ️ No hay mapeo existente, iniciando con mapeo inteligente")
+        } else if (response.status === 404) {
+          // No existing mapping, apply intelligent mapping
+          console.log("ℹ️ No hay mapeo existente, aplicando mapeo inteligente")
+          applyIntelligentMapping()
         }
-        
-        // ✅ MAPEO INTELIGENTE SIEMPRE - Se ejecuta tanto con mapeo vacío como existente
-        if (sourceFields.length > 0) {
-          const initialMapping: { [key: string]: string } = {}
-
-          // ✅ MAPEO AUTOMÁTICO MEJORADO - Más patrones y campos
-          sourceFields.forEach((sourceField) => {
-              const sourceName = sourceField.name.toLowerCase()
-              const sourceDesc = sourceField.description.toLowerCase()
-              
-              // Mapear title
-              if (sourceName.includes("title") || sourceName.includes("jobtitle") || 
-                  sourceDesc.includes("título") || sourceDesc.includes("puesto")) {
-                initialMapping.title = sourceField.name
-              }
-              // Mapear company  
-              else if (sourceName.includes("company") || sourceName.includes("employer") ||
-                       sourceDesc.includes("empresa") || sourceDesc.includes("compañía")) {
-                initialMapping.company = sourceField.name
-              }
-              // Mapear location/city
-              else if (sourceName.includes("location") || sourceName.includes("city") || 
-                       sourceName.includes("ciudad") || sourceDesc.includes("ubicación") || 
-                       sourceDesc.includes("ciudad")) {
-                initialMapping.location = sourceField.name
-              }
-              // Mapear published_at
-              else if (sourceName.includes("date") || sourceName.includes("publish") || 
-                       sourceName.includes("publication") || sourceDesc.includes("fecha") ||
-                       sourceDesc.includes("publicación")) {
-                initialMapping.published_at = sourceField.name
-              }
-              // Mapear apply_url  
-              else if (sourceName.includes("url") || sourceName.includes("link") || 
-                       sourceName.includes("apply") || sourceDesc.includes("aplicación") ||
-                       sourceDesc.includes("enlace")) {
-                initialMapping.apply_url = sourceField.name
-              }
-              // Mapear description
-              else if (sourceName.includes("description") || sourceName.includes("content") ||
-                       sourceDesc.includes("descripción") || sourceDesc.includes("contenido")) {
-                initialMapping.description = sourceField.name
-              }
-              // Mapear sector
-              else if (sourceName.includes("sector") || sourceName.includes("category") ||
-                       sourceDesc.includes("sector") || sourceDesc.includes("categoría")) {
-                initialMapping.sector = sourceField.name
-              }
-              // Mapear contract_type
-              else if (sourceName.includes("contract") || sourceName.includes("jobtype") ||
-                       sourceDesc.includes("contrato") || sourceDesc.includes("tipo")) {
-                initialMapping.contract_type = sourceField.name
-              }
-              // Mapear salary fields
-              else if (sourceName.includes("salary") || sourceName.includes("min") ||
-                       sourceDesc.includes("salario")) {
-                if (sourceName.includes("min") || sourceDesc.includes("mínimo")) {
-                  initialMapping.salary_min = sourceField.name
-                } else if (sourceName.includes("max") || sourceDesc.includes("máximo")) {
-                  initialMapping.salary_max = sourceField.name
-                }
-              }
-            })
-
-            // Solo aplicar mapeo inteligente si no hay mapeo existente
-            if (Object.keys(fieldMapping).length === 0) {
-              setFieldMapping(initialMapping)
-              console.log("✅ Mapeo inteligente aplicado:", initialMapping)
-            } else {
-              console.log("💡 Mapeo inteligente disponible (no aplicado porque ya existe mapeo):", initialMapping)
-            }
-          }
-        } catch (err) {
-          console.error("❌ Error cargando mapeo:", err)
-        }
+      } catch (err) {
+        console.error("❌ Error cargando mapeo:", err)
+        logError(err, { context: 'fetchMapping', connectionId })
       }
     }
 
     fetchMapping()
-  }, [conexion, connectionId, sourceFields])
+  }, [conexion, connectionId, sourceFields.length])
 
-  // ✅ FORZAR MAPEO INTELIGENTE
+  // Intelligent mapping
+  const applyIntelligentMapping = () => {
+    // Start with existing mappings to preserve manual selections
+    const initialMapping: { [key: string]: string } = { ...fieldMapping }
+
+    sourceFields.forEach((sourceField) => {
+      const fieldName = sourceField.name.toLowerCase()
+      
+      // Title mapping - only if not already mapped
+      if (!initialMapping.title && (fieldName === "title" || fieldName === "job_title" || fieldName === "jobtitle" || 
+          fieldName === "titulo" || fieldName === "puesto" || fieldName === "cargo")) {
+        initialMapping.title = sourceField.name
+      }
+      
+      // Company mapping
+      if (!initialMapping.company && (fieldName === "company" || fieldName === "companyname" || fieldName === "company_name" || 
+          fieldName === "empresa" || fieldName === "empleador" || fieldName === "employer")) {
+        initialMapping.company = sourceField.name
+      }
+      
+      // Location mapping
+      if (!initialMapping.location && (fieldName === "location" || fieldName === "city" || fieldName === "ciudad" || 
+          fieldName === "ubicacion" || fieldName === "lugar" || fieldName === "provincia" || fieldName === "region")) {
+        initialMapping.location = sourceField.name
+      }
+      
+      // Published date mapping
+      if (!initialMapping.published_at && (fieldName === "date" || fieldName === "publish_date" || fieldName === "publication_date" || 
+          fieldName === "created_at" || fieldName === "published_at" || fieldName === "publication" || 
+          fieldName === "fecha" || fieldName === "fecha_publicacion")) {
+        initialMapping.published_at = sourceField.name
+      }
+      
+      // Apply URL mapping
+      if (!initialMapping.apply_url && (fieldName === "url_apply" || fieldName === "apply_url" || fieldName === "application_url" ||
+          fieldName === "link_aplicacion" || fieldName === "enlace_aplicacion" || fieldName === "apply_link")) {
+        initialMapping.apply_url = sourceField.name
+      }
+      
+      // URL mapping
+      if (!initialMapping.url && (fieldName === "url" || fieldName === "link" || fieldName === "enlace" || 
+          fieldName === "job_url" || fieldName === "offer_url") && 
+          !fieldName.includes("apply") && !fieldName.includes("logo")) {
+        initialMapping.url = sourceField.name
+      }
+      
+      // Description mapping
+      if (!initialMapping.description && (fieldName === "description" || fieldName === "content" || fieldName === "summary" ||
+          fieldName === "descripcion" || fieldName === "detalle" || fieldName === "contenido")) {
+        initialMapping.description = sourceField.name
+      }
+      
+      // Sector mapping
+      if (!initialMapping.sector && (fieldName === "sector" || fieldName === "category" || fieldName === "job_category" ||
+          fieldName === "categoria" || fieldName === "area" || fieldName === "industria")) {
+        initialMapping.sector = sourceField.name
+      }
+      
+      // Contract type mapping
+      if (!initialMapping.contract_type && (fieldName === "contract_type" || fieldName === "job_type" || 
+          fieldName === "employment_type" || fieldName === "jobtype" || fieldName === "tipo_contrato" || 
+          fieldName === "modalidad" || fieldName === "tipo_empleo")) {
+        initialMapping.contract_type = sourceField.name
+      }
+      
+      // Salary min mapping
+      if (!initialMapping.salary_min && (fieldName === "salary_min" || fieldName === "min_salary" || 
+          fieldName === "salario_minimo" || fieldName === "sueldo_minimo" || fieldName === "minimum_salary")) {
+        initialMapping.salary_min = sourceField.name
+      }
+      
+      // Salary max mapping
+      if (!initialMapping.salary_max && (fieldName === "salary_max" || fieldName === "max_salary" || 
+          fieldName === "salario_maximo" || fieldName === "sueldo_maximo" || fieldName === "maximum_salary")) {
+        initialMapping.salary_max = sourceField.name
+      }
+      
+      // Work mode mapping
+      if (!initialMapping.work_mode && (fieldName === "work_mode" || fieldName === "working_mode" || 
+          fieldName === "remote" || fieldName === "modalidad_trabajo" || fieldName === "trabajo_remoto")) {
+        initialMapping.work_mode = sourceField.name
+      }
+      
+      // Experience level mapping
+      if (!initialMapping.experience_level && (fieldName === "experience" || fieldName === "experience_level" || 
+          fieldName === "seniority" || fieldName === "experiencia" || fieldName === "nivel_experiencia")) {
+        initialMapping.experience_level = sourceField.name
+      }
+    })
+
+    setFieldMapping(initialMapping)
+    console.log("🤖 Mapeo inteligente aplicado:", initialMapping)
+  }
+
+  // Force intelligent mapping
   const forceIntelligentMapping = () => {
     if (sourceFields.length === 0) {
       toast({
@@ -313,82 +357,41 @@ export default function MapeoPage({ params }: { params: Promise<{ id: string }> 
       return
     }
     
-    const initialMapping: { [key: string]: string } = {}
-
-    // ✅ MAPEO AUTOMÁTICO - Misma lógica que arriba
+    // Keep existing mappings
+    const newMappings = { ...fieldMapping }
+    let mappedCount = 0
+    
     sourceFields.forEach((sourceField) => {
-      const sourceName = sourceField.name.toLowerCase()
-      const sourceDesc = sourceField.description.toLowerCase()
+      const fieldName = sourceField.name.toLowerCase()
       
-      // Mapear title
-      if (sourceName.includes("title") || sourceName.includes("jobtitle") || 
-          sourceDesc.includes("título") || sourceDesc.includes("puesto")) {
-        initialMapping.title = sourceField.name
-      }
-      // Mapear company  
-      else if (sourceName.includes("company") || sourceName.includes("employer") ||
-               sourceDesc.includes("empresa") || sourceDesc.includes("compañía")) {
-        initialMapping.company = sourceField.name
-      }
-      // Mapear location/city
-      else if (sourceName.includes("location") || sourceName.includes("city") || 
-               sourceName.includes("ciudad") || sourceDesc.includes("ubicación") || 
-               sourceDesc.includes("ciudad")) {
-        initialMapping.location = sourceField.name
-      }
-      // Mapear published_at
-      else if (sourceName.includes("date") || sourceName.includes("publish") || 
-               sourceName.includes("publication") || sourceDesc.includes("fecha") ||
-               sourceDesc.includes("publicación")) {
-        initialMapping.published_at = sourceField.name
-      }
-      // Mapear apply_url  
-      else if (sourceName.includes("url") || sourceName.includes("link") || 
-               sourceName.includes("apply") || sourceDesc.includes("aplicación") ||
-               sourceDesc.includes("enlace")) {
-        initialMapping.apply_url = sourceField.name
-      }
-      // Mapear description
-      else if (sourceName.includes("description") || sourceName.includes("content") ||
-               sourceDesc.includes("descripción") || sourceDesc.includes("contenido")) {
-        initialMapping.description = sourceField.name
-      }
-      // Mapear sector
-      else if (sourceName.includes("sector") || sourceName.includes("category") ||
-               sourceDesc.includes("sector") || sourceDesc.includes("categoría")) {
-        initialMapping.sector = sourceField.name
-      }
-      // Mapear contract_type
-      else if (sourceName.includes("contract") || sourceName.includes("jobtype") ||
-               sourceDesc.includes("contrato") || sourceDesc.includes("tipo")) {
-        initialMapping.contract_type = sourceField.name
-      }
-      // Mapear salary fields
-      else if (sourceName.includes("salary") || sourceName.includes("min") ||
-               sourceDesc.includes("salario")) {
-        if (sourceName.includes("min") || sourceDesc.includes("mínimo")) {
-          initialMapping.salary_min = sourceField.name
-        } else if (sourceName.includes("max") || sourceDesc.includes("máximo")) {
-          initialMapping.salary_max = sourceField.name
+      // Apply intelligent mapping for unmapped fields
+      targetFields.forEach((targetField) => {
+        if (!newMappings[targetField.name]) {
+          const targetName = targetField.name.toLowerCase()
+          
+          // Check for matches
+          if (fieldName.includes(targetName) || targetName.includes(fieldName)) {
+            newMappings[targetField.name] = sourceField.name
+            mappedCount++
+          }
         }
-      }
+      })
     })
     
-    setFieldMapping(initialMapping)
-    console.log("🤖 Mapeo inteligente forzado:", initialMapping)
+    setFieldMapping(newMappings)
     
     toast({
       title: "Mapeo inteligente aplicado",
-      description: `Se mapearon ${Object.keys(initialMapping).length} campos automáticamente`,
+      description: `Se mapearon ${mappedCount} campos nuevos automáticamente`,
     })
   }
 
-  // ✅ GUARDAR MAPEO
+  // Save mapping
   const saveMapping = async () => {
     const errors = validateMapping()
     if (errors.length > 0) {
       toast({
-        title: "Error en el mapeo",
+        title: "Error de validación",
         description: errors.join(", "),
         variant: "destructive",
       })
@@ -399,42 +402,94 @@ export default function MapeoPage({ params }: { params: Promise<{ id: string }> 
       setSaving(true)
       console.log("🔄 Guardando mapeo...")
 
-      // Convertir a formato del backend
-      const mappings: FieldMapping[] = Object.entries(fieldMapping).map(([targetField, sourceField]) => ({
-        ConnectionId: connectionId,
-        SourceField: sourceField,
-        TargetField: targetField,
+      // Convert to backend format - ensure ALL mapped fields are included
+      console.log("💾 Guardando mapeo completo:", fieldMapping)
+      console.log("💾 Transformaciones:", transformations)
+      
+      const mappings: FieldMapping[] = Object.entries(fieldMapping)
+        .filter(([_, sourceField]) => sourceField && sourceField.trim() !== '') // Only include non-empty mappings
+        .map(([targetField, sourceField]) => ({
+          ConnectionId: connectionId,
+          SourceField: sourceField,
+          TargetField: targetField,
         TransformationType: getTransformationType(targetField),
         TransformationRule: transformations[targetField] || null,
       }))
 
-      const response = await authFetch(`http://localhost:3002/api/connections/${connectionId}/mappings`, {
+      console.log("📤 Enviando mapeos al backend:", mappings)
+      console.log("📤 Total de mapeos a enviar:", mappings.length)
+
+      const response = await authFetchJSON(`http://localhost:3002/api/connections/${connectionId}/mappings`, {
         method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
         body: JSON.stringify({ mappings }),
       })
-
-      if (!response.ok) {
-        const errorData = await response.json()
-        throw new Error(errorData.message || `HTTP error! status: ${response.status}`)
-      }
-
-      const result = await response.json()
-      console.log("✅ Mapeo guardado:", result)
+      
+      console.log("✅ Respuesta del backend:", response)
 
       toast({
-        title: "Mapeo guardado exitosamente",
-        description: "La configuración de mapeo ha sido guardada y está lista para usar",
+        title: "Mapeo guardado",
+        description: "La configuración de mapeo ha sido guardada exitosamente",
       })
 
       setCurrentMappings(mappings)
+      
+      // Reload mappings to confirm what was actually saved
+      try {
+        console.log("🔄 Recargando mapeos para confirmar...")
+        const reloadedMappings = await authFetchJSON<FieldMapping[]>(
+          `http://localhost:3002/api/connections/${connectionId}/mapping`
+        )
+        
+        console.log("📥 Mapeos recargados desde el backend:", reloadedMappings)
+        console.log("📥 Total de mapeos recargados:", reloadedMappings.length)
+        
+        const mappingObj: { [key: string]: string } = {}
+        const transformObj: { [key: string]: string } = {}
+
+        reloadedMappings.forEach((mapping: FieldMapping) => {
+          mappingObj[mapping.TargetField] = mapping.SourceField
+          if (mapping.TransformationRule) {
+            transformObj[mapping.TargetField] = mapping.TransformationRule
+          }
+        })
+
+        console.log("🔄 Mapeo reconstruido:", mappingObj)
+        
+        // Compare what we sent vs what we got back
+        const sentFields = Object.keys(fieldMapping).sort()
+        const receivedFields = Object.keys(mappingObj).sort()
+        
+        console.log("📊 Campos enviados:", sentFields)
+        console.log("📊 Campos recibidos:", receivedFields)
+        
+        const missingFields = sentFields.filter(field => !receivedFields.includes(field))
+        if (missingFields.length > 0) {
+          console.error("❌ Campos perdidos después de guardar:", missingFields)
+          toast({
+            title: "Advertencia",
+            description: `Algunos campos no se guardaron correctamente: ${missingFields.join(", ")}`,
+            variant: "destructive",
+          })
+        }
+
+        // Don't update the state if fields are missing
+        if (missingFields.length === 0) {
+          setFieldMapping(mappingObj)
+          setTransformations(transformObj)
+          setCurrentMappings(reloadedMappings)
+        } else {
+          console.warn("⚠️ Manteniendo el mapeo local debido a campos faltantes")
+        }
+      } catch (reloadError) {
+        console.error("⚠️ Error recargando mapeos:", reloadError)
+      }
     } catch (err) {
+      const errorMessage = getErrorMessage(err)
       console.error("❌ Error guardando mapeo:", err)
-      const errorMessage = err instanceof Error ? err.message : "Error desconocido"
+      logError(err, { context: 'saveMapping', connectionId })
+      
       toast({
-        title: "Error al guardar mapeo",
+        title: "Error al guardar",
         description: errorMessage,
         variant: "destructive",
       })
@@ -443,35 +498,26 @@ export default function MapeoPage({ params }: { params: Promise<{ id: string }> 
     }
   }
 
-  // ✅ PROBAR MAPEO
+  // Test mapping
   const testMapping = async () => {
     try {
       setTesting(true)
       console.log("🔄 Probando mapeo...")
 
-      const response = await authFetch(`http://localhost:3002/api/connections/${connectionId}/test-mapping`, {
+      await authFetchJSON(`http://localhost:3002/api/connections/${connectionId}/test-mapping`, {
         method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
         body: JSON.stringify({ fieldMapping, transformations }),
       })
-
-      if (!response.ok) {
-        const errorData = await response.json()
-        throw new Error(errorData.message || `HTTP error! status: ${response.status}`)
-      }
-
-      const result = await response.json()
-      console.log("✅ Prueba de mapeo exitosa:", result)
 
       toast({
         title: "Prueba exitosa",
         description: "El mapeo funciona correctamente con los datos de muestra",
       })
     } catch (err) {
+      const errorMessage = getErrorMessage(err)
       console.error("❌ Error probando mapeo:", err)
-      const errorMessage = err instanceof Error ? err.message : "Error desconocido"
+      logError(err, { context: 'testMapping', connectionId })
+      
       toast({
         title: "Error en la prueba",
         description: errorMessage,
@@ -482,39 +528,29 @@ export default function MapeoPage({ params }: { params: Promise<{ id: string }> 
     }
   }
 
-  // ✅ ELIMINAR CONEXIÓN
+  // Delete connection
   const deleteConnection = async () => {
     try {
       setDeleting(true)
       console.log("🔄 Eliminando conexión...")
 
-      const response = await authFetch(`http://localhost:3002/api/connections/${connectionId}`, {
+      await authFetchJSON(`http://localhost:3002/api/connections/${connectionId}`, {
         method: "DELETE",
-        headers: {
-          "Content-Type": "application/json",
-        },
       })
-
-      if (!response.ok) {
-        const errorData = await response.json()
-        throw new Error(errorData.message || `HTTP error! status: ${response.status}`)
-      }
-
-      const result = await response.json()
-      console.log("✅ Conexión eliminada:", result)
 
       toast({
         title: "Conexión eliminada",
         description: "La conexión ha sido eliminada exitosamente",
       })
 
-      // Redirigir a la lista de conexiones
       router.push("/conexiones")
     } catch (err) {
+      const errorMessage = getErrorMessage(err)
       console.error("❌ Error eliminando conexión:", err)
-      const errorMessage = err instanceof Error ? err.message : "Error desconocido"
+      logError(err, { context: 'deleteConnection', connectionId })
+      
       toast({
-        title: "Error al eliminar conexión",
+        title: "Error al eliminar",
         description: errorMessage,
         variant: "destructive",
       })
@@ -523,7 +559,7 @@ export default function MapeoPage({ params }: { params: Promise<{ id: string }> 
     }
   }
 
-  // Funciones auxiliares
+  // Helper functions
   const mapField = (targetField: string, sourceField: string) => {
     setFieldMapping((prev) => ({
       ...prev,
@@ -581,7 +617,7 @@ export default function MapeoPage({ params }: { params: Promise<{ id: string }> 
       if (sourceFieldData) {
         let value = sourceFieldData.sample
 
-        // Aplicar transformaciones si existen
+        // Apply transformations
         if (transformations[targetField]) {
           switch (transformations[targetField]) {
             case "uppercase":
@@ -609,6 +645,7 @@ export default function MapeoPage({ params }: { params: Promise<{ id: string }> 
   const sampleData = generateSampleData()
   const validationErrors = validateMapping()
 
+  // Loading state
   if (loading) {
     return (
       <div className="flex flex-col gap-6 p-6">
@@ -626,6 +663,7 @@ export default function MapeoPage({ params }: { params: Promise<{ id: string }> 
     )
   }
 
+  // Error state
   if (error || !conexion) {
     return (
       <div className="flex flex-col gap-6 p-6">
@@ -646,6 +684,7 @@ export default function MapeoPage({ params }: { params: Promise<{ id: string }> 
     )
   }
 
+  // Main content
   return (
     <div className="flex flex-col gap-6 p-6">
       <div className="flex items-center gap-4">
@@ -664,7 +703,7 @@ export default function MapeoPage({ params }: { params: Promise<{ id: string }> 
         </div>
       </div>
 
-      {/* Info de la conexión */}
+      {/* Connection info */}
       <Card>
         <CardHeader>
           <CardTitle className="flex items-center gap-2">
@@ -691,7 +730,7 @@ export default function MapeoPage({ params }: { params: Promise<{ id: string }> 
       </Card>
 
       <div className="grid gap-6 lg:grid-cols-2">
-        {/* Mapeo de campos */}
+        {/* Field mapping */}
         <Card>
           <CardHeader>
             <CardTitle className="flex items-center gap-2">
@@ -790,9 +829,9 @@ export default function MapeoPage({ params }: { params: Promise<{ id: string }> 
           </CardContent>
         </Card>
 
-        {/* Panel lateral */}
+        {/* Side panel */}
         <div className="space-y-6">
-          {/* Campos de origen */}
+          {/* Source fields */}
           <Card>
             <CardHeader>
               <CardTitle className="flex items-center gap-2">
@@ -843,7 +882,7 @@ export default function MapeoPage({ params }: { params: Promise<{ id: string }> 
             </CardContent>
           </Card>
 
-          {/* Estado de validación */}
+          {/* Validation state */}
           <Card>
             <CardHeader>
               <CardTitle className="flex items-center gap-2">
@@ -888,7 +927,7 @@ export default function MapeoPage({ params }: { params: Promise<{ id: string }> 
             </CardContent>
           </Card>
 
-          {/* Acciones */}
+          {/* Actions */}
           <div className="space-y-2">
             <Button onClick={forceIntelligentMapping} variant="outline" className="w-full">
               <Zap className="h-4 w-4 mr-2" />
@@ -897,19 +936,6 @@ export default function MapeoPage({ params }: { params: Promise<{ id: string }> 
             <Button onClick={() => setShowPreview(!showPreview)} variant="outline" className="w-full">
               <Eye className="h-4 w-4 mr-2" />
               {showPreview ? "Ocultar" : "Ver"} Vista Previa
-            </Button>
-            <Button onClick={testMapping} variant="outline" className="w-full bg-transparent" disabled={testing}>
-              {testing ? (
-                <>
-                  <Loader2 className="h-4 w-4 mr-2 animate-spin" />
-                  Probando...
-                </>
-              ) : (
-                <>
-                  <RefreshCw className="h-4 w-4 mr-2" />
-                  Probar Mapeo
-                </>
-              )}
             </Button>
             <Button onClick={saveMapping} className="w-full" disabled={validationErrors.length > 0 || saving}>
               {saving ? (
@@ -925,7 +951,7 @@ export default function MapeoPage({ params }: { params: Promise<{ id: string }> 
               )}
             </Button>
             
-            {/* Botón para eliminar conexión */}
+            {/* Delete button */}
             <AlertDialog>
               <AlertDialogTrigger asChild>
                 <Button variant="destructive" className="w-full" disabled={deleting}>
@@ -937,24 +963,20 @@ export default function MapeoPage({ params }: { params: Promise<{ id: string }> 
                 <AlertDialogHeader>
                   <AlertDialogTitle>¿Estás seguro?</AlertDialogTitle>
                   <AlertDialogDescription>
-                    Esta acción eliminará permanentemente la conexión "{conexion?.name}" y todos sus mapeos de campos asociados. 
-                    Esta acción no se puede deshacer.
+                    Esta acción no se puede deshacer. Se eliminará permanentemente la conexión
+                    "{conexion.name}" y toda su configuración asociada.
                   </AlertDialogDescription>
                 </AlertDialogHeader>
                 <AlertDialogFooter>
                   <AlertDialogCancel>Cancelar</AlertDialogCancel>
-                  <AlertDialogAction 
-                    onClick={deleteConnection}
-                    disabled={deleting}
-                    className="bg-red-600 hover:bg-red-700"
-                  >
+                  <AlertDialogAction onClick={deleteConnection} className="bg-red-600">
                     {deleting ? (
                       <>
                         <Loader2 className="h-4 w-4 mr-2 animate-spin" />
                         Eliminando...
                       </>
                     ) : (
-                      "Sí, eliminar"
+                      "Eliminar"
                     )}
                   </AlertDialogAction>
                 </AlertDialogFooter>
@@ -964,38 +986,20 @@ export default function MapeoPage({ params }: { params: Promise<{ id: string }> 
         </div>
       </div>
 
-      {/* Vista previa de datos */}
+      {/* Preview */}
       {showPreview && (
         <Card>
           <CardHeader>
             <CardTitle className="flex items-center gap-2">
               <Eye className="h-5 w-5" />
-              Vista Previa de Datos Mapeados
+              Vista Previa del Mapeo
             </CardTitle>
-            <CardDescription>Así quedarían los datos después del mapeo y transformaciones</CardDescription>
+            <CardDescription>Así se verán los datos después del mapeo</CardDescription>
           </CardHeader>
           <CardContent>
-            <div className="grid gap-4">
-              <div className="grid gap-4 md:grid-cols-2">
-                {Object.entries(sampleData).map(([field, value]) => (
-                  <div key={field} className="p-3 border rounded-lg">
-                    <div className="flex items-center gap-2">
-                      <Label className="text-sm font-medium">
-                        {targetFields.find((f) => f.name === field)?.description}
-                      </Label>
-                      {transformations[field] && (
-                        <Badge variant="outline" className="text-xs">
-                          <Zap className="h-3 w-3 mr-1" />
-                          {transformations[field]}
-                        </Badge>
-                      )}
-                    </div>
-                    <p className="text-sm text-muted-foreground mt-1">{value}</p>
-                    <p className="text-xs text-muted-foreground">Origen: {fieldMapping[field]}</p>
-                  </div>
-                ))}
-              </div>
-            </div>
+            <pre className="bg-muted p-4 rounded-lg overflow-x-auto">
+              <code>{JSON.stringify(sampleData, null, 2)}</code>
+            </pre>
           </CardContent>
         </Card>
       )}

@@ -88,8 +88,9 @@ export function useKeysetPaginationAuth(options: KeysetPaginationOptions) {
       console.log('🔄 Keyset Auth: Reset - fetching first page:', url);
       
       // ✅ USAR fetchWithAuth en lugar de fetch directo
+      // TEMPORAL: Removido signal para evitar AbortError prematuros
       const response = await fetchWithAuth(url, {
-        signal: abortControllerRef.current?.signal,
+        // signal: abortControllerRef.current?.signal,
       });
       
       if (!response.ok) {
@@ -167,8 +168,9 @@ export function useKeysetPaginationAuth(options: KeysetPaginationOptions) {
         abortControllerRef.current = controller;
         
         // ✅ USAR fetchWithAuth en lugar de fetch directo
+        // TEMPORAL: Removido signal para evitar AbortError prematuros
         const response = await fetchWithAuth(url, {
-          signal: controller.signal,
+          // signal: controller.signal,
         });
         
         clearTimeout(timeoutId);

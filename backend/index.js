@@ -195,6 +195,7 @@ app.get('/', (req, res) => {
   res.send('API running');
 });
 
+
 // Endpoint de debug para CORS
 app.get('/debug', (req, res) => {
   res.json({
@@ -242,7 +243,7 @@ app.get('/job-offers/locations',
     const request = pool.request();
     request.timeout = timeoutMs;
     
-    let whereConditions = ['(City IS NOT NULL OR Region IS NOT NULL)', 'StatusId = 1'];
+    let whereConditions = ['(City IS NOT NULL OR Region IS NOT NULL)'];
     
     // ✅ FILTRAR POR USUARIO - Solo superadmin ve todo
     const { isSuperAdmin } = require('./src/middleware/authMiddleware');
@@ -386,7 +387,7 @@ app.get('/job-offers/sectors',
     const request = pool.request();
     request.timeout = timeoutMs;
     
-    let whereConditions = ['Sector IS NOT NULL', 'Sector != \'\'', 'StatusId = 1'];
+    let whereConditions = ['Sector IS NOT NULL', 'Sector != \'\''];
     
     // ✅ FILTRAR POR USUARIO - Solo superadmin ve todo  
     const { isSuperAdmin } = require('./src/middleware/authMiddleware');
@@ -521,7 +522,7 @@ app.get('/job-offers/external-ids',
     const request = pool.request();
     request.timeout = timeoutMs;
     
-    let whereConditions = ['ExternalId IS NOT NULL', 'ExternalId != \'\'', 'StatusId = 1'];
+    let whereConditions = ['ExternalId IS NOT NULL', 'ExternalId != \'\''];
     
     // ✅ FILTRAR POR USUARIO - Solo superadmin ve todo
     const { isSuperAdmin } = require('./src/middleware/authMiddleware');
@@ -1499,7 +1500,7 @@ app.get('/job-offers/companies',
     const request = pool.request();
     request.timeout = timeoutMs;
     
-    const whereConditions = ['CompanyName IS NOT NULL', "CompanyName != ''", 'StatusId = 1'];
+    const whereConditions = ['CompanyName IS NOT NULL', "CompanyName != ''"];
     
     // ✅ FILTRAR POR USUARIO - Solo superadmin ve todo
     const { isSuperAdmin } = require('./src/middleware/authMiddleware');

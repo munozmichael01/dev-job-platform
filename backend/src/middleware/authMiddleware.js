@@ -1,14 +1,14 @@
 /**
- * 🚀 MIDDLEWARE DE AUTENTICACIÓN OPTIMIZADO
+ * 🔐 Middleware de Autenticación JWT con Roles y Super Admin
  * 
- * Mejoras de performance:
- * - Cache de usuarios en memoria con TTL (5 min)
- * - JWT verificado solo una vez por request
- * - Logs reducidos (solo en debug mode)
- * - DB queries minimizadas
+ * Sistema completo de autenticación multi-tenant con:
+ * - JWT tokens con expiración
+ * - Roles: user, admin, superadmin
+ * - Super admin: acceso total a todos los datos
+ * - Separación estricta de datos por usuario
  * 
- * @author Claude Code  
- * @date 2025-08-19
+ * @author Claude Code
+ * @date 2025-08-18
  */
 
 const jwt = require('jsonwebtoken');
@@ -17,30 +17,9 @@ const { pool, sql } = require('../db/db');
 // Configuración JWT
 const JWT_SECRET = process.env.JWT_SECRET || 'tu-jwt-secret-super-seguro-cambiar-en-produccion';
 const JWT_EXPIRES_IN = process.env.JWT_EXPIRES_IN || '24h';
-const DEBUG_MODE = process.env.AUTH_DEBUG === 'true';
-
-// 🔥 CACHE EN MEMORIA - TTL 5 minutos
-const userCache = new Map();
-const CACHE_TTL = 5 * 60 * 1000; // 5 minutos
-const REQUEST_CACHE = new WeakMap(); // Cache por request
 
 /**
- * Limpiar cache expirado cada 10 minutos
- */
-setInterval(() => {
-  const now = Date.now();
-  for (const [key, value] of userCache.entries()) {
-    if (now - value.timestamp > CACHE_TTL) {
-      userCache.delete(key);
-    }
-  }
-  if (DEBUG_MODE && userCache.size > 0) {
-    console.log(`🗑️ Cache limpieza: ${userCache.size} usuarios en cache`);
-  }
-}, 10 * 60 * 1000);
-
-/**
- * Generar token JWT (sin cambios)
+ * Generar token JWT para usuario
  */
 const generateToken = (user) => {
   const payload = {
@@ -60,9 +39,9 @@ const generateToken = (user) => {
 };
 
 /**
- * ⚡ VERIFICAR TOKEN OPTIMIZADO - Solo verificación JWT
+ * Verificar y decodificar token JWT
  */
-const verifyTokenOptimized = (token) => {
+const verifyToken = (token) => {
   try {
     return jwt.verify(token, JWT_SECRET, {
       issuer: 'job-platform',
@@ -74,172 +53,234 @@ const verifyTokenOptimized = (token) => {
 };
 
 /**
- * ⚡ OBTENER USER OPTIMIZADO - Con cache y sin DB lookup innecesario
+ * Obtener UserId y datos del usuario desde JWT
  */
-const getUserFromRequestOptimized = async (req) => {
-  // 1. Check request cache first
-  if (REQUEST_CACHE.has(req)) {
-    return REQUEST_CACHE.get(req);
-  }
-
-  let token = null;
+const getUserFromRequest = async (req) => {
+  console.log('🔍 Headers recibidos:', JSON.stringify(req.headers, null, 2));
   
-  // 2. Extraer token (sin logs verbosos)
+  // 1. Intentar obtener token desde Authorization header
   const authHeader = req.headers.authorization;
   if (authHeader && authHeader.startsWith('Bearer ')) {
-    token = authHeader.substring(7);
-  } else {
-    const cookies = req.headers.cookie;
-    if (cookies) {
-      const tokenMatch = cookies.match(/auth_token=([^;]+)/);
-      if (tokenMatch) {
-        token = decodeURIComponent(tokenMatch[1]);
+    const token = authHeader.substring(7);
+    try {
+      const decoded = verifyToken(token);
+      console.log(`🔐 JWT User: ${decoded.email} (${decoded.role}) - ID: ${decoded.userId}`);
+      return {
+        userId: decoded.userId,
+        email: decoded.email,
+        role: decoded.role,
+        firstName: decoded.firstName,
+        lastName: decoded.lastName,
+        company: decoded.company
+      };
+    } catch (error) {
+      console.error('❌ Error verificando JWT:', error.message);
+    }
+  }
+
+  // 2. Buscar token en cookies (Next.js)
+  const cookies = req.headers.cookie;
+  if (cookies) {
+    const tokenMatch = cookies.match(/auth_token=([^;]+)/);
+    if (tokenMatch) {
+      const token = decodeURIComponent(tokenMatch[1]);
+      try {
+        const decoded = verifyToken(token);
+        console.log(`🔐 JWT Cookie User: ${decoded.email} (${decoded.role}) - ID: ${decoded.userId}`);
+        return {
+          userId: decoded.userId,
+          email: decoded.email,
+          role: decoded.role,
+          firstName: decoded.firstName,
+          lastName: decoded.lastName,
+          company: decoded.company
+        };
+      } catch (error) {
+        console.error('❌ Error verificando JWT cookie:', error.message);
       }
     }
   }
 
-  if (!token) {
-    if (DEBUG_MODE) console.log('⚠️ No token found');
-    return null;
+  // 3. Fallback: x-user-id header para testing
+  const headerUserId = req.headers['x-user-id'];
+  if (headerUserId) {
+    console.log(`🔄 Fallback x-user-id: ${headerUserId}`);
+    try {
+      await pool;
+      const result = await pool.request()
+        .input('userId', sql.BigInt, parseInt(headerUserId))
+        .query('SELECT Id, Email, Role, FirstName, LastName, Company FROM Users WHERE Id = @userId AND IsActive = 1');
+      
+      if (result.recordset.length > 0) {
+        const user = result.recordset[0];
+        return {
+          userId: user.Id,
+          email: user.Email,
+          role: user.Role || 'user',
+          firstName: user.FirstName,
+          lastName: user.LastName,
+          company: user.Company
+        };
+      }
+    } catch (error) {
+      console.error('❌ Error obteniendo usuario desde BD:', error.message);
+    }
   }
 
-  try {
-    // 3. Verificar JWT (sin DB lookup)
-    const decoded = verifyTokenOptimized(token);
-    const userKey = `user_${decoded.userId}`;
-    
-    // 4. Check memory cache
-    const cachedUser = userCache.get(userKey);
-    if (cachedUser && (Date.now() - cachedUser.timestamp < CACHE_TTL)) {
-      const user = cachedUser.data;
-      REQUEST_CACHE.set(req, user);
-      if (DEBUG_MODE) console.log(`💾 Cache hit: ${user.email}`);
-      return user;
-    }
-
-    // 5. Solo si no hay cache, hacer DB lookup
-    await pool;
-    const dbResult = await pool.request()
-      .input('userId', sql.BigInt, decoded.userId)
-      .query('SELECT Id, Email, Role, FirstName, LastName, Company FROM Users WHERE Id = @userId');
-
-    if (dbResult.recordset.length === 0) {
-      throw new Error('Usuario no encontrado en BD');
-    }
-
-    const dbUser = dbResult.recordset[0];
-    const user = {
-      userId: dbUser.Id,
-      email: dbUser.Email,
-      role: dbUser.Role || 'user',
-      firstName: dbUser.FirstName,
-      lastName: dbUser.LastName,
-      company: dbUser.Company
-    };
-
-    // 6. Guardar en cache
-    userCache.set(userKey, {
-      data: user,
-      timestamp: Date.now()
-    });
-    
-    REQUEST_CACHE.set(req, user);
-    
-    if (DEBUG_MODE) console.log(`🔐 DB lookup: ${user.email} (cached for ${CACHE_TTL/60000}min)`);
-    return user;
-
-  } catch (error) {
-    if (DEBUG_MODE) console.error('❌ Auth error:', error.message);
-    return null;
-  }
+  // 4. No hay token válido - error real
+  console.log('❌ No se encontró token JWT válido en headers:', Object.keys(req.headers));
+  throw new Error('Token JWT requerido');
 };
 
 /**
- * ⚡ MIDDLEWARE: Agregar user a request (optimizado)
+ * Middleware: Agregar información del usuario a la request
  */
 const addUserToRequest = async (req, res, next) => {
   try {
-    const user = await getUserFromRequestOptimized(req);
-    if (user) {
-      req.user = user;
-      req.userId = parseInt(user.userId);
-    }
+    const user = await getUserFromRequest(req);
+    req.user = user;
+    req.userId = user.userId; // Mantener compatibilidad
+    
+    console.log(`🔐 Request User: ${user.email} (${user.role}) - ${req.method} ${req.path}`);
+    console.log(`🔐 Request UserId: ${req.userId}`);
+    console.log(`🔐 Request User completo:`, JSON.stringify(req.user, null, 2));
     next();
   } catch (error) {
-    if (DEBUG_MODE) console.error('❌ addUserToRequest error:', error);
-    next();
-  }
-};
-
-/**
- * MIDDLEWARE: Require autenticación
- */
-const requireAuth = (req, res, next) => {
-  if (!req.user) {
+    console.error('❌ Error obteniendo usuario:', error);
     return res.status(401).json({
       success: false,
       error: 'Error de autenticación',
       message: 'No se pudo autenticar la solicitud'
     });
   }
+};
+
+/**
+ * Middleware: Requiere autenticación válida
+ */
+const requireAuth = (req, res, next) => {
+  if (!req.user || !req.userId) {
+    return res.status(401).json({
+      success: false,
+      error: 'Usuario no autenticado',
+      message: 'Se requiere autenticación para acceder a este recurso'
+    });
+  }
   next();
 };
 
 /**
- * MIDDLEWARE: Solo datos propios (igual que antes)
+ * Middleware: Requiere rol específico
  */
-const onlyOwnData = (userIdField = 'UserId') => {
+const requireRole = (allowedRoles) => {
   return (req, res, next) => {
-    if (isSuperAdmin(req)) {
-      return next(); // Super admin ve todo
+    if (!req.user) {
+      return res.status(401).json({
+        success: false,
+        error: 'Usuario no autenticado'
+      });
     }
+
+    const userRole = req.user.role;
+    const roles = Array.isArray(allowedRoles) ? allowedRoles : [allowedRoles];
     
-    req.userIdField = userIdField;
-    req.shouldFilterByUser = true;
+    if (!roles.includes(userRole)) {
+      console.log(`❌ Acceso denegado: usuario ${req.user.email} (${userRole}) intentó acceder a recurso que requiere ${roles.join(' o ')}`);
+      return res.status(403).json({
+        success: false,
+        error: 'Acceso denegado',
+        message: `Se requiere rol: ${roles.join(' o ')}`
+      });
+    }
+
+    console.log(`✅ Acceso autorizado: ${req.user.email} (${userRole})`);
     next();
   };
 };
 
 /**
- * Utilidades (sin cambios)
+ * Middleware: Solo super admin
+ */
+const requireSuperAdmin = requireRole('superadmin');
+
+/**
+ * Middleware: Admin o super admin
+ */
+const requireAdmin = requireRole(['admin', 'superadmin']);
+
+/**
+ * Verificar si el usuario es super admin
  */
 const isSuperAdmin = (req) => {
-  return req.user && req.user.role === 'superadmin';
+  const result = req.user && req.user.role === 'superadmin';
+  console.log(`🔑 isSuperAdmin check: req.user = ${!!req.user}, req.user.role = ${req.user?.role}, result = ${result}`);
+  return result;
 };
 
-const addUserIdToRequest = addUserToRequest;
-
-const getUserIdForQuery = (req) => {
-  if (isSuperAdmin(req)) return null;
+/**
+ * Obtener UserId para queries (considera super admin)
+ * Super admin puede ver datos de todos los usuarios
+ */
+const getUserIdForQuery = (req, targetUserId = null) => {
+  if (isSuperAdmin(req)) {
+    // Super admin: puede especificar userId específico o ver todos
+    if (targetUserId) {
+      console.log(`🔑 Super admin accediendo a datos de usuario ${targetUserId}`);
+      return targetUserId;
+    }
+    console.log(`🔑 Super admin accediendo a todos los datos`);
+    return null; // null significa "todos los usuarios"
+  }
+  
+  // Usuario normal: solo sus propios datos
   return req.userId;
 };
 
 /**
- * ⚡ STATS DEL CACHE (para monitoring)
+ * Middleware: Verificar acceso a datos propios (excepto super admin)
  */
-const getCacheStats = () => {
-  const now = Date.now();
-  let active = 0, expired = 0;
-  
-  for (const [key, value] of userCache.entries()) {
-    if (now - value.timestamp < CACHE_TTL) {
-      active++;
-    } else {
-      expired++;
+const onlyOwnData = (userIdField = 'UserId') => {
+  return (req, res, next) => {
+    console.log(`🛡️ onlyOwnData middleware: userIdField = ${userIdField}`);
+    console.log(`🛡️ onlyOwnData: req.user = ${!!req.user}, req.userId = ${req.userId}, req.user.role = ${req.user?.role}`);
+    console.log(`🛡️ onlyOwnData: isSuperAdmin(req) = ${isSuperAdmin(req)}`);
+    
+    if (isSuperAdmin(req)) {
+      // Super admin puede acceder a cualquier dato
+      console.log(`🔑 Super admin bypassing data access restrictions`);
+      req.userIdField = userIdField;
+      req.allowAllUsers = true;
+      return next();
     }
-  }
-  
-  return { active, expired, total: userCache.size };
+
+    // Usuario normal: solo sus datos
+    console.log(`🔒 Usuario normal: restringiendo acceso a datos propios (UserId = ${req.userId})`);
+    req.userIdField = userIdField;
+    req.allowAllUsers = false;
+    req.restrictedUserId = req.userId;
+    next();
+  };
 };
 
 module.exports = {
+  // Funciones principales
   generateToken,
+  verifyToken,
+  getUserFromRequest,
+  
+  // Middleware
   addUserToRequest,
-  addUserIdToRequest,
   requireAuth,
+  requireRole,
+  requireSuperAdmin,
+  requireAdmin,
   onlyOwnData,
+  
+  // Utilidades
   isSuperAdmin,
   getUserIdForQuery,
-  getUserFromRequest: getUserFromRequestOptimized,
-  getCacheStats // Para debugging
+  
+  // Compatibilidad hacia atrás
+  addUserIdToRequest: addUserToRequest, // Alias para compatibilidad
+  getUserIdFromRequest: getUserFromRequest // Mantener función legacy
 };

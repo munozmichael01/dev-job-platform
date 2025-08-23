@@ -619,6 +619,7 @@ class XMLProcessor {
         .input("ApplicationsReceived", sql.Int, offer.ApplicationsReceived || 0)
         .input("StatusId", sql.Int, offer.StatusId || 1)
         .input("ConnectionId", sql.Int, offer.ConnectionId)
+        .input("UserId", sql.BigInt, this.connection.UserId || this.connection.userId || null)
         .input("Source", sql.NVarChar(10), offer.Source || "XML")
         .input("PublicationDate", sql.DateTime, offer.PublicationDate || new Date())
         .input("CreatedAt", sql.DateTime, offer.CreatedAt || new Date())
@@ -658,6 +659,7 @@ class XMLProcessor {
                 WHEN Target.StatusId = 5 THEN 5  -- Mantener archivadas manuales
                 ELSE 1  -- Activar las demás (recibidas en XML)
               END,
+              UserId = @UserId,
               Source = @Source,
               PublicationDate = @PublicationDate,
               UpdatedAt = GETDATE()
@@ -667,14 +669,14 @@ class XMLProcessor {
               Country, CountryId, Region, RegionId, City, CityId, Postcode,
               Latitude, Longitude, Vacancies, SalaryMin, SalaryMax, JobType,
               ExternalUrl, ApplicationUrl, Budget, BudgetSpent, ApplicationsGoal,
-              ApplicationsReceived, StatusId, ConnectionId, Source, PublicationDate, CreatedAt
+              ApplicationsReceived, StatusId, ConnectionId, UserId, Source, PublicationDate, CreatedAt
             )
             VALUES (
               @ExternalId, @Title, @JobTitle, @Description, @CompanyName, @Sector, @Address,
               @Country, @CountryId, @Region, @RegionId, @City, @CityId, @Postcode,
               @Latitude, @Longitude, @Vacancies, @SalaryMin, @SalaryMax, @JobType,
               @ExternalUrl, @ApplicationUrl, @Budget, @BudgetSpent, @ApplicationsGoal,
-              @ApplicationsReceived, @StatusId, @ConnectionId, @Source, @PublicationDate, @CreatedAt
+              @ApplicationsReceived, @StatusId, @ConnectionId, @UserId, @Source, @PublicationDate, @CreatedAt
             );
         `)
     } catch (error) {
