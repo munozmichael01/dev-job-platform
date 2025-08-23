@@ -73,7 +73,7 @@ export interface FilterParams {
   q?: string
 }
 
-export async function fetchLocations(filters: FilterParams = {}) {
+export async function fetchLocations(fetchWithAuth: any, filters: FilterParams = {}) {
   console.log("🔍 fetchLocations con filtros:", filters);
   console.log("🔍 DEBUG: fetchLocations incluye company:", filters.company);
   
@@ -87,7 +87,7 @@ export async function fetchLocations(filters: FilterParams = {}) {
   const url = `${API_URL}/job-offers/locations${params.toString() ? '?' + params.toString() : ''}`;
   console.log("🔍 fetchLocations URL:", url);
 
-  const res = await fetch(url, {
+  const res = await fetchWithAuth(url, {
     method: 'GET',
     headers: {
       'Cache-Control': 'no-cache, no-store, must-revalidate',
@@ -105,7 +105,7 @@ export async function fetchLocations(filters: FilterParams = {}) {
   return res.json()
 }
 
-export async function fetchSectors(filters: FilterParams = {}) {
+export async function fetchSectors(fetchWithAuth: any, filters: FilterParams = {}) {
   console.log("🔍 fetchSectors con filtros:", filters);
   console.log("🔍 DEBUG: fetchSectors incluye company:", filters.company);
   
@@ -119,7 +119,7 @@ export async function fetchSectors(filters: FilterParams = {}) {
   const url = `${API_URL}/job-offers/sectors${params.toString() ? '?' + params.toString() : ''}`;
   console.log("🔍 fetchSectors URL:", url);
 
-  const res = await fetch(url, {
+  const res = await fetchWithAuth(url, {
     method: 'GET',
     headers: {
       'Cache-Control': 'no-cache, no-store, must-revalidate',
@@ -174,13 +174,13 @@ export async function fetchJobTypes() {
 }
 
 // -------- Segmentos --------
-export async function fetchSegments() {
-  const res = await fetch(`${API_URL}/api/segments`, { cache: 'no-store' });
+export async function fetchSegments(fetchWithAuth: any) {
+  const res = await fetchWithAuth(`${API_URL}/api/segments`, { cache: 'no-store' });
   if (!res.ok) throw new Error('Error al obtener segmentos');
   return res.json();
 }
-export async function createSegment(data: any) {
-  const res = await fetch(`${API_URL}/api/segments`, {
+export async function createSegment(fetchWithAuth: any, data: any) {
+  const res = await fetchWithAuth(`${API_URL}/api/segments`, {
     method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(data),
   });
   if (!res.ok) throw new Error('Error al crear segmento');
@@ -203,10 +203,10 @@ export async function deleteSegment(id: number) {
   if (!res.ok) throw new Error('Error al eliminar segmento');
   return true;
 }
-export async function estimateSegmentPreview(filters: {
+export async function estimateSegmentPreview(fetchWithAuth: any, filters: {
   jobTitles?: string[]; locations?: string[]; sectors?: string[]; experienceLevels?: string[]; contractTypes?: string[];
 }) {
-  const res = await fetch(`${API_URL}/api/segments/estimate-preview`, {
+  const res = await fetchWithAuth(`${API_URL}/api/segments/estimate-preview`, {
     method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ filters }),
     cache: 'no-store'
   });
@@ -243,9 +243,9 @@ export async function fetchCampaign(id: number) {
   return res.json();
 }
 
-export async function createCampaign(data: any) {
+export async function createCampaign(fetchWithAuth: any, data: any) {
   console.log("🎯 Enviando data a backend:", data);
-  const res = await fetch(`${API_URL}/api/campaigns`, {
+  const res = await fetchWithAuth(`${API_URL}/api/campaigns`, {
     method: 'POST', 
     headers: { 'Content-Type': 'application/json' }, 
     body: JSON.stringify(data),
@@ -317,7 +317,7 @@ export async function resumeCampaign(id: number) {
 }
 
 
-export async function fetchCompanies(filters: FilterParams = {}) {
+export async function fetchCompanies(fetchWithAuth: any, filters: FilterParams = {}) {
   console.log("🔍 fetchCompanies con filtros:", filters);
   
   const params = new URLSearchParams();
@@ -330,7 +330,7 @@ export async function fetchCompanies(filters: FilterParams = {}) {
   const url = `${API_URL}/job-offers/companies${params.toString() ? '?' + params.toString() : ''}`;
   console.log("🔍 fetchCompanies URL:", url);
 
-  const res = await fetch(url, {
+  const res = await fetchWithAuth(url, {
     method: 'GET',
     headers: {
       'Cache-Control': 'no-cache, no-store, must-revalidate',

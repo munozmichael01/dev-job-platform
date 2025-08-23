@@ -15,6 +15,7 @@ import { Checkbox } from "@/components/ui/checkbox"
 import Link from "next/link"
 import { useToast } from "@/hooks/use-toast"
 import { createCampaign, fetchSegments } from "@/lib/api-temp"
+import { useAuthFetch } from "@/hooks/useAuthFetch"
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group"
 import { MultiSelect } from "@/components/ui/multi-select"
 import ChannelSelector from "@/components/campaigns/ChannelSelector"
@@ -22,6 +23,7 @@ import ChannelSelector from "@/components/campaigns/ChannelSelector"
 export default function NuevaCampanaPage() {
   const { toast } = useToast()
   const router = useRouter()
+  const { authFetch } = useAuthFetch()
   const [formData, setFormData] = useState({
     name: "",
     description: "",
@@ -43,7 +45,7 @@ export default function NuevaCampanaPage() {
   useEffect(() => {
     ;(async () => {
       try {
-        const data = await fetchSegments()
+        const data = await fetchSegments(authFetch)
         setAvailableSegments(
           data.map((s: any) => ({
             id: String(s.Id),
@@ -54,7 +56,7 @@ export default function NuevaCampanaPage() {
         )
       } catch {}
     })()
-  }, [])
+  }, [authFetch])
 
   const selectedSegments = availableSegments.filter((s) => formData.segmentIds.includes(s.id))
   const totalOffers = selectedSegments.reduce((sum, segment) => sum + segment.offerCount, 0)
@@ -88,7 +90,7 @@ export default function NuevaCampanaPage() {
       : ["jooble", "talent", "jobrapido", "whatjobs"] // Todos los canales integrados
 
     try {
-      await createCampaign({
+      await createCampaign(authFetch, {
         name: formData.name,
         description: formData.description,
         segmentIds: formData.segmentIds.map(id => Number(id)), // Enviar todos los segmentos

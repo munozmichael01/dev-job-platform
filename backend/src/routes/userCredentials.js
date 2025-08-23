@@ -140,9 +140,35 @@ router.get('/',
 router.post('/:userId/credentials/:channelId', async (req, res) => {
   try {
     const { userId, channelId } = req.params;
-    const { credentials, limits, configuration } = req.body;
+    const { credentials, joobleApiKeys, limits, configuration } = req.body;
 
-    if (!credentials || typeof credentials !== 'object') {
+    console.log(`🔧 Guardando credenciales para canal ${channelId}:`, {
+      credentials: credentials ? Object.keys(credentials) : 'vacío',
+      joobleApiKeys: joobleApiKeys ? `${joobleApiKeys.length} países` : 'no definido',
+      limits,
+      configuration
+    });
+
+    // Para Jooble, usar joobleApiKeys si está disponible, sino credentials tradicionales
+    let credentialsToEncrypt = credentials || {};
+    
+    if (channelId === 'jooble' && joobleApiKeys && joobleApiKeys.length > 0) {
+      // Validar que todas las API keys de Jooble tengan país y clave
+      const validApiKeys = joobleApiKeys.filter(item => 
+        item.countryCode && item.countryCode.trim() !== '' &&
+        item.apiKey && item.apiKey.trim() !== ''
+      );
+      
+      if (validApiKeys.length === 0) {
+        return res.status(400).json({
+          success: false,
+          error: 'Se requiere al menos una API key válida con país y clave'
+        });
+      }
+      
+      credentialsToEncrypt = { joobleApiKeys: validApiKeys };
+      console.log(`✅ Jooble: Guardando ${validApiKeys.length} API keys válidas`);
+    } else if (!credentials || typeof credentials !== 'object') {
       return res.status(400).json({
         success: false,
         error: 'Credenciales requeridas'
@@ -150,7 +176,7 @@ router.post('/:userId/credentials/:channelId', async (req, res) => {
     }
 
     // Encriptar credenciales
-    const encryptedCredentials = credentialsManager.encryptCredentials(credentials);
+    const encryptedCredentials = credentialsManager.encryptCredentials(credentialsToEncrypt);
     
     // Obtener información del canal
     const channelNames = {
@@ -289,12 +315,36 @@ router.post('/:userId/credentials/:channelId/validate', async (req, res) => {
     switch (channelId) {
       case 'jooble':
         console.log('🎯 Validando credenciales Jooble con API real...');
-        const joobleService = new JoobleService({
-          apiKey: credentials.apiKey,
-          countryCode: credentials.countryCode,
-          timeout: credentials.timeout
-        });
-        validationResult = await joobleService.validateCredentials(credentials);
+        
+        // Manejar nuevo formato con múltiples API keys
+        if (credentials.joobleApiKeys && credentials.joobleApiKeys.length > 0) {
+          console.log(`🔑 Validando ${credentials.joobleApiKeys.length} API keys de Jooble...`);
+          
+          // Validar todas las API keys (por ahora validamos la primera, luego se puede extender)
+          const firstApiKey = credentials.joobleApiKeys[0];
+          const joobleService = new JoobleService({
+            apiKey: firstApiKey.apiKey,
+            countryCode: firstApiKey.countryCode,
+            timeout: credentials.timeout || 10000
+          });
+          validationResult = await joobleService.validateCredentials({
+            apiKey: firstApiKey.apiKey,
+            countryCode: firstApiKey.countryCode
+          });
+          
+          // Agregar detalles sobre cuántas API keys se validaron
+          if (validationResult.success) {
+            validationResult.message = `Credenciales Jooble validadas (${credentials.joobleApiKeys.length} países configurados)`;
+          }
+        } else {
+          // Formato legacy con apiKey y countryCode directos
+          const joobleService = new JoobleService({
+            apiKey: credentials.apiKey,
+            countryCode: credentials.countryCode,
+            timeout: credentials.timeout
+          });
+          validationResult = await joobleService.validateCredentials(credentials);
+        }
         break;
         
       default:
@@ -440,22 +490,31 @@ router.get('/:userId/credentials/:channelId/details', async (req, res) => {
 
     console.log(`✅ Credenciales obtenidas para edición: ${Object.keys(credentials).join(', ')}`);
 
+    // Para Jooble, separar las API keys si están en el formato nuevo
+    let responseData = {
+      credentials: credentials,
+      limits: {
+        dailyBudgetLimit: row.DailyBudgetLimit?.toString() || '',
+        monthlyBudgetLimit: row.MonthlyBudgetLimit?.toString() || '',
+        maxCPA: row.MaxCPA?.toString() || ''
+      },
+      configuration: configuration,
+      status: {
+        isValidated: row.IsValidated,
+        validationError: row.ValidationError,
+        lastValidated: row.LastValidated
+      }
+    };
+
+    // Si es Jooble y tiene joobleApiKeys, incluir en la respuesta
+    if (channelId === 'jooble' && credentials.joobleApiKeys) {
+      responseData.joobleApiKeys = credentials.joobleApiKeys;
+      console.log(`📋 Jooble: ${credentials.joobleApiKeys.length} API keys encontradas`);
+    }
+
     res.json({
       success: true,
-      data: {
-        credentials: credentials,
-        limits: {
-          dailyBudgetLimit: row.DailyBudgetLimit?.toString() || '',
-          monthlyBudgetLimit: row.MonthlyBudgetLimit?.toString() || '',
-          maxCPA: row.MaxCPA?.toString() || ''
-        },
-        configuration: configuration,
-        status: {
-          isValidated: row.IsValidated,
-          validationError: row.ValidationError,
-          lastValidated: row.LastValidated
-        }
-      }
+      data: responseData
     });
 
   } catch (error) {

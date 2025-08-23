@@ -297,7 +297,7 @@ app.get('/job-offers/locations',
     const hasSearch = q && q.trim();
     
     const locationQuery = `
-      SELECT DISTINCT TOP 200
+      SELECT DISTINCT
         CASE 
           WHEN City IS NOT NULL AND Region IS NOT NULL AND Region != '' 
           THEN CONCAT(City, ', ', Region)
@@ -442,7 +442,7 @@ app.get('/job-offers/sectors',
     const hasSearch = q && q.trim();
     
     const sectorQuery = `
-      SELECT DISTINCT TOP 50 Sector
+      SELECT DISTINCT Sector
       FROM JobOffers WITH (NOLOCK)
       WHERE ${whereConditions.join(' AND ')}
         AND Sector IS NOT NULL AND Sector != ''
@@ -575,7 +575,7 @@ app.get('/job-offers/external-ids',
     const hasSearch = q && q.trim();
     
     const externalIdQuery = `
-      SELECT DISTINCT TOP 20 ExternalId
+      SELECT DISTINCT ExternalId
       FROM JobOffers WITH (NOLOCK)
       WHERE ${whereConditions.join(' AND ')}
         AND ExternalId IS NOT NULL AND ExternalId != ''
@@ -1551,7 +1551,7 @@ app.get('/job-offers/companies',
     const hasSearch = q && q.trim();
     
     const companyQuery = `
-      SELECT DISTINCT TOP 100 CompanyName
+      SELECT DISTINCT CompanyName
       FROM JobOffers WITH (NOLOCK)
       WHERE ${whereConditions.join(' AND ')}
         AND CompanyName IS NOT NULL AND CompanyName != ''

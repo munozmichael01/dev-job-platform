@@ -18,7 +18,9 @@ import {
   Eye, 
   EyeOff,
   RefreshCw,
-  HelpCircle
+  HelpCircle,
+  Plus,
+  Trash2
 } from 'lucide-react';
 
 interface ChannelConfigFormProps {
@@ -37,8 +39,14 @@ interface ChannelConfigFormProps {
   onCancel: () => void;
 }
 
+interface JoobleApiKey {
+  countryCode: string;
+  apiKey: string;
+}
+
 interface FormData {
   credentials: Record<string, string>;
+  joobleApiKeys?: JoobleApiKey[]; // Específico para Jooble
   limits: {
     dailyBudgetLimit: string;
     monthlyBudgetLimit: string;
@@ -60,6 +68,7 @@ export default function ChannelConfigForm({
 }: ChannelConfigFormProps) {
   const [formData, setFormData] = useState<FormData>({
     credentials: {},
+    joobleApiKeys: channelId === 'jooble' ? [{ countryCode: '', apiKey: '' }] : undefined,
     limits: {
       dailyBudgetLimit: '',
       monthlyBudgetLimit: '',
@@ -97,6 +106,9 @@ export default function ChannelConfigForm({
           
           setFormData({
             credentials: data.data.credentials || {},
+            joobleApiKeys: channelId === 'jooble' ? 
+              (data.data.joobleApiKeys || [{ countryCode: '', apiKey: '' }]) : 
+              undefined,
             limits: {
               dailyBudgetLimit: data.data.limits?.dailyBudgetLimit || '',
               monthlyBudgetLimit: data.data.limits?.monthlyBudgetLimit || '',
@@ -155,6 +167,30 @@ export default function ChannelConfigForm({
     }));
   };
 
+  // Funciones específicas para Jooble API Keys
+  const handleJoobleApiKeyChange = (index: number, field: 'countryCode' | 'apiKey', value: string) => {
+    setFormData(prev => ({
+      ...prev,
+      joobleApiKeys: prev.joobleApiKeys?.map((item, i) => 
+        i === index ? { ...item, [field]: value } : item
+      )
+    }));
+  };
+
+  const addJoobleApiKey = () => {
+    setFormData(prev => ({
+      ...prev,
+      joobleApiKeys: [...(prev.joobleApiKeys || []), { countryCode: '', apiKey: '' }]
+    }));
+  };
+
+  const removeJoobleApiKey = (index: number) => {
+    setFormData(prev => ({
+      ...prev,
+      joobleApiKeys: prev.joobleApiKeys?.filter((_, i) => i !== index)
+    }));
+  };
+
   const togglePasswordVisibility = (field: string) => {
     setShowPasswords(prev => ({
       ...prev,
@@ -208,6 +244,7 @@ export default function ChannelConfigForm({
     try {
       const payload = {
         credentials: formData.credentials,
+        joobleApiKeys: channelId === 'jooble' ? formData.joobleApiKeys : undefined,
         limits: {
           dailyBudgetLimit: formData.limits.dailyBudgetLimit ? parseFloat(formData.limits.dailyBudgetLimit) : null,
           monthlyBudgetLimit: formData.limits.monthlyBudgetLimit ? parseFloat(formData.limits.monthlyBudgetLimit) : null,
@@ -290,7 +327,104 @@ export default function ChannelConfigForm({
     );
   };
 
+  const renderJoobleApiKeys = () => {
+    if (channelId !== 'jooble') return null;
+
+    return (
+      <div className="space-y-4">
+        <div className="flex items-center justify-between">
+          <h4 className="font-medium text-sm text-green-700">API Keys por País</h4>
+          <Button 
+            type="button" 
+            variant="outline" 
+            size="sm" 
+            onClick={addJoobleApiKey}
+          >
+            <Plus className="h-4 w-4 mr-2" />
+            Agregar País
+          </Button>
+        </div>
+        
+        {formData.joobleApiKeys?.map((item, index) => (
+          <div key={index} className="border p-4 rounded-lg space-y-3">
+            <div className="flex items-center justify-between">
+              <h5 className="font-medium text-sm">País {index + 1}</h5>
+              {formData.joobleApiKeys!.length > 1 && (
+                <Button 
+                  type="button" 
+                  variant="ghost" 
+                  size="sm"
+                  onClick={() => removeJoobleApiKey(index)}
+                >
+                  <Trash2 className="h-4 w-4" />
+                </Button>
+              )}
+            </div>
+            
+            <div className="grid gap-3 md:grid-cols-2">
+              <div className="space-y-2">
+                <Label htmlFor={`countryCode-${index}`}>Country Code *</Label>
+                <Select
+                  value={item.countryCode}
+                  onValueChange={(value) => handleJoobleApiKeyChange(index, 'countryCode', value)}
+                >
+                  <SelectTrigger>
+                    <SelectValue placeholder="Selecciona país" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="es">España (ES)</SelectItem>
+                    <SelectItem value="pt">Portugal (PT)</SelectItem>
+                    <SelectItem value="fr">Francia (FR)</SelectItem>
+                    <SelectItem value="de">Alemania (DE)</SelectItem>
+                    <SelectItem value="uk">Reino Unido (UK)</SelectItem>
+                    <SelectItem value="us">Estados Unidos (US)</SelectItem>
+                    <SelectItem value="mx">México (MX)</SelectItem>
+                    <SelectItem value="it">Italia (IT)</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+              
+              <div className="space-y-2">
+                <Label htmlFor={`apiKey-${index}`}>API Key *</Label>
+                <div className="relative">
+                  <Input
+                    id={`apiKey-${index}`}
+                    type={showPasswords[`jooble-${index}`] ? 'text' : 'password'}
+                    value={item.apiKey}
+                    onChange={(e) => handleJoobleApiKeyChange(index, 'apiKey', e.target.value)}
+                    placeholder="XXXXX-XXXX-XXXX-XXXXX-XXXXXXXX"
+                    className={!item.apiKey ? 'border-red-300' : ''}
+                  />
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="sm"
+                    className="absolute right-0 top-0 h-full px-3"
+                    onClick={() => togglePasswordVisibility(`jooble-${index}`)}
+                  >
+                    {showPasswords[`jooble-${index}`] ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                  </Button>
+                </div>
+                <p className="text-xs text-muted-foreground">
+                  API Key única para {item.countryCode ? item.countryCode.toUpperCase() : 'este país'}
+                </p>
+              </div>
+            </div>
+          </div>
+        ))}
+      </div>
+    );
+  };
+
   const isFormValid = () => {
+    if (channelId === 'jooble') {
+      // Para Jooble, validar que todas las API keys tengan país y clave
+      return formData.joobleApiKeys?.every(item => 
+        item.countryCode && item.countryCode.trim() !== '' &&
+        item.apiKey && item.apiKey.trim() !== ''
+      ) || false;
+    }
+    
     return channelInfo.requiredCredentials.every(field => 
       formData.credentials[field] && formData.credentials[field].trim() !== ''
     );
@@ -349,25 +483,31 @@ export default function ChannelConfigForm({
             </TabsList>
 
             <TabsContent value="credentials" className="space-y-4">
-              <div className="grid gap-4 md:grid-cols-2">
-                {/* Campos requeridos */}
-                <div className="space-y-4">
-                  <h4 className="font-medium text-sm text-green-700">Campos Requeridos</h4>
-                  {channelInfo.requiredCredentials.map(field => 
-                    renderCredentialField(field, true)
-                  )}
-                </div>
-
-                {/* Campos opcionales */}
-                {channelInfo.optionalCredentials.length > 0 && (
+              {channelId === 'jooble' ? (
+                // Formulario especial para Jooble con múltiples API keys
+                renderJoobleApiKeys()
+              ) : (
+                // Formulario tradicional para otros canales
+                <div className="grid gap-4 md:grid-cols-2">
+                  {/* Campos requeridos */}
                   <div className="space-y-4">
-                    <h4 className="font-medium text-sm text-gray-600">Campos Opcionales</h4>
-                    {channelInfo.optionalCredentials.map(field => 
-                      renderCredentialField(field, false)
+                    <h4 className="font-medium text-sm text-green-700">Campos Requeridos</h4>
+                    {channelInfo.requiredCredentials.map(field => 
+                      renderCredentialField(field, true)
                     )}
                   </div>
-                )}
-              </div>
+
+                  {/* Campos opcionales */}
+                  {channelInfo.optionalCredentials.length > 0 && (
+                    <div className="space-y-4">
+                      <h4 className="font-medium text-sm text-gray-600">Campos Opcionales</h4>
+                      {channelInfo.optionalCredentials.map(field => 
+                        renderCredentialField(field, false)
+                      )}
+                    </div>
+                  )}
+                </div>
+              )}
 
               <div className="flex gap-2 pt-4">
                 <Button
@@ -594,10 +734,16 @@ function renderChannelSpecificHelp(channelId: string) {
         <h4 className="font-medium">Pasos para configurar Jooble:</h4>
         <ol className="list-decimal list-inside space-y-1 text-muted-foreground">
           <li>Contacta a tu manager dedicado de Jooble</li>
-          <li>Solicita una clave API única para tu cuenta</li>
-          <li>Especifica el código de país donde quieres publicar</li>
-          <li>Configura tu presupuesto y límites de CPA</li>
+          <li>Solicita una clave API única para cada país donde quieres publicar</li>
+          <li>Agrega múltiples países usando el botón "Agregar País"</li>
+          <li>Configura tu presupuesto y límites de CPA para cada país</li>
         </ol>
+        <div className="mt-3 p-3 bg-green-50 rounded-lg border border-green-200">
+          <p className="text-xs text-green-800">
+            <strong>Ventaja multi-país:</strong> Puedes configurar diferentes API Keys para España (ES), 
+            Portugal (PT), Francia (FR), Alemania (DE) y otros países según tu estrategia de expansión.
+          </p>
+        </div>
       </div>
     ),
     talent: (

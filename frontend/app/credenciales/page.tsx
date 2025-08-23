@@ -174,7 +174,7 @@ export default function CredencialesPage() {
   };
 
   const handleDeleteCredentials = async (channelId: string) => {
-    if (!confirm(`¿Estás seguro de que quieres eliminar las credenciales de ${channelId}?`)) {
+    if (!confirm(`¿Estás seguro de que quieres eliminar la configuración de ${channelId}?`)) {
       return;
     }
 
@@ -187,11 +187,11 @@ export default function CredencialesPage() {
         await loadUserChannels();
       } else {
         const data = await response.json();
-        setError(data.error || 'Error eliminando credenciales');
+        setError(data.error || 'Error eliminando configuración');
       }
     } catch (error) {
-      console.error('Error eliminando credenciales:', error);
-      setError('Error eliminando credenciales');
+      console.error('Error eliminando configuración:', error);
+      setError('Error eliminando configuración');
     }
   };
 
@@ -209,8 +209,8 @@ export default function CredencialesPage() {
         setError(`Error validando ${channelId}: ${data.validation?.error || 'Unknown error'}`);
       }
     } catch (error) {
-      console.error('Error validando credenciales:', error);
-      setError('Error validando credenciales');
+      console.error('Error validando configuración:', error);
+      setError('Error validando configuración');
     }
   };
 
@@ -250,9 +250,9 @@ export default function CredencialesPage() {
     <div className="container mx-auto p-6">
       <div className="flex justify-between items-center mb-6">
         <div>
-          <h1 className="text-3xl font-bold">Gestión de Credenciales</h1>
+          <h1 className="text-3xl font-bold">Canales de Distribución</h1>
           <p className="text-muted-foreground">
-            Configura tus credenciales para cada canal de distribución
+            Configura tus canales para distribuir ofertas de trabajo
           </p>
         </div>
         <Button onClick={() => setShowConfigForm(true)}>
@@ -281,7 +281,7 @@ export default function CredencialesPage() {
                 <Settings className="h-12 w-12 text-muted-foreground mb-4" />
                 <h3 className="text-lg font-semibold mb-2">No hay canales configurados</h3>
                 <p className="text-muted-foreground text-center mb-4">
-                  Configura tus credenciales para empezar a distribuir ofertas
+                  Configura tus canales para empezar a distribuir ofertas
                 </p>
                 <Button onClick={() => setShowConfigForm(true)}>
                   <Plus className="h-4 w-4 mr-2" />
@@ -401,7 +401,7 @@ export default function CredencialesPage() {
                   <CardContent className="space-y-3">
                     <div className="text-sm">
                       <p><strong>Tipo:</strong> {info.type}</p>
-                      <p><strong>Credenciales requeridas:</strong></p>
+                      <p><strong>Configuración requerida:</strong></p>
                       <ul className="list-disc list-inside text-xs text-muted-foreground ml-2">
                         {info.requiredCredentials.map(cred => (
                           <li key={cred}>{cred}</li>

@@ -163,12 +163,13 @@ router.post('/', addUserToRequest, requireAuth, async (req, res) => {
       .input('Filters', sql.NVarChar(sql.MAX), JSON.stringify(f))
       .input('Status', sql.NVarChar(50), status)
       .input('OfferCount', sql.Int, offerCount)
+      .input('UserId', sql.BigInt, req.userId)  // ✅ CRÍTICO: Asignar UserId
       .input('CreatedAt', sql.DateTime, now)
       .input('UpdatedAt', sql.DateTime, now)
       .query(`
-        INSERT INTO Segments (Name, Description, Filters, Status, OfferCount, CreatedAt, UpdatedAt)
+        INSERT INTO Segments (Name, Description, Filters, Status, OfferCount, UserId, CreatedAt, UpdatedAt)
         OUTPUT INSERTED.*
-        VALUES (@Name, @Description, @Filters, @Status, @OfferCount, @CreatedAt, @UpdatedAt)
+        VALUES (@Name, @Description, @Filters, @Status, @OfferCount, @UserId, @CreatedAt, @UpdatedAt)
       `);
     const row = insert.recordset[0];
     res.status(201).json({ ...row, Filters: parseFilters(row.Filters) });
@@ -332,6 +333,14 @@ router.post('/:id/recalculate', addUserToRequest, requireAuth, async (req, res) 
     
     // Recalcular el número de ofertas
     const { where, inputs } = buildWhereFromFilters(filters, sql);
+    
+    // Añadir filtro por usuario para multi-tenant
+    if (!isSuperAdmin(req)) {
+      where.push('UserId = @currentUserId');
+      inputs.push({ name: 'currentUserId', type: sql.BigInt, value: req.userId });
+      console.log(`🔒 Recalculate filtrando para usuario ${req.userId} (${req.user.role})`);
+    }
+    
     const whereClause = where.length ? `WHERE ${where.join(' AND ')}` : '';
     const reqSql = pool.request();
     inputs.forEach(p => reqSql.input(p.name, p.type, p.value));

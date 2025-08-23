@@ -47,7 +47,7 @@ const menuItems = [
     icon: Database,
   },
   {
-    title: "Credenciales",
+    title: "Canales",
     url: "/credenciales",
     icon: Shield,
   },

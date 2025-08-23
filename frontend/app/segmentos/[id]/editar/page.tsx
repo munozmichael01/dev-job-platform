@@ -15,6 +15,7 @@ import { Checkbox } from "@/components/ui/checkbox"
 import { MultiSelect, type MultiSelectOption } from "@/components/ui/multi-select"
 import Link from "next/link"
 import { useToast } from "@/hooks/use-toast"
+import { useAuthFetch } from "@/hooks/useAuthFetch"
 import { updateSegment, getSegment, estimateSegmentPreview, fetchLocations, fetchSectors, fetchCompanies } from "@/lib/api-temp"
 
 export default function EditarSegmentoPage() {
@@ -22,6 +23,7 @@ export default function EditarSegmentoPage() {
   const router = useRouter()
   const params = useParams()
   const id = parseInt(params.id as string)
+  const { authFetch } = useAuthFetch()
 
   const [loading, setLoading] = useState(true)
   const [formData, setFormData] = useState({
@@ -85,7 +87,7 @@ export default function EditarSegmentoPage() {
     ;(async () => {
       try {
         setLoadingLists(true)
-        const [loc, sec, comp] = await Promise.all([fetchLocations({ status: 'active' }), fetchSectors({ status: 'active' }), fetchCompanies({ status: 'active' })])
+        const [loc, sec, comp] = await Promise.all([fetchLocations(authFetch, { status: 'active' }), fetchSectors(authFetch, { status: 'active' }), fetchCompanies(authFetch, { status: 'active' })])
         setLocationsList(loc?.data || [])
         setSectorsList(sec?.data || [])
         setCompaniesList(comp?.data || [])
@@ -126,7 +128,7 @@ export default function EditarSegmentoPage() {
   const recalcEstimate = async () => {
     setEstimating(true)
     try {
-      const { success, count } = await estimateSegmentPreview({
+      const { success, count } = await estimateSegmentPreview(authFetch, {
         jobTitles: formData.jobTitles,
         locations: formData.locations,
         sectors: formData.sectors,

@@ -15,11 +15,13 @@ import { Checkbox } from "@/components/ui/checkbox"
 import { MultiSelect, type MultiSelectOption } from "@/components/ui/multi-select"
 import Link from "next/link"
 import { useToast } from "@/hooks/use-toast"
+import { useAuthFetch } from "@/hooks/useAuthFetch"
 import { createSegment, estimateSegmentPreview, fetchLocations, fetchSectors, fetchCompanies } from "@/lib/api-temp"
 
 export default function NuevoSegmentoPage() {
   const { toast } = useToast()
   const router = useRouter()
+  const { authFetch } = useAuthFetch()
 
   const [formData, setFormData] = useState({
     name: "",
@@ -51,7 +53,7 @@ export default function NuevoSegmentoPage() {
     ;(async () => {
       try {
         setLoadingLists(true)
-        const [loc, sec, comp] = await Promise.all([fetchLocations({ status: 'active' }), fetchSectors({ status: 'active' }), fetchCompanies({ status: 'active' })])
+        const [loc, sec, comp] = await Promise.all([fetchLocations(authFetch, { status: 'active' }), fetchSectors(authFetch, { status: 'active' }), fetchCompanies(authFetch, { status: 'active' })])
         setLocationsList(loc?.data || [])
         setSectorsList(sec?.data || [])
         setCompaniesList(comp?.data || [])
@@ -96,7 +98,7 @@ export default function NuevoSegmentoPage() {
   const recalcEstimate = async () => {
     setEstimating(true)
     try {
-      const { success, count } = await estimateSegmentPreview({
+      const { success, count } = await estimateSegmentPreview(authFetch, {
         jobTitles: formData.jobTitles,
         locations: formData.locations,
         sectors: formData.sectors,
@@ -121,20 +123,39 @@ export default function NuevoSegmentoPage() {
       toast({ title: "Errores en el formulario", description: "El nombre es obligatorio", variant: "destructive" })
       return
     }
-    await createSegment({
-      name: formData.name,
-      description: formData.description,
-      filters: {
-        jobTitles: formData.jobTitles,
-        locations: formData.locations,
-        sectors: formData.sectors,
-        companies: formData.companies,
-        experienceLevels: formData.experienceLevels,
-        contractTypes: formData.contractTypes, // sin uso
-      },
-    })
-    toast({ title: "Segmento creado", description: formData.name })
-    router.push("/segmentos")
+    
+    // Validar que el segmento tenga ofertas estimadas
+    if (estimatedOffers === 0) {
+      toast({ 
+        title: "Segmento vacío", 
+        description: "No se puede crear un segmento sin ofertas. Ajusta los filtros para incluir al menos una oferta.", 
+        variant: "destructive" 
+      })
+      return
+    }
+
+    try {
+      await createSegment(authFetch, {
+        name: formData.name,
+        description: formData.description,
+        filters: {
+          jobTitles: formData.jobTitles,
+          locations: formData.locations,
+          sectors: formData.sectors,
+          companies: formData.companies,
+          experienceLevels: formData.experienceLevels,
+          contractTypes: formData.contractTypes, // sin uso
+        },
+      })
+      toast({ title: "Segmento creado", description: `${formData.name} con ${estimatedOffers} ofertas` })
+      router.push("/segmentos")
+    } catch (error: any) {
+      toast({ 
+        title: "Error al crear segmento", 
+        description: error.message || "Error desconocido", 
+        variant: "destructive" 
+      })
+    }
   }
 
   return (
@@ -347,8 +368,14 @@ export default function NuevoSegmentoPage() {
             </Card>
 
             <div className="flex gap-2">
-              <Button type="submit" className="flex-1" onClick={(e) => { e.preventDefault(); handleSubmit(e) }}>
-                <Save className="h-4 w-4 mr-2" />Crear Segmento
+              <Button 
+                type="submit" 
+                className="flex-1" 
+                onClick={(e) => { e.preventDefault(); handleSubmit(e) }}
+                disabled={!formData.name.trim() || estimatedOffers === 0}
+              >
+                <Save className="h-4 w-4 mr-2" />
+                {estimatedOffers === 0 ? "Sin ofertas - No se puede crear" : "Crear Segmento"}
               </Button>
             </div>
           </div>
