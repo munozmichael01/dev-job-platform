@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, useEffect, useCallback, useMemo } from "react"
+import { useState, useEffect, useCallback, useMemo, useRef } from "react"
 import { useSearchParams } from "next/navigation"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
@@ -111,7 +111,7 @@ export default function OfertasPage() {
           description: result.message
         })
         // Recargar datos
-        reset(getCleanFilters())
+        resetRef.current(currentFilters)
       } else {
         toast({
           title: "Error",
@@ -167,11 +167,17 @@ export default function OfertasPage() {
     }
   }, [debouncedSearchTerm, statusFilter, locationFilter, sectorFilter, companyFilter, externalIdFilter, promocionFilter])
 
-  // Hash para detectar cambios en filtros
-  const filtersHash = useMemo(() => {
-    const filters = getCleanFilters()
-    return JSON.stringify(filters)
-  }, [getCleanFilters])
+  // Filtros estables para evitar loops infinitos
+  const currentFilters = useMemo(() => ({
+    ...(debouncedSearchTerm && debouncedSearchTerm.trim() !== '' ? { q: debouncedSearchTerm.trim() } : {}),
+    mode: 'auto',
+    ...(statusFilter && statusFilter !== 'all' ? { status: statusFilter } : {}),
+    ...(locationFilter && locationFilter !== 'all' ? { location: locationFilter } : {}),
+    ...(sectorFilter && sectorFilter !== 'all' ? { sector: sectorFilter } : {}),
+    ...(companyFilter && companyFilter !== 'all' ? { company: companyFilter } : {}),
+    ...(externalIdFilter && externalIdFilter !== 'all' ? { externalId: externalIdFilter } : {}),
+    ...(promocionFilter && promocionFilter !== 'all' ? { promocion: promocionFilter } : {}),
+  }), [debouncedSearchTerm, statusFilter, locationFilter, sectorFilter, companyFilter, externalIdFilter, promocionFilter])
 
   // Hook de keyset pagination con navegación anterior/siguiente - AUTENTICADO
   const {
@@ -192,31 +198,38 @@ export default function OfertasPage() {
   } = useKeysetPaginationAuth({
     limit: 20,
     baseUrl: 'http://localhost:3002/job-offers', // URL completa del backend
-    initialParams: getCleanFilters() // Parámetros iniciales
+    initialParams: {} // Sin parámetros iniciales - se cargarán en el useEffect
   });
 
-  // 🔍 DEBUG: Log de re-render del componente
-  console.log('🔍 COMPONENT RE-RENDER:', {
-    ofertasCount: ofertas.length,
-    primeros3: ofertas.slice(0, 3).map(o => `${o.id || o.Id}:${o.title?.substring(0, 20)}`),
-    isLoading: isInitialLoading,
-    currentPage
-  });
+  // Component ready - removed debug logs
 
   // Paginación simple - sin scroll infinito
 
-  // Efecto para resetear y cargar cuando cambien los filtros
-  useEffect(() => {
-    reset(getCleanFilters());
-  }, [filtersHash, reset]);
+  // Ref para evitar dependencia de reset en useEffect
+  const resetRef = useRef(reset)
+  resetRef.current = reset
 
-  // Cargar opciones de dropdowns con filtros dependientes
+  // Cargar datos solo una vez al montar el componente
+  useEffect(() => {
+    resetRef.current({});
+  }, []); // Solo al montar
+
+  // Aplicar filtros cuando cambien - con debounce para evitar spam
+  useEffect(() => {
+    const timeoutId = setTimeout(() => {
+      resetRef.current(currentFilters);
+    }, 500); // 500ms debounce
+
+    return () => clearTimeout(timeoutId);
+  }, [statusFilter, locationFilter, sectorFilter, companyFilter, externalIdFilter, promocionFilter, debouncedSearchTerm]); // Depende de valores individuales
+
+  // Cargar opciones de dropdowns con filtros dependientes - ARREGLADO
   useEffect(() => {
     const loadDropdownOptions = async () => {
       setLoadingOptions(true)
       try {
-        // Filtros actuales para consultas dependientes
-        const currentFilters = {
+        // Usar currentFilters en lugar de re-crear objeto
+        const filterParams = {
           status: statusFilter !== 'all' ? statusFilter : undefined,
           location: locationFilter !== 'all' ? locationFilter : undefined,
           sector: sectorFilter !== 'all' ? sectorFilter : undefined,
@@ -225,42 +238,42 @@ export default function OfertasPage() {
           q: debouncedSearchTerm || undefined
         }
 
-        console.log('🔍 Cargando opciones con filtros dependientes:', currentFilters)
+        // Loading dropdown options with cascading filters
 
         const [locationsResult, sectorsResult, companiesResult, externalIdsResult] = await Promise.all([
           api.fetchLocations({
-            status: currentFilters.status,
-            sector: currentFilters.sector,
-            company: currentFilters.company,
-            externalId: currentFilters.externalId,
-            q: currentFilters.q
+            status: filterParams.status,
+            sector: filterParams.sector,
+            company: filterParams.company,
+            externalId: filterParams.externalId,
+            q: filterParams.q
           }),
           api.fetchSectors({
-            status: currentFilters.status,
-            location: currentFilters.location,
-            company: currentFilters.company,
-            externalId: currentFilters.externalId,
-            q: currentFilters.q
+            status: filterParams.status,
+            location: filterParams.location,
+            company: filterParams.company,
+            externalId: filterParams.externalId,
+            q: filterParams.q
           }),
           api.fetchCompanies({
-            status: currentFilters.status,
-            location: currentFilters.location,
-            sector: currentFilters.sector,
-            externalId: currentFilters.externalId,
-            q: currentFilters.q
+            status: filterParams.status,
+            location: filterParams.location,
+            sector: filterParams.sector,
+            externalId: filterParams.externalId,
+            q: filterParams.q
           }),
           api.fetchExternalIds({
-            status: currentFilters.status,
-            location: currentFilters.location,
-            sector: currentFilters.sector,
-            company: currentFilters.company,
-            q: currentFilters.q
+            status: filterParams.status,
+            location: filterParams.location,
+            sector: filterParams.sector,
+            company: filterParams.company,
+            q: filterParams.q
           })
         ])
         
         if (locationsResult.success) {
           setLocations(locationsResult.data || [])
-          console.log(`✅ Locations actualizadas: ${locationsResult.data?.length || 0} opciones`)
+          // Locations loaded successfully
         }
         
         if (sectorsResult.success) {
@@ -270,12 +283,12 @@ export default function OfertasPage() {
         
         if (companiesResult.success) {
           setCompanies(companiesResult.data || [])
-          console.log(`✅ Companies actualizadas: ${companiesResult.data?.length || 0} opciones`)
+          // Companies loaded successfully
         }
         
         if (externalIdsResult.success) {
           setExternalIds(externalIdsResult.data || [])
-          console.log(`✅ ExternalIds actualizados: ${externalIdsResult.data?.length || 0} opciones`)
+          // ExternalIds loaded successfully
         }
       } catch (error) {
         console.error('❌ Error cargando opciones de filtros:', error)
@@ -286,7 +299,7 @@ export default function OfertasPage() {
     }
     
     loadDropdownOptions()
-  }, [statusFilter, locationFilter, sectorFilter, companyFilter, externalIdFilter, promocionFilter, debouncedSearchTerm]) // Recargar cuando cambien los filtros
+  }, []) // Solo ejecutar al montar - NO depender de filtros para evitar loops
 
   // NOTA: La carga inicial se maneja en el efecto de abajo con reset()
 

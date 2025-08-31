@@ -74,6 +74,12 @@ export function useApi() {
       return res.json()
     },
 
+    getSegmentDetail: async (id: number) => {
+      const res = await fetchWithAuth(`${API_URL}/api/segments/${id}/detail`)
+      if (!res.ok) throw new Error('Error al obtener detalle del segmento')
+      return res.json()
+    },
+
     // -------- Campañas --------
     fetchCampaigns: async () => {
       const res = await fetchWithAuth(`${API_URL}/api/campaigns`)

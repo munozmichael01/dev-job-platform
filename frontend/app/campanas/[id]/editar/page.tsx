@@ -15,6 +15,7 @@ import { Checkbox } from "@/components/ui/checkbox"
 import Link from "next/link"
 import { useToast } from "@/hooks/use-toast"
 import { fetchCampaign, updateCampaign, fetchSegments } from "@/lib/api-temp"
+import { useAuthFetch } from "@/hooks/useAuthFetch"
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group"
 import ChannelSelector from "@/components/campaigns/ChannelSelector"
 
@@ -23,6 +24,7 @@ export default function EditarCampanaPage() {
   const router = useRouter()
   const params = useParams()
   const campaignId = params.id as string
+  const { authFetch } = useAuthFetch()
 
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
@@ -48,7 +50,7 @@ export default function EditarCampanaPage() {
   useEffect(() => {
     loadCampaignData()
     loadSegments()
-  }, [campaignId])
+  }, [campaignId, authFetch])
 
   const loadCampaignData = async () => {
     try {
@@ -87,7 +89,7 @@ export default function EditarCampanaPage() {
 
   const loadSegments = async () => {
     try {
-      const data = await fetchSegments()
+      const data = await fetchSegments(authFetch)
       setAvailableSegments(
         data.map((s: any) => ({
           id: String(s.Id),

@@ -102,8 +102,8 @@ class CredentialsManager {
    */
   async getUserChannelCredentials(userId, channelId) {
     try {
+      const { pool, poolPromise } = require('../db/db');
       await poolPromise;
-      const { pool } = require('../db/db');
       const result = await pool.request()
         .input('userId', userId)
         .input('channelId', channelId)
@@ -144,8 +144,8 @@ class CredentialsManager {
    */
   async getAllUserCredentials(userId) {
     try {
+      const { pool, poolPromise } = require('../db/db');
       await poolPromise;
-      const { pool } = require('../db/db');
       const result = await pool.request()
         .input('userId', userId)
         .query(`

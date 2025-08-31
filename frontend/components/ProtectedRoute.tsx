@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useCallback } from 'react'
+import { useEffect, useCallback, useRef } from 'react'
 import { usePathname, useRouter } from 'next/navigation'
 import { useAuth } from '@/contexts/AuthContext'
 import { SidebarProvider } from "@/components/ui/sidebar"
@@ -23,15 +23,26 @@ export default function ProtectedRoute({ children }: ProtectedRouteProps) {
   const router = useRouter()
   const { toast } = useToast()
 
-  // Handle auth sync events
+  // Use refs to store current values and avoid dependency changes
+  const pathnameRef = useRef(pathname)
+  const routerRef = useRef(router)
+  
+  // Update refs on each render
+  pathnameRef.current = pathname
+  routerRef.current = router
+
+  // Stable callback that won't trigger hook reordering
   const handleAuthSync = useCallback((event: any) => {
     logger.debug('ProtectedRoute: Auth sync event received', { event })
+    
+    const currentPathname = pathnameRef.current
+    const currentRouter = routerRef.current
     
     switch (event.type) {
       case 'LOGOUT':
       case 'SESSION_EXPIRED':
         // Force redirect to login when logout/session expired event is received
-        if (!publicRoutes.includes(pathname)) {
+        if (!publicRoutes.includes(currentPathname)) {
           logger.info('ProtectedRoute: Redirecting to login due to auth event', { eventType: event.type })
           const landingUrl = process.env.NEXT_PUBLIC_LANDING_URL || 'http://localhost:3000'
           window.location.href = `${landingUrl}/login`
@@ -40,13 +51,13 @@ export default function ProtectedRoute({ children }: ProtectedRouteProps) {
         
       case 'LOGIN':
         // Refresh the page if we're on login page and user just logged in
-        if (publicRoutes.includes(pathname)) {
+        if (publicRoutes.includes(currentPathname)) {
           logger.info('ProtectedRoute: User logged in, redirecting to dashboard')
-          router.push('/')
+          currentRouter.push('/')
         }
         break
     }
-  }, [pathname, router])
+  }, []) // Empty dependencies array - callback is now stable
 
   useAuthSync(handleAuthSync)
 

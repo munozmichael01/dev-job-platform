@@ -4,7 +4,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
 import { SidebarTrigger } from "@/components/ui/sidebar"
-import { Plus, Users, Edit, Trash2, Calendar, Briefcase, MapPin, Building2, RefreshCw, Copy, AlertTriangle } from "lucide-react"
+import { Plus, Users, Edit, Trash2, Calendar, Briefcase, MapPin, Building2, RefreshCw, Copy, AlertTriangle, Eye } from "lucide-react"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip"
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from "@/components/ui/alert-dialog"
@@ -276,6 +276,20 @@ export default function SegmentosPage() {
                     <TableCell>
                       <div className="flex gap-2">
                         <TooltipProvider>
+                          {/* Botón Ver */}
+                          <Tooltip>
+                            <TooltipTrigger asChild>
+                              <Button variant="outline" size="sm" asChild>
+                                <Link href={`/segmentos/${segmento.Id}`}>
+                                  <Eye className="h-4 w-4" />
+                                </Link>
+                              </Button>
+                            </TooltipTrigger>
+                            <TooltipContent>
+                              <p>Ver detalle del segmento</p>
+                            </TooltipContent>
+                          </Tooltip>
+
                           {/* Botón Recalcular */}
                           <Tooltip>
                             <TooltipTrigger asChild>

@@ -23,10 +23,23 @@ if (process.env.DB_PORT && process.env.DB_PORT.trim() !== '') {
 }
 
 const pool = new sql.ConnectionPool(config);
-const poolConnect = pool.connect();
+const poolPromise = pool.connect();
+
+// Handle connection events
+poolPromise.then(pool => {
+  console.log('✅ Conexión a SQL Server establecida');
+}).catch(err => {
+  console.error('❌ Error conectando a SQL Server:', err);
+});
+
+// Handle connection errors
+pool.on('error', err => {
+  console.error('❌ SQL Server pool error:', err);
+});
 
 module.exports = {
   sql,
   pool,
-  poolConnect
+  poolPromise,
+  poolConnect: poolPromise
 };

@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
@@ -20,6 +20,7 @@ import {
   Shield
 } from 'lucide-react';
 import Link from 'next/link';
+import { useAuth } from '@/contexts/AuthContext';
 
 interface ChannelInfo {
   id: string;
@@ -42,6 +43,11 @@ interface UserChannelCredentials {
     monthlyBudgetLimit: number | null;
     maxCPA: number | null;
   };
+  // Para Jooble multi-país
+  countries?: Array<{
+    countryCode: string;
+    apiKey: string;
+  }>;
 }
 
 interface ChannelSelectorProps {
@@ -57,40 +63,73 @@ export default function ChannelSelector({
   onChannelToggle, 
   distributionType,
   campaignBudget,
-  userId = 1 // Por ahora hardcodeado
+  userId // This parameter is no longer used, getting from auth context
 }: ChannelSelectorProps) {
+  const { user, fetchWithAuth } = useAuth();
   const [availableChannels, setAvailableChannels] = useState<ChannelInfo[]>([]);
   const [userCredentials, setUserCredentials] = useState<UserChannelCredentials[]>([]);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    loadChannelsData();
-  }, []);
+    if (user?.id) {
+      loadChannelsData();
+    }
+  }, [user?.id]);
 
   const loadChannelsData = async () => {
+    if (!user?.id) return;
+    
     try {
-      // Cargar credenciales del usuario
-      const credentialsResponse = await fetch(`http://localhost:3002/api/users/${userId}/credentials`);
+      setLoading(true);
+      // Cargar credenciales del usuario (ya expandidas por países desde el backend)
+      const credentialsResponse = await fetchWithAuth(`http://localhost:3002/api/users/${user.id}/credentials`);
       const credentialsData = await credentialsResponse.json();
+      
+      // El backend ya maneja la expansión de Jooble por países
       setUserCredentials(credentialsData.channels || []);
       
       // Cargar canales disponibles desde la API del backend
-      const channelsResponse = await fetch('http://localhost:3002/api/credentials/channels');
+      const channelsResponse = await fetchWithAuth('http://localhost:3002/api/credentials/channels');
       if (channelsResponse.ok) {
         const channelsData = await channelsResponse.json();
         
         // Convertir el formato de la API a nuestro formato local
-        const formattedChannels = Object.entries(channelsData.channels || {}).map(([id, info]: [string, any]) => ({
+        const baseChannels = Object.entries(channelsData.channels || {}).map(([id, info]: [string, any]) => ({
           id,
           name: info.name,
           type: info.type,
           description: info.description,
-          avgCPA: getChannelAvgCPA(id), // Función auxiliar para obtener CPA
+          avgCPA: getChannelAvgCPA(id),
           costModel: getCostModel(info.type),
           features: info.requiredCredentials || []
         }));
         
-        setAvailableChannels(formattedChannels);
+        // Para Jooble: usar las credenciales expandidas del backend
+        // Para otros canales: usar los canales base tal como están
+        const finalChannels = [];
+        
+        for (const channel of baseChannels) {
+          if (channel.id === 'jooble') {
+            // Solo agregar los canales Jooble que están en las credenciales (ya expandidos por país)
+            const joobleCredentials = credentialsData.channels?.filter((cred: any) => 
+              cred.channelId.startsWith('jooble-')
+            ) || [];
+            
+            for (const cred of joobleCredentials) {
+              finalChannels.push({
+                ...channel,
+                id: cred.channelId, // jooble-es, jooble-pt
+                name: cred.channelName, // "Jooble ES", "Jooble PT"
+                description: `${channel.description} - ${cred.countryInfo?.countryName || 'País específico'}`
+              });
+            }
+          } else {
+            // Otros canales van tal como están (talent, jobrapido, etc.)
+            finalChannels.push(channel);
+          }
+        }
+        
+        setAvailableChannels(finalChannels);
       } else {
         console.warn('No se pudieron cargar canales desde API, usando fallback');
         // Fallback solo si la API falla completamente
@@ -186,6 +225,8 @@ export default function ChannelSelector({
   const getChannelAvgCPA = (channelId: string): number => {
     const cpaMappings: Record<string, number> = {
       'jooble': 15,
+      'jooble-es': 15,
+      'jooble-pt': 15,
       'talent': 18,
       'jobrapido': 12,
       'whatjobs': 14,
@@ -194,6 +235,19 @@ export default function ChannelSelector({
       'indeed': 22
     };
     return cpaMappings[channelId] || 20;
+  };
+
+  const getCountryName = (countryCode: string): string => {
+    const countryNames: Record<string, string> = {
+      'ES': 'España',
+      'PT': 'Portugal',
+      'FR': 'Francia',
+      'IT': 'Italia',
+      'DE': 'Alemania',
+      'GB': 'Reino Unido',
+      'US': 'Estados Unidos'
+    };
+    return countryNames[countryCode] || countryCode;
   };
 
   const getCostModel = (type: string): string => {

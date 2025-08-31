@@ -85,6 +85,48 @@ export default function CampanasPage() {
     }
   }
 
+  const handleActivateCampaign = async (id: number, name: string) => {
+    if (!window.confirm(`¿Estás seguro de que quieres activar y enviar la campaña "${name}" a los canales configurados?`)) {
+      return
+    }
+    
+    try {
+      setLoading(true)
+      const response = await fetch(`http://localhost:3002/api/campaigns/${id}/activate`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${localStorage.getItem('token')}`
+        }
+      })
+      
+      const result = await response.json()
+      
+      if (response.ok && result.success) {
+        toast({ 
+          title: "Campaña activada", 
+          description: `La campaña "${name}" ha sido enviada exitosamente a ${result.channels.filter((c: any) => c.success).length} canales` 
+        })
+        loadCampaigns()
+      } else {
+        toast({ 
+          title: "Error activando campaña", 
+          description: result.error || 'Error desconocido',
+          variant: "destructive" 
+        })
+      }
+    } catch (error: any) {
+      console.error("Error activando campaña:", error)
+      toast({ 
+        title: "Error", 
+        description: error.message || "No se pudo activar la campaña", 
+        variant: "destructive" 
+      })
+    } finally {
+      setLoading(false)
+    }
+  }
+
   const loadCampaigns = async () => {
     try {
       setLoading(true)
@@ -203,6 +245,7 @@ export default function CampanasPage() {
               </SelectTrigger>
               <SelectContent>
                 <SelectItem value="all">Todas</SelectItem>
+                <SelectItem value="draft">Borradores</SelectItem>
                 <SelectItem value="active">Activas</SelectItem>
                 <SelectItem value="paused">Pausadas</SelectItem>
                 <SelectItem value="warning">Con Alertas</SelectItem>
@@ -333,7 +376,17 @@ export default function CampanasPage() {
                           <Edit className="h-4 w-4" />
                         </Link>
                       </Button>
-                      {campana.status === "active" ? (
+                      {campana.status === "draft" ? (
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          className="text-blue-600"
+                          onClick={() => handleActivateCampaign(campana.id, campana.name)}
+                          disabled={loading}
+                        >
+                          <Play className="h-4 w-4" />
+                        </Button>
+                      ) : campana.status === "active" ? (
                         <Button
                           variant="outline"
                           size="sm"

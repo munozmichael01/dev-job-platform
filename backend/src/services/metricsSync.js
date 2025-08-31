@@ -11,7 +11,7 @@
  * @date 2025-01-17
  */
 
-const { poolConnect, pool, sql } = require('../db/bootstrap');
+const { poolConnect, pool, sql } = require('../db/db');
 const ChannelFactory = require('./channels/channelFactory');
 
 class MetricsSync {

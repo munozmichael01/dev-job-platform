@@ -378,6 +378,76 @@ router.post('/:id/recalculate', addUserToRequest, requireAuth, async (req, res) 
   }
 });
 
+// Obtener detalle completo de un segmento (para pantalla de vista)
+router.get('/:id/detail', addUserToRequest, requireAuth, async (req, res) => {
+  const id = parseInt(req.params.id);
+  try {
+    await poolConnect;
+    
+    // Obtener información básica del segmento
+    const segmentResult = await pool.request()
+      .input('Id', sql.Int, id)
+      .query('SELECT * FROM Segments WHERE Id = @Id');
+      
+    if (segmentResult.recordset.length === 0) {
+      return res.status(404).json({ error: 'Segmento no encontrado' });
+    }
+    
+    const segment = segmentResult.recordset[0];
+    
+    // Obtener campañas que usan este segmento
+    const campaignsResult = await pool.request()
+      .input('SegmentId', sql.Int, id)
+      .query(`
+        SELECT DISTINCT 
+          c.Id, c.Name, c.Status, c.StartDate, c.EndDate, c.CreatedAt,
+          CASE WHEN cs.SegmentId IS NOT NULL THEN 1 ELSE 0 END as IsActive
+        FROM Campaigns c
+        INNER JOIN CampaignSegments cs ON c.Id = cs.CampaignId
+        WHERE cs.SegmentId = @SegmentId
+        ORDER BY c.CreatedAt DESC
+      `);
+    
+    // Obtener muestra de ofertas del segmento (primeras 100)
+    const filters = parseFilters(segment.Filters);
+    const { where, inputs } = buildWhereFromFilters(filters, sql);
+    
+    // Añadir filtro por usuario para multi-tenant
+    if (!isSuperAdmin(req)) {
+      where.push('UserId = @currentUserId');
+      inputs.push({ name: 'currentUserId', type: sql.BigInt, value: req.userId });
+    }
+    
+    const whereClause = where.length ? `WHERE ${where.join(' AND ')}` : '';
+    const reqSql = pool.request();
+    inputs.forEach(p => reqSql.input(p.name, p.type, p.value));
+    
+    const offersResult = await reqSql.query(`
+      SELECT TOP 100
+        Id, ExternalId, Title, CompanyName, 
+        COALESCE(City, Address, '') as Location, Sector, 
+        JobType, SalaryMin, SalaryMax, CreatedAt
+      FROM JobOffers WITH (READPAST) 
+      ${whereClause}
+      ORDER BY CreatedAt DESC
+    `);
+    
+    res.json({
+      segment: {
+        ...segment,
+        Filters: parseFilters(segment.Filters)
+      },
+      campaigns: campaignsResult.recordset,
+      sampleOffers: offersResult.recordset,
+      totalOffers: segment.OfferCount || 0
+    });
+    
+  } catch (e) {
+    console.error('Error getting segment detail:', e);
+    res.status(500).json({ error: 'Error obteniendo detalle del segmento', details: e.message });
+  }
+});
+
 // Duplicar un segmento
 router.post('/:id/duplicate', async (req, res) => {
   const id = parseInt(req.params.id);

@@ -17,7 +17,8 @@ router.get('/:userId/credentials',
     
     // ✅ VALIDAR QUE EL USUARIO SOLO VEA SUS PROPIAS CREDENCIALES (o sea superadmin)
     const { isSuperAdmin } = require('../middleware/authMiddleware');
-    if (!isSuperAdmin(req) && parseInt(userId) !== req.userId) {
+    // Fix type comparison: ensure both sides are the same type
+    if (!isSuperAdmin(req) && parseInt(userId) !== parseInt(req.userId)) {
       return res.status(403).json({
         success: false,
         error: 'No tienes permisos para ver estas credenciales'
@@ -45,25 +46,74 @@ router.get('/:userId/credentials',
         ORDER BY CreatedAt DESC
       `);
 
-    const channels = result.recordset.map(row => ({
-      channelId: row.ChannelId,
-      channelName: row.ChannelName,
-      isActive: row.IsActive,
-      isValidated: row.IsValidated,
-      lastValidated: row.LastValidated,
-      validationError: row.ValidationError,
-      limits: {
-        dailyBudgetLimit: row.DailyBudgetLimit,
-        monthlyBudgetLimit: row.MonthlyBudgetLimit,
-        maxCPA: row.MaxCPA
-      },
-      createdAt: row.CreatedAt,
-      updatedAt: row.UpdatedAt
-    }));
+    // Procesar canales y expandir Jooble por países si es necesario
+    const processedChannels = [];
+    
+    for (const row of result.recordset) {
+      const baseChannel = {
+        channelId: row.ChannelId,
+        channelName: row.ChannelName,
+        isActive: row.IsActive,
+        isValidated: row.IsValidated,
+        lastValidated: row.LastValidated,
+        validationError: row.ValidationError,
+        limits: {
+          dailyBudgetLimit: row.DailyBudgetLimit,
+          monthlyBudgetLimit: row.MonthlyBudgetLimit,
+          maxCPA: row.MaxCPA
+        },
+        createdAt: row.CreatedAt,
+        updatedAt: row.UpdatedAt
+      };
+
+      // Expandir Jooble por países si está configurado
+      if (row.ChannelId === 'jooble' && row.IsActive && row.IsValidated) {
+        try {
+          // Obtener detalles de Jooble para este usuario
+          const joobleDetails = await credentialsManager.getUserChannelCredentials(userId, 'jooble');
+          
+          if (joobleDetails && joobleDetails.joobleApiKeys && joobleDetails.joobleApiKeys.length > 0) {
+            // Crear un canal por cada país configurado
+            for (const apiKeyInfo of joobleDetails.joobleApiKeys) {
+              const countryCode = apiKeyInfo.countryCode.toUpperCase();
+              const countryNames = {
+                'ES': 'España',
+                'PT': 'Portugal', 
+                'FR': 'Francia',
+                'IT': 'Italia',
+                'DE': 'Alemania',
+                'GB': 'Reino Unido'
+              };
+              
+              processedChannels.push({
+                ...baseChannel,
+                channelId: `jooble-${apiKeyInfo.countryCode}`, // jooble-es, jooble-pt
+                channelName: `Jooble ${countryCode}`,
+                countryInfo: {
+                  countryCode: apiKeyInfo.countryCode,
+                  countryName: countryNames[countryCode] || countryCode,
+                  hasApiKey: true
+                }
+              });
+            }
+          } else {
+            // Fallback: usar canal Jooble genérico si no hay países configurados
+            processedChannels.push(baseChannel);
+          }
+        } catch (error) {
+          console.warn(`⚠️ Error expandiendo países de Jooble para usuario ${userId}:`, error.message);
+          // Fallback: usar canal Jooble genérico en caso de error
+          processedChannels.push(baseChannel);
+        }
+      } else {
+        // Para otros canales (talent, jobrapido, etc.), usar tal como están
+        processedChannels.push(baseChannel);
+      }
+    }
 
     res.json({
       success: true,
-      channels
+      channels: processedChannels
     });
 
   } catch (error) {
@@ -104,27 +154,78 @@ router.get('/',
         ORDER BY CreatedAt DESC
       `);
 
-    const channels = result.recordset.map(row => ({
-      channelId: row.ChannelId,
-      channelName: row.ChannelName,
-      isActive: row.IsActive,
-      isValidated: row.IsValidated,
-      lastValidated: row.LastValidated,
-      validationError: row.ValidationError,
-      limits: {
-        dailyBudgetLimit: row.DailyBudgetLimit,
-        monthlyBudgetLimit: row.MonthlyBudgetLimit,
-        maxCPA: row.MaxCPA
-      },
-      createdAt: row.CreatedAt,
-      updatedAt: row.UpdatedAt
-    }));
+    // Procesar canales y expandir Jooble por países si es necesario
+    const processedChannels = [];
+    
+    for (const row of result.recordset) {
+      const baseChannel = {
+        channelId: row.ChannelId,
+        channelName: row.ChannelName,
+        isActive: row.IsActive,
+        isValidated: row.IsValidated,
+        lastValidated: row.LastValidated,
+        validationError: row.ValidationError,
+        limits: {
+          dailyBudgetLimit: row.DailyBudgetLimit,
+          monthlyBudgetLimit: row.MonthlyBudgetLimit,
+          maxCPA: row.MaxCPA
+        },
+        createdAt: row.CreatedAt,
+        updatedAt: row.UpdatedAt
+      };
 
-    console.log(`✅ Credenciales obtenidas: ${channels.length} canales para usuario ${req.userId}`);
+      // Expandir Jooble por países si está configurado
+      if (row.ChannelId === 'jooble' && row.IsActive && row.IsValidated) {
+        try {
+          // Obtener detalles de Jooble para este usuario
+          const joobleDetails = await credentialsManager.getUserChannelCredentials(req.userId, 'jooble');
+          
+          if (joobleDetails && joobleDetails.joobleApiKeys && joobleDetails.joobleApiKeys.length > 0) {
+            // Crear un canal por cada país configurado
+            for (const apiKeyInfo of joobleDetails.joobleApiKeys) {
+              const countryCode = apiKeyInfo.countryCode.toUpperCase();
+              const countryNames = {
+                'ES': 'España',
+                'PT': 'Portugal', 
+                'FR': 'Francia',
+                'IT': 'Italia',
+                'DE': 'Alemania',
+                'GB': 'Reino Unido'
+              };
+              
+              processedChannels.push({
+                ...baseChannel,
+                channelId: `jooble-${apiKeyInfo.countryCode}`, // jooble-es, jooble-pt
+                channelName: `Jooble ${countryCode}`,
+                countryInfo: {
+                  countryCode: apiKeyInfo.countryCode,
+                  countryName: countryNames[countryCode] || countryCode,
+                  hasApiKey: true
+                }
+              });
+            }
+            console.log(`🌍 Jooble expandido: ${joobleDetails.joobleApiKeys.length} países para usuario ${req.userId}`);
+          } else {
+            // Fallback: usar canal Jooble genérico si no hay países configurados
+            processedChannels.push(baseChannel);
+            console.log(`⚠️ Jooble genérico: no hay países configurados para usuario ${req.userId}`);
+          }
+        } catch (error) {
+          console.warn(`⚠️ Error expandiendo países de Jooble para usuario ${req.userId}:`, error.message);
+          // Fallback: usar canal Jooble genérico en caso de error
+          processedChannels.push(baseChannel);
+        }
+      } else {
+        // Para otros canales (talent, jobrapido, etc.), usar tal como están
+        processedChannels.push(baseChannel);
+      }
+    }
+
+    console.log(`✅ Credenciales procesadas: ${processedChannels.length} canales para usuario ${req.userId}`);
 
     res.json({
       success: true,
-      channels
+      channels: processedChannels
     });
 
   } catch (error) {
@@ -314,30 +415,86 @@ router.post('/:userId/credentials/:channelId/validate', async (req, res) => {
     // Validación específica por canal
     switch (channelId) {
       case 'jooble':
-        console.log('🎯 Validando credenciales Jooble con API real...');
+        console.log('🎯 Validando credenciales Jooble con nuevo formato multi-país...');
         
         // Manejar nuevo formato con múltiples API keys
         if (credentials.joobleApiKeys && credentials.joobleApiKeys.length > 0) {
-          console.log(`🔑 Validando ${credentials.joobleApiKeys.length} API keys de Jooble...`);
+          console.log(`🔑 Validando ${credentials.joobleApiKeys.length} API keys de Jooble individualmente...`);
           
-          // Validar todas las API keys (por ahora validamos la primera, luego se puede extender)
-          const firstApiKey = credentials.joobleApiKeys[0];
-          const joobleService = new JoobleService({
-            apiKey: firstApiKey.apiKey,
-            countryCode: firstApiKey.countryCode,
-            timeout: credentials.timeout || 10000
-          });
-          validationResult = await joobleService.validateCredentials({
-            apiKey: firstApiKey.apiKey,
-            countryCode: firstApiKey.countryCode
-          });
+          const validationResults = [];
+          let hasSuccessfulValidation = false;
           
-          // Agregar detalles sobre cuántas API keys se validaron
-          if (validationResult.success) {
-            validationResult.message = `Credenciales Jooble validadas (${credentials.joobleApiKeys.length} países configurados)`;
+          // Validar cada API key individualmente
+          for (const apiKeyData of credentials.joobleApiKeys) {
+            console.log(`🌍 Validando ${apiKeyData.countryCode} con API key ${apiKeyData.apiKey.substring(0, 8)}...`);
+            
+            const joobleService = new JoobleService({
+              apiKey: apiKeyData.apiKey,
+              countryCode: apiKeyData.countryCode,
+              timeout: credentials.timeout || 10000
+            });
+            
+            try {
+              const countryResult = await joobleService.validateCredentials({
+                apiKey: apiKeyData.apiKey,
+                countryCode: apiKeyData.countryCode
+              });
+              
+              validationResults.push({
+                country: apiKeyData.countryCode,
+                success: countryResult.success,
+                message: countryResult.message,
+                error: countryResult.error
+              });
+              
+              if (countryResult.success) {
+                hasSuccessfulValidation = true;
+              }
+              
+              console.log(`${countryResult.success ? '✅' : '❌'} ${apiKeyData.countryCode}: ${countryResult.message || countryResult.error}`);
+            } catch (error) {
+              console.log(`❌ ${apiKeyData.countryCode}: ${error.message}`);
+              validationResults.push({
+                country: apiKeyData.countryCode,
+                success: false,
+                error: error.message
+              });
+            }
+          }
+          
+          // Generar resultado consolidado
+          const successfulCountries = validationResults.filter(r => r.success);
+          const failedCountries = validationResults.filter(r => !r.success);
+          
+          if (hasSuccessfulValidation) {
+            validationResult = {
+              success: true,
+              message: `Credenciales Jooble validadas para ${successfulCountries.length}/${credentials.joobleApiKeys.length} países: ${successfulCountries.map(c => c.country).join(', ')}${failedCountries.length > 0 ? ` (fallaron: ${failedCountries.map(c => c.country).join(', ')})` : ''}`,
+              validatedAt: new Date().toISOString(),
+              details: {
+                totalCountries: credentials.joobleApiKeys.length,
+                successfulCountries: successfulCountries.map(c => c.country),
+                failedCountries: failedCountries.map(c => c.country),
+                validationResults: validationResults
+              }
+            };
+          } else {
+            // Todos los países fallaron
+            const primaryError = failedCountries[0]?.error || 'Error desconocido';
+            validationResult = {
+              success: false,
+              error: `Error validando jooble: ${primaryError}`,
+              code: 'ALL_COUNTRIES_FAILED',
+              details: {
+                totalCountries: credentials.joobleApiKeys.length,
+                failedCountries: failedCountries.map(c => c.country),
+                validationResults: validationResults
+              }
+            };
           }
         } else {
           // Formato legacy con apiKey y countryCode directos
+          console.log('🔑 Usando formato legacy de Jooble...');
           const joobleService = new JoobleService({
             apiKey: credentials.apiKey,
             countryCode: credentials.countryCode,

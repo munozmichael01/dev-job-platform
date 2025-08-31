@@ -407,6 +407,37 @@ class XMLProcessor {
     return results
   }
 
+  normalizeFieldName(fieldName) {
+    // Mapear campos target específicos a los nombres esperados por la BD
+    const fieldMapping = {
+      'external_id': 'ExternalId',
+      'title': 'Title',
+      'job_title': 'JobTitle', 
+      'description': 'Description',
+      'company_name': 'CompanyName',
+      'sector': 'Sector',
+      'address': 'Address',
+      'country': 'Country',
+      'region': 'Region',
+      'city': 'City',
+      'postcode': 'Postcode',
+      'latitude': 'Latitude',
+      'longitude': 'Longitude',
+      'vacancies': 'Vacancies',
+      'salary_min': 'SalaryMin',
+      'salary_max': 'SalaryMax',
+      'job_type': 'JobType',
+      'external_url': 'ExternalUrl',
+      'application_url': 'ApplicationUrl',
+      'budget': 'Budget',
+      'applications_goal': 'ApplicationsGoal',
+      'source': 'Source',
+      'publication_date': 'PublicationDate'
+    }
+    
+    return fieldMapping[fieldName] || fieldName
+  }
+
   mapToStandardFormat(offer, mappings) {
     const standardOffer = {}
 
@@ -432,13 +463,22 @@ class XMLProcessor {
             transformedValue = this.cleanHtmlContent(transformedValue)
           }
           
-          standardOffer[mapping.TargetField] = transformedValue
+          // Normalizar el TargetField a PascalCase para compatibilidad con base de datos
+          const normalizedTarget = this.normalizeFieldName(mapping.TargetField)
+          standardOffer[normalizedTarget] = transformedValue
         } catch (error) {
-          standardOffer[mapping.TargetField] = null
+          const normalizedTarget = this.normalizeFieldName(mapping.TargetField)
+          standardOffer[normalizedTarget] = null
         }
       }
     } else {
       // Mapeo automático por defecto
+      // DEBUG: Ver qué campos están disponibles en el offer
+      console.log("🔍 DEBUG - Available offer fields:", Object.keys(offer))
+      console.log("🔍 DEBUG - offer.id:", offer.id)
+      console.log("🔍 DEBUG - offer.ID:", offer.ID) 
+      console.log("🔍 DEBUG - offer.Id:", offer.Id)
+      
       standardOffer.ExternalId = String(offer.id || offer.ID || offer.Id || Math.random().toString(36).substr(2, 9))
       standardOffer.Title = String(offer.title || offer.jobtitle || offer.job_title || "")
       standardOffer.JobTitle = String(offer.jobtitle || offer.job_title || offer.title || "")
@@ -529,13 +569,14 @@ class XMLProcessor {
   }
 
   transformValue(value, type, rule) {
-    if (value === undefined || value === null) return null
+    if (value === undefined || value === null || value === '' || value === 'undefined') return null
 
     switch (type) {
       case "DATE":
         return this.parseDate(value)
       case "NUMBER":
-        return Number(value) || null
+        const num = Number(value)
+        return isNaN(num) ? null : num
       case "BOOLEAN":
         return Boolean(value)
       case "ARRAY":
@@ -545,7 +586,7 @@ class XMLProcessor {
         return value || null
       case "STRING":
       default:
-        const stringValue = String(value || "")
+        const stringValue = String(value === 'undefined' ? '' : (value || ""))
         // Si es content/description, limpiar HTML
         if (rule === 'clean_html' || (stringValue.includes('<') && stringValue.includes('>'))) {
           return this.cleanHtmlContent(stringValue)
@@ -587,40 +628,59 @@ class XMLProcessor {
     }
   }
 
+  // Helper para convertir valores numéricos seguros
+  safeNumber(value, defaultValue = null) {
+    if (value === undefined || value === null || value === '' || value === 'undefined') return defaultValue
+    const num = Number(value)
+    return isNaN(num) ? defaultValue : num
+  }
+
+  // Helper para convertir valores decimales seguros  
+  safeDecimal(value, defaultValue = 0) {
+    if (value === undefined || value === null || value === '' || value === 'undefined') return defaultValue
+    const num = Number(value)
+    return isNaN(num) ? defaultValue : num
+  }
+
   async saveOffer(offer) {
     try {
+      // DEBUG: Log offer data to identify undefined values
+      console.log("🐛 DEBUG - Saving offer with ExternalId:", offer.ExternalId)
+      console.log("🐛 DEBUG - ConnectionId:", offer.ConnectionId, "this.connection.id:", this.connection.id)
+      console.log("🐛 DEBUG - UserId:", this.connection.UserId, this.connection.userId)
+      
       await pool
         .request()
-        .input("ExternalId", sql.NVarChar(255), String(offer.ExternalId))
-        .input("Title", sql.NVarChar(255), offer.Title || "")
-        .input("JobTitle", sql.NVarChar(255), offer.JobTitle || offer.Title || "")
-        .input("Description", sql.NVarChar(sql.MAX), offer.Description)
-        .input("CompanyName", sql.NVarChar(255), offer.CompanyName || "")
-        .input("Sector", sql.NVarChar(255), offer.Sector || "")
-        .input("Address", sql.NVarChar(255), offer.Address || "")
-        .input("Country", sql.NVarChar(100), offer.Country || "")
-        .input("CountryId", sql.Int, offer.CountryId || null)
-        .input("Region", sql.NVarChar(100), offer.Region || "")
-        .input("RegionId", sql.Int, offer.RegionId || null)
-        .input("City", sql.NVarChar(100), offer.City || "")
-        .input("CityId", sql.Int, offer.CityId || null)
-        .input("Postcode", sql.NVarChar(20), offer.Postcode || "")
-        .input("Latitude", sql.Decimal(9, 6), offer.Latitude || null)
-        .input("Longitude", sql.Decimal(9, 6), offer.Longitude || null)
-        .input("Vacancies", sql.Int, offer.Vacancies || 1)
-        .input("SalaryMin", sql.Decimal(10, 2), offer.SalaryMin || 0)
-        .input("SalaryMax", sql.Decimal(10, 2), offer.SalaryMax || 0)
-        .input("JobType", sql.NVarChar(100), offer.JobType || "")
-        .input("ExternalUrl", sql.NVarChar(500), offer.ExternalUrl || "")
-        .input("ApplicationUrl", sql.NVarChar(500), offer.ApplicationUrl || "")
-        .input("Budget", sql.Decimal(10, 2), offer.Budget || 10)
-        .input("BudgetSpent", sql.Decimal(10, 2), offer.BudgetSpent || 0)
-        .input("ApplicationsGoal", sql.Int, offer.ApplicationsGoal || 50)
-        .input("ApplicationsReceived", sql.Int, offer.ApplicationsReceived || 0)
-        .input("StatusId", sql.Int, offer.StatusId || 1)
-        .input("ConnectionId", sql.Int, offer.ConnectionId)
-        .input("UserId", sql.BigInt, this.connection.UserId || this.connection.userId || null)
-        .input("Source", sql.NVarChar(10), offer.Source || "XML")
+        .input("ExternalId", sql.NVarChar(255), String(offer.ExternalId === undefined ? '' : offer.ExternalId).substring(0, 255))
+        .input("Title", sql.NVarChar(255), (offer.Title || "").substring(0, 255))
+        .input("JobTitle", sql.NVarChar(255), (offer.JobTitle || offer.Title || "").substring(0, 255))
+        .input("Description", sql.NVarChar(sql.MAX), offer.Description || "")
+        .input("CompanyName", sql.NVarChar(255), (offer.CompanyName || "").substring(0, 255))
+        .input("Sector", sql.NVarChar(255), (offer.Sector || "").substring(0, 255))
+        .input("Address", sql.NVarChar(255), (offer.Address || "").substring(0, 255))
+        .input("Country", sql.NVarChar(100), (offer.Country || "").substring(0, 100))
+        .input("CountryId", sql.Int, this.safeNumber(offer.CountryId))
+        .input("Region", sql.NVarChar(100), (offer.Region || "").substring(0, 100))
+        .input("RegionId", sql.Int, this.safeNumber(offer.RegionId))
+        .input("City", sql.NVarChar(100), (offer.City || "").substring(0, 100))
+        .input("CityId", sql.Int, this.safeNumber(offer.CityId))
+        .input("Postcode", sql.NVarChar(20), (offer.Postcode || "").substring(0, 20))
+        .input("Latitude", sql.Decimal(9, 6), this.safeDecimal(offer.Latitude, null))
+        .input("Longitude", sql.Decimal(9, 6), this.safeDecimal(offer.Longitude, null))
+        .input("Vacancies", sql.Int, this.safeNumber(offer.Vacancies, 1))
+        .input("SalaryMin", sql.Decimal(10, 2), this.safeDecimal(offer.SalaryMin, 0))
+        .input("SalaryMax", sql.Decimal(10, 2), this.safeDecimal(offer.SalaryMax, 0))
+        .input("JobType", sql.NVarChar(100), (offer.JobType || "").substring(0, 100))
+        .input("ExternalUrl", sql.NVarChar(500), (offer.ExternalUrl || "").substring(0, 500))
+        .input("ApplicationUrl", sql.NVarChar(500), (offer.ApplicationUrl || "").substring(0, 500))
+        .input("Budget", sql.Decimal(10, 2), this.safeDecimal(offer.Budget, 10))
+        .input("BudgetSpent", sql.Decimal(10, 2), this.safeDecimal(offer.BudgetSpent, 0))
+        .input("ApplicationsGoal", sql.Int, this.safeNumber(offer.ApplicationsGoal, 50))
+        .input("ApplicationsReceived", sql.Int, this.safeNumber(offer.ApplicationsReceived, 0))
+        .input("StatusId", sql.Int, this.safeNumber(offer.StatusId, 1))
+        .input("ConnectionId", sql.Int, this.safeNumber(offer.ConnectionId || this.connection.id))
+        .input("UserId", sql.BigInt, this.safeNumber(this.connection.UserId || this.connection.userId))
+        .input("Source", sql.NVarChar(10), (offer.Source || "XML").substring(0, 10))
         .input("PublicationDate", sql.DateTime, offer.PublicationDate || new Date())
         .input("CreatedAt", sql.DateTime, offer.CreatedAt || new Date())
         .query(`
@@ -701,11 +761,13 @@ class XMLProcessor {
 
       for (let i = 0; i < batches.length; i++) {
         const batch = batches[i]
-        console.log(`🗄️ Processing archive batch ${i + 1}/${batches.length} (${batch.length} IDs)...`)
+        console.log(`🗄️ Processing archive batch ${i + 1}/${batches.length} (${batch.length} IDs)... [FIXED]`)
 
         // Crear lista de parámetros seguros
         const placeholders = batch.map((_, index) => `@id${index}`).join(",")
-        const request = pool.request().input("ConnectionId", sql.Int, this.connection.id)
+        const connectionId = this.safeNumber(this.connection.id || this.connection.Id, 1)
+        console.log(`🔍 DEBUG connectionId: ${connectionId}, this.connection.id: ${this.connection.id}, this.connection.Id: ${this.connection.Id}`)
+        const request = pool.request().input("ConnectionId", sql.Int, connectionId)
 
         // Agregar cada ID como parámetro
         batch.forEach((id, index) => {
@@ -785,8 +847,8 @@ class XMLProcessor {
         const foundField = offerFields.find(field => field.toLowerCase() === priorityField)
         if (foundField && !locationMappingCreated) {
           mappings.push({
-            ConnectionId: this.connection.id,
-            ClientId: this.connection.clientId,
+            ConnectionId: this.safeNumber(this.connection.id || this.connection.Id, 1),
+            ClientId: this.safeNumber(this.connection.clientId || this.connection.UserId || this.connection.userId, 1),
             SourceField: foundField,
             TargetField: 'location',
             TransformationType: this.detectMappingType(foundField, sampleOffer[foundField]),
@@ -810,8 +872,8 @@ class XMLProcessor {
         const targetField = standardMappings[lowerField]
         if (targetField) {
           mappings.push({
-            ConnectionId: this.connection.id,
-            ClientId: this.connection.clientId,
+            ConnectionId: this.safeNumber(this.connection.id || this.connection.Id, 1),
+            ClientId: this.safeNumber(this.connection.clientId || this.connection.UserId || this.connection.userId, 1),
             SourceField: sourceField,
             TargetField: targetField,
             TransformationType: this.detectMappingType(sourceField, sampleOffer[sourceField]),

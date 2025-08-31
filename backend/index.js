@@ -264,7 +264,7 @@ app.get('/job-offers/locations',
       } else if (status === 'paused') {
         whereConditions.push('StatusId = 3');
       } else if (status === 'archived') {
-        whereConditions.push('StatusId = 4');
+        whereConditions.push('StatusId = 5');
       }
     }
 
@@ -408,7 +408,7 @@ app.get('/job-offers/sectors',
       } else if (status === 'paused') {
         whereConditions.push('StatusId = 3');
       } else if (status === 'archived') {
-        whereConditions.push('StatusId = 4');
+        whereConditions.push('StatusId = 5');
       }
     }
 
@@ -543,7 +543,7 @@ app.get('/job-offers/external-ids',
       } else if (status === 'paused') {
         whereConditions.push('StatusId = 3');
       } else if (status === 'archived') {
-        whereConditions.push('StatusId = 4');
+        whereConditions.push('StatusId = 5');
       }
     }
 
@@ -756,21 +756,24 @@ app.get('/job-offers',
     const usingKeysetPagination = Boolean(lastCreatedAt && lastId);
     console.log(`🔍 CURSOR DEBUG - usingKeysetPagination: ${usingKeysetPagination}`);
     
-    // Construir query SQL dinámico OPTIMIZADO
-    let whereConditions = [];
+    // 🔧 FIX PAGINACIÓN: Separar filtros de condiciones de cursor
+    // Solo filtros (para COUNT y query principal)
+    let filterConditions = [];
+    // Condiciones de cursor (solo para query principal, NO para COUNT)
+    let paginationConditions = [];
     let queryParams = [];
     
     // ✅ FILTRAR POR USUARIO - Solo superadmin ve todo
     const { isSuperAdmin } = require('./src/middleware/authMiddleware');
     if (!isSuperAdmin(req)) {
-      whereConditions.push('jo.UserId = @currentUserId');
+      filterConditions.push('jo.UserId = @currentUserId');
       queryParams.push({ name: 'currentUserId', type: sql.BigInt, value: req.userId });
       console.log(`🔒 Filtrando ofertas para usuario ${req.userId} (${req.user.role})`);
     } else {
       console.log(`🔑 Super admin: viendo todas las ofertas sin filtro`);
     }
     
-    // Agregar condición de keyset pagination si aplica
+    // 🔧 SEPARAR: Condiciones de keyset pagination (solo para query principal)
     if (usingKeysetPagination) {
       console.log('🔍 CURSOR DEBUG - Entrando en keyset pagination logic');
       if (lastCreatedAt && lastId) {
@@ -787,8 +790,8 @@ app.get('/job-offers',
         }
         
         const condition = '(CreatedAt < @lastCreatedAt OR (CreatedAt = @lastCreatedAt AND Id < @lastId))';
-        console.log('🔍 CURSOR DEBUG - Añadiendo condición WHERE:', condition);
-        whereConditions.push(condition);
+        console.log('🔍 CURSOR DEBUG - Añadiendo condición PAGINATION:', condition);
+        paginationConditions.push(condition); // 🔧 CAMBIO: Va a paginationConditions, NO filterConditions
         queryParams.push({ name: 'lastCreatedAt', type: sql.DateTime, value: parsedDate });
         queryParams.push({ name: 'lastId', type: sql.Int, value: parseInt(lastId) });
       } else if (lastCreatedAt) {
@@ -804,14 +807,14 @@ app.get('/job-offers',
         }
         
         const condition = 'CreatedAt < @lastCreatedAt';
-        console.log('🔍 CURSOR DEBUG - Añadiendo condición WHERE:', condition);
-        whereConditions.push(condition);
+        console.log('🔍 CURSOR DEBUG - Añadiendo condición PAGINATION:', condition);
+        paginationConditions.push(condition); // 🔧 CAMBIO: Va a paginationConditions
         queryParams.push({ name: 'lastCreatedAt', type: sql.DateTime, value: parsedDate });
       } else if (lastId) {
         console.log('🔍 CURSOR DEBUG - Usando solo lastId');
         const condition = 'Id < @lastId';
-        console.log('🔍 CURSOR DEBUG - Añadiendo condición WHERE:', condition);
-        whereConditions.push(condition);
+        console.log('🔍 CURSOR DEBUG - Añadiendo condición PAGINATION:', condition);
+        paginationConditions.push(condition); // 🔧 CAMBIO: Va a paginationConditions
         queryParams.push({ name: 'lastId', type: sql.Int, value: parseInt(lastId) });
       }
     } else {
@@ -836,7 +839,7 @@ app.get('/job-offers',
       )`;
       console.log(`🔍 SEARCH DEBUG - Condición WHERE: ${searchCondition}`);
       console.log(`🔍 SEARCH DEBUG - Parámetros: Contains="%${cleanSearch}%", Prefix="${cleanSearch}%"`);
-      whereConditions.push(searchCondition);
+      filterConditions.push(searchCondition);
       queryParams.push({ name: 'searchContains', type: sql.NVarChar, value: `%${cleanSearch}%` });
       queryParams.push({ name: 'searchPrefix', type: sql.NVarChar, value: `${cleanSearch}%` });
       queryParams.push({ name: 'searchParam', type: sql.NVarChar, value: cleanSearch });
@@ -851,17 +854,17 @@ app.get('/job-offers',
         'active': 1,
         'pending': 3,
         'paused': 2,
-        'archived': 4
+        'archived': 5
       };
       if (statusMap[cleanStatus]) {
-        whereConditions.push('StatusId = @status');
+        filterConditions.push('StatusId = @status');
         queryParams.push({ name: 'status', type: sql.Int, value: statusMap[cleanStatus] });
       }
     }
 
     // Filtro por ubicación OPTIMIZADO - buscar en campo location calculado Y campos individuales
     if (cleanLocation) {
-      whereConditions.push(`(
+      filterConditions.push(`(
         City = @locationExact OR 
         Region = @locationExact OR 
         CASE 
@@ -887,21 +890,21 @@ app.get('/job-offers',
 
     // Filtro por sector OPTIMIZADO
     if (cleanSector) {
-      whereConditions.push('(Sector = @sectorExact OR Sector LIKE @sector)');
+      filterConditions.push('(Sector = @sectorExact OR Sector LIKE @sector)');
       queryParams.push({ name: 'sectorExact', type: sql.NVarChar, value: cleanSector });
       queryParams.push({ name: 'sector', type: sql.NVarChar, value: `%${cleanSector}%` });
     }
 
     // Filtro por empresa OPTIMIZADO
     if (cleanCompany) {
-      whereConditions.push('(CompanyName = @companyExact OR CompanyName LIKE @company)');
+      filterConditions.push('(CompanyName = @companyExact OR CompanyName LIKE @company)');
       queryParams.push({ name: 'companyExact', type: sql.NVarChar, value: cleanCompany });
       queryParams.push({ name: 'company', type: sql.NVarChar, value: `%${cleanCompany}%` });
     }
 
     // Filtro por ExternalId OPTIMIZADO
     if (cleanExternalId) {
-      whereConditions.push('(ExternalId = @externalIdExact OR ExternalId LIKE @externalId)');
+      filterConditions.push('(ExternalId = @externalIdExact OR ExternalId LIKE @externalId)');
       queryParams.push({ name: 'externalIdExact', type: sql.NVarChar, value: cleanExternalId });
       queryParams.push({ name: 'externalId', type: sql.NVarChar, value: `%${cleanExternalId}%` });
     }
@@ -910,7 +913,7 @@ app.get('/job-offers',
     if (cleanPromocion) {
       if (cleanPromocion === 'promocionandose') {
         // Estado 4: Promocionándose - En campañas activas
-        whereConditions.push(`Id IN (
+        filterConditions.push(`Id IN (
           SELECT DISTINCT cc.OfferId 
           FROM CampaignChannels cc
           INNER JOIN Campaigns c ON cc.CampaignId = c.Id
@@ -918,7 +921,7 @@ app.get('/job-offers',
         )`);
       } else if (cleanPromocion === 'preparada') {
         // Estado 3: Preparada - En campañas inactivas (no activas)
-        whereConditions.push(`Id IN (
+        filterConditions.push(`Id IN (
           SELECT DISTINCT cc.OfferId 
           FROM CampaignChannels cc
           INNER JOIN Campaigns c ON cc.CampaignId = c.Id
@@ -926,7 +929,7 @@ app.get('/job-offers',
         )`);
       } else if (cleanPromocion === 'categorizada') {
         // Estado 2: Categorizada - En campaña pero no activa
-        whereConditions.push(`Id IN (
+        filterConditions.push(`Id IN (
           SELECT DISTINCT cc.OfferId 
           FROM CampaignChannels cc
           INNER JOIN Campaigns c ON cc.CampaignId = c.Id
@@ -939,15 +942,20 @@ app.get('/job-offers',
         )`);
       } else if (cleanPromocion === 'sin-promocion') {
         // Estado 1: Sin promoción - No está en ninguna campaña
-        whereConditions.push(`Id NOT IN (
+        filterConditions.push(`Id NOT IN (
           SELECT DISTINCT cc.OfferId
           FROM CampaignChannels cc
         )`);
       }
     }
 
-    // Construir cláusula WHERE
-    const whereClause = whereConditions.length > 0 ? `WHERE ${whereConditions.join(' AND ')}` : '';
+    // 🔧 SEPARAR CLÁUSULAS: Solo filtros para COUNT, filtros+cursor para query principal
+    const filterClause = filterConditions.length > 0 ? `WHERE ${filterConditions.join(' AND ')}` : '';
+    const allConditions = [...filterConditions, ...paginationConditions];
+    const whereClause = allConditions.length > 0 ? `WHERE ${allConditions.join(' AND ')}` : '';
+    
+    console.log(`🔍 CLAUSES DEBUG - FilterClause (COUNT): ${filterClause}`);
+    console.log(`🔍 CLAUSES DEBUG - WhereClause (MAIN): ${whereClause}`);
 
     // Validar sortBy para evitar SQL injection
     const allowedSortFields = ['CreatedAt', 'Title', 'CompanyName', 'StatusId', 'PublicationDate'];
@@ -1020,7 +1028,7 @@ app.get('/job-offers',
         CASE 
           WHEN jo.StatusId = 1 THEN 'active'
           WHEN jo.StatusId = 2 THEN 'paused'
-          WHEN jo.StatusId = 3 THEN 'archived'
+          WHEN jo.StatusId = 5 THEN 'archived'
           ELSE 'pending'
         END as status,
         -- PROMOCIÓN SIMPLIFICADA PARA PERFORMANCE
@@ -1077,7 +1085,7 @@ app.get('/job-offers',
         CASE jo.StatusId
           WHEN 1 THEN 'active'
           WHEN 2 THEN 'paused'
-          WHEN 3 THEN 'archived'
+          WHEN 5 THEN 'archived'
           WHEN 4 THEN 'pending'
           ELSE 'unknown'
         END as status,
@@ -1107,19 +1115,24 @@ app.get('/job-offers',
     `;
     }
 
-    // PERFORMANCE OPTIMIZED COUNT - Use real count but optimized
+    // 🔧 FIX COUNT QUERY: Solo usar filtros, NO condiciones de cursor
     let totalCount = 0;
-    if (whereConditions.length > 0) {
-      // For filtered queries, use optimized count with OPTION (FAST 1000)
+    if (filterConditions.length > 0) {
+      // Para queries filtradas, usar conteo optimizado solo con filtros
       const countQuery = `
         SELECT COUNT(*) as total
         FROM JobOffers jo WITH (READPAST)
-        ${whereClause}
+        ${filterClause}
         OPTION (FAST 1000)
       `;
+      console.log(`🔍 COUNT QUERY DEBUG: ${countQuery}`);
       const countRequest = pool.request();
+      // 🔧 CRÍTICO: Solo agregar parámetros que NO son de cursor
       queryParams.forEach(param => {
-        countRequest.input(param.name, param.type, param.value);
+        // Excluir parámetros de cursor de la query COUNT
+        if (!['lastCreatedAt', 'lastId'].includes(param.name)) {
+          countRequest.input(param.name, param.type, param.value);
+        }
       });
       const countResult = await countRequest.query(countQuery);
       totalCount = countResult.recordset[0].total;
@@ -1519,7 +1532,7 @@ app.get('/job-offers/companies',
     const cleanExternalId = externalId && externalId !== 'all' ? externalId : null;
 
     if (cleanStatus) {
-      const statusMap = { 'active': 1, 'pending': 3, 'paused': 2, 'archived': 4 };
+      const statusMap = { 'active': 1, 'pending': 3, 'paused': 2, 'archived': 5 };
       if (statusMap[cleanStatus]) {
         whereConditions.push('StatusId = @statusFilter');
         request.input('statusFilter', sql.Int, statusMap[cleanStatus]);

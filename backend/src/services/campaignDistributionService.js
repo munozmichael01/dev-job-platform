@@ -417,7 +417,7 @@ class CampaignDistributionService {
       const whereClause = whereConditions.join(' AND ');
       
       const result = await request.query(`
-        SELECT TOP 1000
+        SELECT
           jo.Id,
           jo.Title,
           jo.CompanyName,

@@ -146,7 +146,7 @@ router.post('/', async (req, res) => {
       .input('ManualBid', sql.Decimal(12,2), manualBid)
       .input('Priority', sql.NVarChar(20), priority)
       .input('AutoOptimization', sql.Bit, !!autoOptimization)
-      .input('Status', sql.NVarChar(50), 'active')
+      .input('Status', sql.NVarChar(50), 'draft')
       .input('UserId', sql.BigInt, userId)
       .input('CreatedAt', sql.DateTime, now)
       .input('UpdatedAt', sql.DateTime, now)
@@ -887,6 +887,216 @@ router.post('/repopulate-channels', async (req, res) => {
       success: false,
       error: 'Error repoblando CampaignChannels',
       details: error.message
+    });
+  }
+});
+
+// POST /api/campaigns/:id/activate - Activar campaña (enviar a canales)
+router.post('/:id/activate', async (req, res) => {
+  try {
+    const campaignId = req.params.id;
+    const userId = req.userId;
+    
+    console.log(`🚀 Activando campaña ${campaignId} para usuario ${userId}...`);
+    
+    await poolConnect;
+    
+    // 1. Obtener datos de la campaña
+    const campaignResult = await pool.request()
+      .input('Id', sql.Int, campaignId)
+      .input('UserId', sql.BigInt, userId)
+      .query(`
+        SELECT c.*, s.Name as SegmentName
+        FROM Campaigns c
+        LEFT JOIN Segments s ON c.SegmentId = s.Id
+        WHERE c.Id = @Id ${!isSuperAdmin(req) ? 'AND c.UserId = @UserId' : ''}
+      `);
+    
+    if (campaignResult.recordset.length === 0) {
+      return res.status(404).json({ error: 'Campaña no encontrada' });
+    }
+    
+    const campaign = campaignResult.recordset[0];
+    
+    // Verificar que está en estado draft
+    if (campaign.Status !== 'draft') {
+      return res.status(400).json({ 
+        error: `Campaña ya está en estado '${campaign.Status}'. Solo se pueden activar campañas en estado 'draft'` 
+      });
+    }
+    
+    // 2. Obtener segmentos asociados a la campaña
+    const segmentsResult = await pool.request()
+      .input('CampaignId', sql.Int, campaignId)
+      .query(`
+        SELECT cs.SegmentId, s.Name as SegmentName
+        FROM CampaignSegments cs
+        INNER JOIN Segments s ON cs.SegmentId = s.Id
+        WHERE cs.CampaignId = @CampaignId
+        ORDER BY cs.CreatedAt
+      `);
+    
+    const segmentIds = segmentsResult.recordset.map(s => s.SegmentId);
+    
+    if (segmentIds.length === 0) {
+      return res.status(400).json({ error: 'Campaña no tiene segmentos asociados' });
+    }
+    
+    // 3. Obtener ofertas de todos los segmentos
+    const offers = await CampaignDistributionService.getOffersFromSegment(segmentIds);
+    
+    if (offers.length === 0) {
+      return res.status(400).json({ 
+        error: 'No se encontraron ofertas en los segmentos de la campaña',
+        segmentIds: segmentIds
+      });
+    }
+    
+    // 4. Obtener canales configurados del usuario
+    const channels = parseJSON(campaign.Channels);
+    const results = [];
+    let hasSuccess = false;
+    
+    // 5. Enviar a cada canal configurado
+    for (const channelId of channels) {
+      console.log(`📤 Enviando campaña ${campaignId} a canal ${channelId}...`);
+      
+      try {
+        let channelResult = null;
+        
+        if (channelId === 'jooble' || channelId.startsWith('jooble-')) {
+          // Obtener credenciales de Jooble del usuario
+          const credentialsResult = await pool.request()
+            .input('UserId', sql.BigInt, userId)
+            .input('ChannelId', sql.NVarChar(50), 'jooble')
+            .query('SELECT EncryptedCredentials FROM UserChannelCredentials WHERE UserId = @UserId AND ChannelId = @ChannelId AND IsActive = 1');
+          
+          if (credentialsResult.recordset.length === 0) {
+            throw new Error('Credenciales de Jooble no encontradas o no están activas');
+          }
+          
+          // Desencriptar credenciales
+          const CredentialsManager = require('../services/credentialsManager');
+          const credentialsManager = new CredentialsManager();
+          const credentials = credentialsManager.decryptCredentials(credentialsResult.recordset[0].EncryptedCredentials);
+          
+          // Usar JoobleService para crear campaña
+          const JoobleService = require('../services/channels/joobleService');
+          
+          // Preparar datos para Jooble
+          const campaignData = {
+            id: campaign.Id,
+            name: campaign.Name,
+            description: campaign.Description,
+            startDate: campaign.StartDate,
+            endDate: campaign.EndDate,
+            budget: campaign.Budget,
+            maxCPA: campaign.MaxCPA,
+            status: 'active'
+          };
+          
+          const budgetInfo = {
+            maxCPC: campaign.MaxCPA,
+            dailyBudget: campaign.Budget ? Math.round(campaign.Budget / 30) : null,
+            targetApplications: campaign.TargetApplications
+          };
+          
+          // Determinar qué API key usar según el país especificado
+          let targetApiKey;
+          if (channelId.startsWith('jooble-')) {
+            const countryCode = channelId.split('-')[1]; // jooble-es -> es
+            targetApiKey = credentials.joobleApiKeys?.find(key => key.countryCode === countryCode);
+            if (!targetApiKey) {
+              throw new Error(`No se encontró API key para Jooble ${countryCode.toUpperCase()}`);
+            }
+            console.log(`🌍 Enviando campaña a Jooble ${countryCode.toUpperCase()}`);
+          } else {
+            // Jooble genérico - usar primer API key disponible
+            targetApiKey = credentials.joobleApiKeys?.[0];
+            if (!targetApiKey) {
+              throw new Error('No se encontraron API keys de Jooble configuradas');
+            }
+            console.log(`🌍 Enviando campaña a Jooble (genérico) - ${targetApiKey.countryCode.toUpperCase()}`);
+          }
+          
+          // Crear instancia de JoobleService con las credenciales específicas del país
+          const joobleService = new JoobleService({
+            apiKey: targetApiKey.apiKey,
+            countryCode: targetApiKey.countryCode
+          });
+          
+          channelResult = await joobleService.createCampaign(campaignData, offers, budgetInfo);
+          
+        } else {
+          // Para otros canales, simular por ahora
+          console.log(`⚠️ Canal ${channelId} no implementado aún, simulando...`);
+          channelResult = {
+            success: true,
+            channel: channelId,
+            campaignId: `${channelId}_sim_${Date.now()}`,
+            message: `Simulación exitosa para ${channelId}`,
+            simulation: true
+          };
+        }
+        
+        results.push({
+          channel: channelId,
+          success: channelResult.success,
+          data: channelResult,
+          error: null
+        });
+        
+        if (channelResult.success) {
+          hasSuccess = true;
+          console.log(`✅ Campaña enviada exitosamente a ${channelId}`);
+        }
+        
+      } catch (channelError) {
+        console.error(`❌ Error enviando a ${channelId}: ${channelError.message}`);
+        results.push({
+          channel: channelId,
+          success: false,
+          data: null,
+          error: channelError.message
+        });
+      }
+    }
+    
+    // 6. Actualizar estado de la campaña
+    if (hasSuccess) {
+      await pool.request()
+        .input('Id', sql.Int, campaignId)
+        .query(`UPDATE Campaigns SET Status='active', UpdatedAt=GETDATE() WHERE Id=@Id`);
+      
+      console.log(`✅ Campaña ${campaignId} activada exitosamente`);
+      
+      res.json({
+        success: true,
+        message: `Campaña activada y enviada a ${results.filter(r => r.success).length}/${results.length} canales`,
+        campaignId: campaignId,
+        status: 'active',
+        channels: results,
+        offers: offers.length,
+        timestamp: new Date().toISOString()
+      });
+    } else {
+      // Todos los canales fallaron
+      const errors = results.map(r => r.error).filter(Boolean);
+      res.status(400).json({
+        success: false,
+        error: 'Error enviando campaña a todos los canales',
+        details: errors,
+        channels: results,
+        campaignId: campaignId,
+        status: 'draft' // Mantener en draft
+      });
+    }
+    
+  } catch (error) {
+    console.error(`❌ Error activando campaña: ${error.message}`);
+    res.status(500).json({ 
+      error: 'Error interno activando campaña',
+      details: error.message 
     });
   }
 });

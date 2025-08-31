@@ -1,5 +1,5 @@
 "use client"
-import type React from "react"
+import React from "react"
 import { useEffect, useState } from "react"
 import { useRouter } from "next/navigation"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
@@ -15,20 +15,21 @@ import { Checkbox } from "@/components/ui/checkbox"
 import Link from "next/link"
 import { useToast } from "@/hooks/use-toast"
 import { createCampaign, fetchSegments } from "@/lib/api-temp"
-import { useAuthFetch } from "@/hooks/useAuthFetch"
+import { useAuth } from "@/contexts/AuthContext"
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group"
 import { MultiSelect } from "@/components/ui/multi-select"
 import ChannelSelector from "@/components/campaigns/ChannelSelector"
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 
 export default function NuevaCampanaPage() {
   const { toast } = useToast()
   const router = useRouter()
-  const { authFetch } = useAuthFetch()
+  const { user, fetchWithAuth } = useAuth()
   const [formData, setFormData] = useState({
     name: "",
     description: "",
     segmentIds: [] as string[],
-    distributionType: "automatic",
+    distributionType: "automatic" as "automatic" | "manual",
     startDate: "",
     endDate: "",
     budget: "",
@@ -41,11 +42,16 @@ export default function NuevaCampanaPage() {
     autoOptimization: true,
   })
   const [availableSegments, setAvailableSegments] = useState<{ id: string; name: string; description: string; offerCount: number }[]>([])
+  const [configuredChannels, setConfiguredChannels] = useState<string[]>([])
+  const [showConfirmModal, setShowConfirmModal] = useState(false)
+  const [createdCampaignId, setCreatedCampaignId] = useState<string | null>(null)
+  const [isCreatingCampaign, setIsCreatingCampaign] = useState(false)
+  const [isActivatingCampaign, setIsActivatingCampaign] = useState(false)
 
   useEffect(() => {
-    ;(async () => {
+    const loadData = async () => {
       try {
-        const data = await fetchSegments(authFetch)
+        const data = await fetchSegments(fetchWithAuth)
         setAvailableSegments(
           data.map((s: any) => ({
             id: String(s.Id),
@@ -54,16 +60,55 @@ export default function NuevaCampanaPage() {
             offerCount: s.OfferCount || 0,
           })),
         )
-      } catch {}
-    })()
-  }, [authFetch])
+      } catch (error) {
+        console.error("Error loading segments:", error)
+      }
+      
+      // Cargar canales configurados
+      await loadConfiguredChannels()
+    }
+    
+    if (user?.id && fetchWithAuth) {
+      loadData()
+    }
+  }, [user?.id, fetchWithAuth, loadConfiguredChannels])
 
-  const selectedSegments = availableSegments.filter((s) => formData.segmentIds.includes(s.id))
-  const totalOffers = selectedSegments.reduce((sum, segment) => sum + segment.offerCount, 0)
-  const toggleChannel = (channelId: string) =>
-    setFormData((prev) => ({ ...prev, channels: prev.channels.includes(channelId) ? prev.channels.filter((c) => c !== channelId) : [...prev.channels, channelId] }))
-  const calculateEstimatedBudget = () => (formData.targetApplications && formData.maxCPA ? Number(formData.targetApplications) * Number(formData.maxCPA) : 0)
-  const validateForm = () => {
+  const loadConfiguredChannels = React.useCallback(async () => {
+    if (!user?.id || !fetchWithAuth) return
+    try {
+      const response = await fetchWithAuth(`http://localhost:3002/api/users/${user.id}/credentials`)
+      const data = await response.json()
+      const configured = data.channels?.filter((c: any) => c.isActive && c.isValidated).map((c: any) => c.channelId) || []
+      setConfiguredChannels(configured)
+    } catch {
+      setConfiguredChannels([])
+    }
+  }, [user?.id, fetchWithAuth])
+
+  const selectedSegments = React.useMemo(
+    () => availableSegments.filter((s) => formData.segmentIds.includes(s.id)),
+    [availableSegments, formData.segmentIds]
+  )
+  
+  const totalOffers = React.useMemo(
+    () => selectedSegments.reduce((sum, segment) => sum + segment.offerCount, 0),
+    [selectedSegments]
+  )
+  
+  const toggleChannel = React.useCallback((channelId: string) => {
+    setFormData((prev) => ({ 
+      ...prev, 
+      channels: prev.channels.includes(channelId) 
+        ? prev.channels.filter((c) => c !== channelId) 
+        : [...prev.channels, channelId] 
+    }))
+  }, [])
+  
+  const calculateEstimatedBudget = React.useCallback(() => {
+    return (formData.targetApplications && formData.maxCPA ? Number(formData.targetApplications) * Number(formData.maxCPA) : 0)
+  }, [formData.targetApplications, formData.maxCPA])
+  
+  const validateForm = React.useCallback(() => {
     const errors = []
     if (!formData.name.trim()) errors.push("El nombre es obligatorio")
     if (formData.segmentIds.length === 0) errors.push("Debe seleccionar al menos un segmento")
@@ -72,9 +117,16 @@ export default function NuevaCampanaPage() {
     if (!formData.budget) errors.push("El presupuesto es obligatorio")
     if (!formData.targetApplications) errors.push("El objetivo de aplicaciones es obligatorio")
     if (!formData.maxCPA) errors.push("El CPA máximo es obligatorio")
-    if (formData.distributionType === "manual" && formData.channels.length === 0) errors.push("Debe seleccionar al menos un canal para distribución manual")
+    
+    // Validar canales configurados para cualquier tipo de distribución
+    if (configuredChannels.length === 0) {
+      errors.push("Debe configurar al menos un canal antes de crear una campaña")
+    } else if (formData.distributionType === "manual" && formData.channels.length === 0) {
+      errors.push("Debe seleccionar al menos un canal para distribución manual")
+    }
+    
     return errors
-  }
+  }, [formData, configuredChannels])
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
@@ -84,16 +136,21 @@ export default function NuevaCampanaPage() {
       return
     }
 
-    // Para distribución automática, usar todos los canales integrados por defecto
+    // Mostrar modal de confirmación
+    setShowConfirmModal(true)
+  }
+
+  const handleCreateDraft = async () => {
+    setIsCreatingCampaign(true)
     const channelsToUse = formData.distributionType === "manual" 
       ? formData.channels 
-      : ["jooble", "talent", "jobrapido", "whatjobs"] // Todos los canales integrados
+      : configuredChannels
 
     try {
-      await createCampaign(authFetch, {
+      const response = await createCampaign(fetchWithAuth, {
         name: formData.name,
         description: formData.description,
-        segmentIds: formData.segmentIds.map(id => Number(id)), // Enviar todos los segmentos
+        segmentIds: formData.segmentIds.map(id => Number(id)),
         distributionType: formData.distributionType,
         startDate: formData.startDate || null,
         endDate: formData.endDate || null,
@@ -106,10 +163,69 @@ export default function NuevaCampanaPage() {
         priority: formData.priority,
         autoOptimization: formData.autoOptimization,
       })
-      toast({ title: "Campaña creada exitosamente", description: `La campaña "${formData.name}" ha sido creada` })
+      
+      toast({ title: "Campaña guardada como borrador", description: `La campaña "${formData.name}" ha sido guardada` })
+      setShowConfirmModal(false)
       router.push("/campanas")
     } catch (error: any) {
       toast({ title: "Error", description: error.message, variant: "destructive" })
+    } finally {
+      setIsCreatingCampaign(false)
+    }
+  }
+
+  const handleCreateAndSend = async () => {
+    setIsCreatingCampaign(true)
+    const channelsToUse = formData.distributionType === "manual" 
+      ? formData.channels 
+      : configuredChannels
+
+    try {
+      // 1. Crear campaña como borrador
+      const response = await createCampaign(fetchWithAuth, {
+        name: formData.name,
+        description: formData.description,
+        segmentIds: formData.segmentIds.map(id => Number(id)),
+        distributionType: formData.distributionType,
+        startDate: formData.startDate || null,
+        endDate: formData.endDate || null,
+        budget: formData.budget ? Number(formData.budget) : null,
+        targetApplications: formData.targetApplications ? Number(formData.targetApplications) : null,
+        maxCPA: formData.maxCPA ? Number(formData.maxCPA) : null,
+        channels: channelsToUse,
+        bidStrategy: formData.bidStrategy,
+        manualBid: formData.manualBid ? Number(formData.manualBid) : null,
+        priority: formData.priority,
+        autoOptimization: formData.autoOptimization,
+      })
+      
+      setCreatedCampaignId(response.campaign.Id)
+      setIsCreatingCampaign(false)
+      setIsActivatingCampaign(true)
+      
+      // 2. Activar y enviar a canales
+      const activateResponse = await fetchWithAuth(`http://localhost:3002/api/campaigns/${response.campaign.Id}/activate`, {
+        method: 'POST',
+      })
+      
+      if (!activateResponse.ok) {
+        const errorData = await activateResponse.json()
+        throw new Error(errorData.error || 'Error activando campaña')
+      }
+      
+      const activateData = await activateResponse.json()
+      
+      toast({ 
+        title: "Campaña creada y enviada exitosamente", 
+        description: `La campaña "${formData.name}" ha sido enviada a los canales seleccionados` 
+      })
+      setShowConfirmModal(false)
+      router.push("/campanas")
+    } catch (error: any) {
+      toast({ title: "Error", description: error.message, variant: "destructive" })
+    } finally {
+      setIsCreatingCampaign(false)
+      setIsActivatingCampaign(false)
     }
   }
 
@@ -217,7 +333,12 @@ export default function NuevaCampanaPage() {
                 <CardDescription>Elige cómo se distribuirán las ofertas</CardDescription>
               </CardHeader>
               <CardContent className="space-y-4">
-                <RadioGroup value={formData.distributionType} onValueChange={(value) => setFormData((prev) => ({ ...prev, distributionType: value }))}>
+                <RadioGroup 
+                  value={formData.distributionType} 
+                  onValueChange={(value: "automatic" | "manual") => {
+                    setFormData((prev) => ({ ...prev, distributionType: value }))
+                  }}
+                >
                   <div className="flex items-center space-x-2 p-4 border rounded-lg">
                     <RadioGroupItem value="automatic" id="automatic" />
                     <div className="flex-1">
@@ -417,6 +538,94 @@ export default function NuevaCampanaPage() {
           </div>
         </div>
       </form>
+
+      {/* Modal de confirmación */}
+      <Dialog open={showConfirmModal} onOpenChange={setShowConfirmModal}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <AlertTriangle className="h-5 w-5 text-orange-500" />
+              Confirmar creación de campaña
+            </DialogTitle>
+            <DialogDescription>
+              ¿Qué deseas hacer con la campaña "{formData.name}"?
+            </DialogDescription>
+          </DialogHeader>
+          
+          <div className="py-4 space-y-4">
+            <div className="p-4 border rounded-lg bg-muted/50">
+              <h4 className="font-medium mb-2">Resumen de la campaña:</h4>
+              <div className="text-sm space-y-1">
+                <div><strong>Segmentos:</strong> {selectedSegments.map(s => s.name).join(", ")}</div>
+                <div><strong>Presupuesto:</strong> €{formData.budget}</div>
+                <div><strong>Objetivo:</strong> {formData.targetApplications} aplicaciones</div>
+                {(formData.distributionType === "manual" ? formData.channels : configuredChannels).length > 0 && (
+                  <div><strong>Canales:</strong> {
+                    (formData.distributionType === "manual" ? formData.channels : configuredChannels)
+                      .map(channelId => {
+                        if (channelId === 'jooble-es') return 'Jooble ES';
+                        if (channelId === 'jooble-pt') return 'Jooble PT';
+                        if (channelId === 'talent') return 'Talent.com';
+                        if (channelId === 'jobrapido') return 'JobRapido';
+                        if (channelId === 'whatjobs') return 'WhatJobs';
+                        return channelId;
+                      }).join(", ")
+                  }</div>
+                )}
+              </div>
+            </div>
+            
+            <div className="text-sm text-muted-foreground">
+              <strong>Opciones disponibles:</strong>
+              <ul className="mt-2 space-y-1">
+                <li>• <strong>Guardar como borrador:</strong> La campaña se creará pero no se enviará a los canales</li>
+                <li>• <strong>Crear y enviar:</strong> La campaña se creará y se enviará inmediatamente a los canales seleccionados</li>
+              </ul>
+            </div>
+          </div>
+
+          <DialogFooter className="gap-2">
+            <Button
+              variant="outline"
+              onClick={handleCreateDraft}
+              disabled={isCreatingCampaign || isActivatingCampaign}
+            >
+              {isCreatingCampaign ? (
+                <>
+                  <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-current mr-2"></div>
+                  Guardando...
+                </>
+              ) : (
+                <>
+                  <Save className="h-4 w-4 mr-2" />
+                  Guardar como borrador
+                </>
+              )}
+            </Button>
+            <Button
+              onClick={handleCreateAndSend}
+              disabled={isCreatingCampaign || isActivatingCampaign}
+            >
+              {isActivatingCampaign ? (
+                <>
+                  <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-current mr-2"></div>
+                  Enviando...
+                </>
+              ) : isCreatingCampaign ? (
+                <>
+                  <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-current mr-2"></div>
+                  Creando...
+                </>
+              ) : (
+                <>
+                  <Zap className="h-4 w-4 mr-2" />
+                  Crear y enviar →
+                </>
+              )}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   )
 }
