@@ -70,13 +70,30 @@ export default function ChannelSelector({
   const [userCredentials, setUserCredentials] = useState<UserChannelCredentials[]>([]);
   const [loading, setLoading] = useState(true);
 
-  useEffect(() => {
-    if (user?.id) {
-      loadChannelsData();
-    }
-  }, [user?.id]);
+  // Funciones auxiliares para mapear datos de la API
+  const getChannelAvgCPA = useCallback((channelId: string): number => {
+    const cpaMappings: Record<string, number> = {
+      'jooble': 15,
+      'jooble-es': 15,
+      'jooble-pt': 15,
+      'talent': 18,
+      'jobrapido': 12,
+      'whatjobs': 14,
+      'infojobs': 20,
+      'linkedin': 25,
+      'indeed': 22
+    };
+    return cpaMappings[channelId] || 20;
+  }, []);
 
-  const loadChannelsData = async () => {
+  const getCostModel = useCallback((type: string): string => {
+    if (type.toLowerCase().includes('cpc')) return 'CPC';
+    if (type.toLowerCase().includes('cpa')) return 'CPA';
+    if (type.toLowerCase().includes('organic')) return 'Organic';
+    return type;
+  }, []);
+
+  const loadChannelsData = useCallback(async () => {
     if (!user?.id) return;
     
     try {
@@ -219,23 +236,13 @@ export default function ChannelSelector({
     } finally {
       setLoading(false);
     }
-  };
+  }, [user?.id, getChannelAvgCPA, getCostModel]);
 
-  // Funciones auxiliares para mapear datos de la API
-  const getChannelAvgCPA = (channelId: string): number => {
-    const cpaMappings: Record<string, number> = {
-      'jooble': 15,
-      'jooble-es': 15,
-      'jooble-pt': 15,
-      'talent': 18,
-      'jobrapido': 12,
-      'whatjobs': 14,
-      'infojobs': 20,
-      'linkedin': 25,
-      'indeed': 22
-    };
-    return cpaMappings[channelId] || 20;
-  };
+  useEffect(() => {
+    if (user?.id) {
+      loadChannelsData();
+    }
+  }, [user?.id, loadChannelsData]);
 
   const getCountryName = (countryCode: string): string => {
     const countryNames: Record<string, string> = {
@@ -248,13 +255,6 @@ export default function ChannelSelector({
       'US': 'Estados Unidos'
     };
     return countryNames[countryCode] || countryCode;
-  };
-
-  const getCostModel = (type: string): string => {
-    if (type.toLowerCase().includes('cpc')) return 'CPC';
-    if (type.toLowerCase().includes('cpa')) return 'CPA';
-    if (type.toLowerCase().includes('organic')) return 'Organic';
-    return type;
   };
 
   const getChannelStatus = (channelId: string) => {

@@ -105,6 +105,9 @@ class JoobleService {
         return this.simulateCreateCampaign(payloadToJooble, internalData, exampleUrl);
       }
       
+      // DEBUG: Log payload exacto antes de enviar
+      console.log(`🐛 DEBUG - Payload completo a Jooble:`, JSON.stringify(payloadToJooble, null, 2));
+      
       // Enviar SOLO el payload mínimo a Jooble
       const response = await this.httpClient.post(`/createCampaign/${this.config.apiKey}`, payloadToJooble);
       
@@ -174,17 +177,17 @@ class JoobleService {
     const segmentationRules = this.buildSegmentationRulesForJooble(offers);
     
     return {
-      // Campos requeridos por Jooble API
+      // Campos requeridos por Jooble API según documentación oficial
       CampaignName: campaignData.name || 'Campaña Job Platform',
-      Status: this.mapInternalStatusToJooble(campaignData.status),
-      ClickPrice: budgetInfo.maxCPC || campaignData.maxCPA || 25,
-      Budget: budget,
-      MonthlyBudget: campaignData.monthlyBudget || false,
+      Status: String(this.mapInternalStatusToJooble(campaignData.status)),
+      ClickPrice: String(budgetInfo.maxCPC || campaignData.maxCPA || 25),
+      Budget: String(budget),
+      MonthlyBudget: String(campaignData.monthlyBudget || false),
       Utm: utmString,
       SiteUrl: siteUrl,
       
-      // SegmentationRules derivadas automáticamente de ofertas pre-filtradas
-      segmentationRules: segmentationRules
+      // Rules (no segmentationRules) según documentación
+      Rules: segmentationRules
     };
   }
 
@@ -377,9 +380,8 @@ class JoobleService {
       const titlesToSend = uniqueTitles.slice(0, 5); // Límite de Jooble
       titlesToSend.forEach(title => {
         rules.push({
-          type: 1,
-          value: title,
-          operator: 'contains'
+          type: "1",
+          value: title
         });
       });
       console.log(`📋 Agregados ${titlesToSend.length}/5 títulos: ${titlesToSend.join(', ')}`);
@@ -394,9 +396,8 @@ class JoobleService {
       const companiesToSend = uniqueCompanies.slice(0, 3); // Límite de Jooble
       companiesToSend.forEach(company => {
         rules.push({
-          type: 2,
-          value: company,
-          operator: 'equals'
+          type: "2",
+          value: company
         });
       });
       console.log(`🏢 Agregadas ${companiesToSend.length}/3 empresas: ${companiesToSend.join(', ')}`);

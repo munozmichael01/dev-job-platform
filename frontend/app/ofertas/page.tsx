@@ -850,7 +850,7 @@ export default function OfertasPage() {
                   <Button
                     variant="outline"
                     size="sm"
-                    onClick={() => loadPrevious()}
+                    onClick={() => loadPrevious(currentFilters)}
                     disabled={isLoadingMore || !canGoPrevious}
                   >
                     ← Anterior
@@ -863,7 +863,7 @@ export default function OfertasPage() {
                   <Button
                     variant="outline"
                     size="sm"
-                    onClick={() => loadMore()}
+                    onClick={() => loadMore(currentFilters)}
                     disabled={isLoadingMore || !hasMore}
                   >
                     {isLoadingMore ? (

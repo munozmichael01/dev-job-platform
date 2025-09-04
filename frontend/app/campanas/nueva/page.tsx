@@ -10,12 +10,12 @@ import { Textarea } from "@/components/ui/textarea"
 import { Badge } from "@/components/ui/badge"
 import { SidebarTrigger } from "@/components/ui/sidebar"
 import { Save, ArrowLeft, Megaphone, Users, Target, DollarSign, Settings, Zap, Hand, CheckCircle, AlertTriangle } from "lucide-react"
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Checkbox } from "@/components/ui/checkbox"
 import Link from "next/link"
 import { useToast } from "@/hooks/use-toast"
 import { createCampaign, fetchSegments } from "@/lib/api-temp"
 import { useAuth } from "@/contexts/AuthContext"
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group"
 import { MultiSelect } from "@/components/ui/multi-select"
 import ChannelSelector from "@/components/campaigns/ChannelSelector"
@@ -48,8 +48,11 @@ export default function NuevaCampanaPage() {
   const [isCreatingCampaign, setIsCreatingCampaign] = useState(false)
   const [isActivatingCampaign, setIsActivatingCampaign] = useState(false)
 
+
   useEffect(() => {
-    const loadData = async () => {
+    if (!user?.id) return
+    
+    const loadSegments = async () => {
       try {
         const data = await fetchSegments(fetchWithAuth)
         setAvailableSegments(
@@ -63,27 +66,27 @@ export default function NuevaCampanaPage() {
       } catch (error) {
         console.error("Error loading segments:", error)
       }
-      
-      // Cargar canales configurados
-      await loadConfiguredChannels()
     }
     
-    if (user?.id && fetchWithAuth) {
-      loadData()
-    }
-  }, [user?.id, fetchWithAuth, loadConfiguredChannels])
+    loadSegments()
+  }, [user?.id])
 
-  const loadConfiguredChannels = React.useCallback(async () => {
-    if (!user?.id || !fetchWithAuth) return
-    try {
-      const response = await fetchWithAuth(`http://localhost:3002/api/users/${user.id}/credentials`)
-      const data = await response.json()
-      const configured = data.channels?.filter((c: any) => c.isActive && c.isValidated).map((c: any) => c.channelId) || []
-      setConfiguredChannels(configured)
-    } catch {
-      setConfiguredChannels([])
+  useEffect(() => {
+    if (!user?.id) return
+    
+    const loadChannels = async () => {
+      try {
+        const response = await fetchWithAuth(`http://localhost:3002/api/users/${user.id}/credentials`)
+        const data = await response.json()
+        const configured = data.channels?.filter((c: any) => c.isActive && c.isValidated).map((c: any) => c.channelId) || []
+        setConfiguredChannels(configured)
+      } catch {
+        setConfiguredChannels([])
+      }
     }
-  }, [user?.id, fetchWithAuth])
+    
+    loadChannels()
+  }, [user?.id])
 
   const selectedSegments = React.useMemo(
     () => availableSegments.filter((s) => formData.segmentIds.includes(s.id)),
@@ -142,9 +145,12 @@ export default function NuevaCampanaPage() {
 
   const handleCreateDraft = async () => {
     setIsCreatingCampaign(true)
+    
     const channelsToUse = formData.distributionType === "manual" 
       ? formData.channels 
-      : configuredChannels
+      : formData.channels.length > 0 
+        ? formData.channels  // Si hay canales seleccionados específicamente, usar esos
+        : configuredChannels // Solo si no hay selección específica, usar todos
 
     try {
       const response = await createCampaign(fetchWithAuth, {
@@ -176,9 +182,20 @@ export default function NuevaCampanaPage() {
 
   const handleCreateAndSend = async () => {
     setIsCreatingCampaign(true)
+    
+    // Debug: verificar canales seleccionados
+    console.log("🔍 Debug canales:")
+    console.log("- Distribution Type:", formData.distributionType)
+    console.log("- Canales seleccionados (formData.channels):", formData.channels)
+    console.log("- Canales configurados:", configuredChannels)
+    
     const channelsToUse = formData.distributionType === "manual" 
       ? formData.channels 
-      : configuredChannels
+      : formData.channels.length > 0 
+        ? formData.channels  // Si hay canales seleccionados específicamente, usar esos
+        : configuredChannels // Solo si no hay selección específica, usar todos
+    
+    console.log("- Canales que se van a usar:", channelsToUse)
 
     try {
       // 1. Crear campaña como borrador
@@ -199,18 +216,34 @@ export default function NuevaCampanaPage() {
         autoOptimization: formData.autoOptimization,
       })
       
-      setCreatedCampaignId(response.campaign.Id)
+      // Verificar la estructura de la respuesta
+      console.log("Response de createCampaign:", response)
+      
+      const campaignId = response.campaign?.Id || response.campaign?.id || response.Id || response.id
+      if (!campaignId) {
+        throw new Error("No se pudo obtener el ID de la campaña creada")
+      }
+      
+      setCreatedCampaignId(campaignId)
       setIsCreatingCampaign(false)
       setIsActivatingCampaign(true)
       
       // 2. Activar y enviar a canales
-      const activateResponse = await fetchWithAuth(`http://localhost:3002/api/campaigns/${response.campaign.Id}/activate`, {
+      const activateResponse = await fetchWithAuth(`http://localhost:3002/api/campaigns/${campaignId}/activate`, {
         method: 'POST',
       })
       
       if (!activateResponse.ok) {
-        const errorData = await activateResponse.json()
-        throw new Error(errorData.error || 'Error activando campaña')
+        const errorText = await activateResponse.text()
+        console.error("❌ Error detallado de activación:", errorText)
+        let errorMessage = 'Error activando campaña'
+        try {
+          const errorData = JSON.parse(errorText)
+          errorMessage = errorData.error || errorData.message || errorText
+        } catch (e) {
+          errorMessage = errorText || 'Error activando campaña'
+        }
+        throw new Error(errorMessage)
       }
       
       const activateData = await activateResponse.json()
@@ -222,6 +255,7 @@ export default function NuevaCampanaPage() {
       setShowConfirmModal(false)
       router.push("/campanas")
     } catch (error: any) {
+      console.error("❌ Error completo en creación/activación:", error)
       toast({ title: "Error", description: error.message, variant: "destructive" })
     } finally {
       setIsCreatingCampaign(false)
@@ -335,8 +369,11 @@ export default function NuevaCampanaPage() {
               <CardContent className="space-y-4">
                 <RadioGroup 
                   value={formData.distributionType} 
-                  onValueChange={(value: "automatic" | "manual") => {
-                    setFormData((prev) => ({ ...prev, distributionType: value }))
+                  onValueChange={(value) => {
+                    setFormData(prev => ({ 
+                      ...prev, 
+                      distributionType: value as "automatic" | "manual" 
+                    }))
                   }}
                 >
                   <div className="flex items-center space-x-2 p-4 border rounded-lg">
@@ -363,12 +400,46 @@ export default function NuevaCampanaPage() {
                   <Label className="text-sm font-medium mb-3 block">
                     {formData.distributionType === "automatic" ? "Canales Disponibles" : "Selecciona Canales de Distribución"}
                   </Label>
-                  <ChannelSelector
+                  {/* Selector temporal simple */}
+                  <div className="p-4 border rounded-lg space-y-3">
+                    <p className="text-sm font-medium">Selecciona canales para la campaña:</p>
+                    {configuredChannels.map(channelId => (
+                      <div key={channelId} className="flex items-center space-x-2">
+                        <input 
+                          type="checkbox"
+                          id={`channel-${channelId}`}
+                          checked={formData.channels.includes(channelId)}
+                          onChange={(e) => {
+                            if (e.target.checked) {
+                              setFormData(prev => ({
+                                ...prev,
+                                channels: [...prev.channels, channelId]
+                              }))
+                            } else {
+                              setFormData(prev => ({
+                                ...prev,
+                                channels: prev.channels.filter(c => c !== channelId)
+                              }))
+                            }
+                          }}
+                        />
+                        <label htmlFor={`channel-${channelId}`} className="text-sm cursor-pointer">
+                          {channelId}
+                        </label>
+                      </div>
+                    ))}
+                    {formData.channels.length > 0 && (
+                      <p className="text-xs text-green-600 mt-2">
+                        ✓ {formData.channels.length} canal(es) seleccionado(s): {formData.channels.join(', ')}
+                      </p>
+                    )}
+                  </div>
+                  {/* <ChannelSelector
                     selectedChannels={formData.channels}
                     onChannelToggle={(channelId) => toggleChannel(channelId)}
                     distributionType={formData.distributionType as 'automatic' | 'manual'}
                     campaignBudget={formData.budget ? Number(formData.budget) : undefined}
-                  />
+                  /> */}
                 </div>
               </CardContent>
             </Card>

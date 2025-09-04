@@ -360,3 +360,4 @@ export function measurePerformance<T>(
 
 // Add missing import for useEffect
 import { useEffect } from 'react'
+

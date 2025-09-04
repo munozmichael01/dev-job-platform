@@ -801,31 +801,34 @@ class XMLProcessor {
       const mappings = []
       const offerFields = Object.keys(sampleOffer)
 
-      // ✅ MAPEO ESTÁNDAR CORREGIDO con PRIORIDADES INTELIGENTES
+      // ✅ MAPEO ESTÁNDAR CORREGIDO con PRIORIDADES INTELIGENTES  
       const standardMappings = {
-        'id': 'url',                 // ID -> URL externa
-        'title': 'title',            // Título
-        'jobtitle': 'title',         
-        'content': 'description',    // Descripción con limpieza HTML
-        'description': 'description',
-        'company': 'company',        // Empresa
-        'category': 'sector',        // Sector
-        'url': 'url',                // URL externa
-        'url_apply': 'apply_url',    // URL de aplicación
-        'application_url': 'apply_url',
-        'apply_url': 'apply_url',
-        'publication': 'published_at', // Fecha de publicación
-        'publication_date': 'published_at',
-        'date': 'published_at',
-        'salary': 'salary_min',      // Salario
-        'salary_min': 'salary_min',
-        'salary_max': 'salary_max',
-        'jobtype': 'contract_type',  // Tipo de contrato/modalidad
-        'job_type': 'contract_type',
-        'tipo': 'contract_type',
-        'modalidad': 'contract_type',
-        'vacancies': 'contract_type', // temporal
-        'num_vacancies': 'contract_type'
+        'id': 'external_id',         // ✅ CORREGIDO: id → external_id
+        'title': 'title',            // ✅ CORRECTO: title → title
+        'jobtitle': 'title',         // ✅ CORRECTO: jobtitle → title
+        'content': 'description',    // ✅ CORRECTO: content → description
+        'description': 'description', // ✅ CORRECTO: description → description
+        'company': 'company_name',   // ✅ CORREGIDO: company → company_name
+        'category': 'sector',        // ✅ CORRECTO: category → sector
+        'url': 'external_url',       // ✅ CORREGIDO: url → external_url
+        'url_apply': 'application_url', // ✅ CORREGIDO: url_apply → application_url
+        'application_url': 'application_url', // ✅ CORRECTO: application_url → application_url
+        'apply_url': 'application_url', // ✅ CORRECTO: apply_url → application_url
+        'publication': 'publication_date', // ✅ CORREGIDO: publication → publication_date
+        'publication_date': 'publication_date', // ✅ CORRECTO: publication_date → publication_date
+        'date': 'publication_date',  // ✅ CORRECTO: date → publication_date
+        'salary': 'salary_min',      // ✅ CORRECTO: salary → salary_min
+        'salary_min': 'salary_min',  // ✅ CORRECTO: salary_min → salary_min
+        'salary_max': 'salary_max',  // ✅ CORRECTO: salary_max → salary_max
+        'jobtype': 'job_type',       // ✅ CORREGIDO: jobtype → job_type
+        'job_type': 'job_type',      // ✅ CORRECTO: job_type → job_type
+        'tipo': 'job_type',          // ✅ CORRECTO: tipo → job_type
+        'modalidad': 'job_type',     // ✅ CORRECTO: modalidad → job_type
+        'vacancies': 'vacancies',    // ✅ CORREGIDO: vacancies → vacancies
+        'num_vacancies': 'vacancies', // ✅ CORREGIDO: num_vacancies → vacancies
+        'city': 'city',              // ✅ AGREGADO: city → city
+        'region': 'region',          // ✅ AGREGADO: region → region  
+        'country': 'country'         // ✅ AGREGADO: country → country
       }
 
       // ✅ SISTEMA DE PRIORIDADES PARA UBICACIÓN: city > region > country > location > address > postcode
@@ -850,12 +853,12 @@ class XMLProcessor {
             ConnectionId: this.safeNumber(this.connection.id || this.connection.Id, 1),
             ClientId: this.safeNumber(this.connection.clientId || this.connection.UserId || this.connection.userId, 1),
             SourceField: foundField,
-            TargetField: 'location',
+            TargetField: foundField, // ✅ CORREGIDO: mapear a su propio campo
             TransformationType: this.detectMappingType(foundField, sampleOffer[foundField]),
             TransformationRule: null
           })
           locationMappingCreated = true
-          console.log(`🎯 PRIORITY MAPPING: ${foundField} → location (priority: ${locationPriorities.indexOf(priorityField) + 1})`)
+          console.log(`🎯 PRIORITY MAPPING: ${foundField} → ${foundField} (priority: ${locationPriorities.indexOf(priorityField) + 1})`)
           break
         }
       }

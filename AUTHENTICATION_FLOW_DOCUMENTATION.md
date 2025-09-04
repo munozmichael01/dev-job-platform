@@ -352,3 +352,4 @@ DB_PASSWORD=JobPlatform2025!
 
 *Última actualización: Enero 2025*
 *Versión: 1.0*
+

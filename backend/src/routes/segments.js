@@ -344,8 +344,18 @@ router.post('/:id/recalculate', addUserToRequest, requireAuth, async (req, res) 
     const whereClause = where.length ? `WHERE ${where.join(' AND ')}` : '';
     const reqSql = pool.request();
     inputs.forEach(p => reqSql.input(p.name, p.type, p.value));
-    const countResult = await reqSql.query(`SELECT COUNT(*) AS total FROM JobOffers WITH (READPAST) ${whereClause}`);
+    
+    // 🔍 DEBUG: Log de la query completa
+    const debugQuery = `SELECT COUNT(*) AS total FROM JobOffers WITH (READPAST) ${whereClause}`;
+    console.log(`🔍 SEGMENT RECALC DEBUG - Query:`, debugQuery);
+    console.log(`🔍 SEGMENT RECALC DEBUG - Filters:`, JSON.stringify(filters));
+    console.log(`🔍 SEGMENT RECALC DEBUG - Where conditions:`, where);
+    console.log(`🔍 SEGMENT RECALC DEBUG - Inputs:`, inputs.map(i => `${i.name}=${i.value}`).join(', '));
+    
+    const countResult = await reqSql.query(debugQuery);
     const newOfferCount = countResult.recordset[0].total || 0;
+    
+    console.log(`🔍 SEGMENT RECALC DEBUG - Result: ${newOfferCount} ofertas encontradas`);
     
     // Actualizar el segmento con el nuevo contador
     const updateResult = await pool.request()

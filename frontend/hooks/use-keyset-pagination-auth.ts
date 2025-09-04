@@ -251,6 +251,7 @@ export function useKeysetPaginationAuth(options: KeysetPaginationOptions) {
     }));
 
     try {
+      // 🔧 FIX: Usar filtros actuales en lugar de solo paramsRef.current
       const params = { ...paramsRef.current, ...additionalParams, limit };
       const url = buildKeysetUrl(baseUrl, params, finalCursor);
       
@@ -309,7 +310,7 @@ export function useKeysetPaginationAuth(options: KeysetPaginationOptions) {
   /**
    * Cargar página anterior - AUTENTICADO
    */
-  const loadPrevious = useCallback(async () => {
+  const loadPrevious = useCallback(async (additionalParams: Record<string, any> = {}) => {
     if (loadingRef.current || currentPageRef.current <= 1) {
       return;
     }
@@ -326,7 +327,8 @@ export function useKeysetPaginationAuth(options: KeysetPaginationOptions) {
     }));
 
     try {
-      const params = { ...paramsRef.current, limit };
+      // 🔧 FIX: Usar filtros actuales también en loadPrevious
+      const params = { ...paramsRef.current, ...additionalParams, limit };
       const url = buildKeysetUrl(baseUrl, params, previousCursor);
       
       const response = await fetchWithRetry(url, 2);

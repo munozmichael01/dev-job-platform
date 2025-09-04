@@ -10,7 +10,6 @@ import { Textarea } from "@/components/ui/textarea"
 import { Badge } from "@/components/ui/badge"
 import { SidebarTrigger } from "@/components/ui/sidebar"
 import { Plus, X, Save, ArrowLeft, Briefcase, MapPin, Building2, Star, Loader2 } from "lucide-react"
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Checkbox } from "@/components/ui/checkbox"
 import { MultiSelect, type MultiSelectOption } from "@/components/ui/multi-select"
 import Link from "next/link"
@@ -42,7 +41,6 @@ export default function NuevoSegmentoPage() {
 
   // Auxiliares
   const [newJobTitle, setNewJobTitle] = useState("")
-  const [newLocation, setNewLocation] = useState("")
 
   // Estimación
   const [estimatedOffers, setEstimatedOffers] = useState<number>(0)
@@ -73,21 +71,11 @@ export default function NuevoSegmentoPage() {
     }
   }
   const removeJobTitle = (t: string) => setFormData((p) => ({ ...p, jobTitles: p.jobTitles.filter((x) => x !== t) }))
-  const addLocation = () => {
-    if (newLocation && !formData.locations.includes(newLocation)) {
-      setFormData((p) => ({ ...p, locations: [...p.locations, newLocation] }))
-      setNewLocation("")
-    }
-  }
-  const removeLocation = (loc: string) => setFormData((p) => ({ ...p, locations: p.locations.filter((x) => x !== loc) }))
-  const toggleSector = (s: string) =>
-    setFormData((p) => ({ ...p, sectors: p.sectors.includes(s) ? p.sectors.filter((x) => x !== s) : [...p.sectors, s] }))
-  const toggleCompany = (c: string) =>
-    setFormData((p) => ({ ...p, companies: p.companies.includes(c) ? p.companies.filter((x) => x !== c) : [...p.companies, c] }))
 
   // Convert arrays to MultiSelect options
   const sectorsOptions: MultiSelectOption[] = sectorsList.map(sector => ({ label: sector, value: sector }))
   const companiesOptions: MultiSelectOption[] = companiesList.map(company => ({ label: company, value: company }))
+  const locationsOptions: MultiSelectOption[] = locationsList.map(location => ({ label: location, value: location }))
   const toggleExperience = (e: string) =>
     setFormData((p) => ({
       ...p,
@@ -215,32 +203,26 @@ export default function NuevoSegmentoPage() {
               </CardContent>
             </Card>
 
-            {/* Ubicaciones (lista real) */}
+            {/* Ubicaciones (lista real con búsqueda) */}
             <Card>
               <CardHeader>
                 <CardTitle className="flex items-center gap-2"><MapPin className="h-5 w-5" />Ubicaciones</CardTitle>
-                <CardDescription>Selecciona las ubicaciones donde buscar ofertas</CardDescription>
+                <CardDescription>Busca y selecciona múltiples ubicaciones donde buscar ofertas</CardDescription>
               </CardHeader>
               <CardContent className="space-y-4">
-                <div className="flex gap-2">
-                  <Select value={newLocation} onValueChange={setNewLocation} disabled={loadingLists}>
-                    <SelectTrigger><SelectValue placeholder="Selecciona una ubicación" /></SelectTrigger>
-                    <SelectContent>
-                      {locationsList.filter((loc) => !formData.locations.includes(loc)).map((location) => (
-                        <SelectItem key={location} value={location}>{location}</SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                  <Button type="button" onClick={addLocation} disabled={!newLocation}><Plus className="h-4 w-4" /></Button>
-                </div>
-                <div className="flex flex-wrap gap-2">
-                  {formData.locations.map((location, index) => (
-                    <Badge key={index} variant="secondary" className="flex items-center gap-1">
-                      {location}
-                      <button type="button" onClick={() => removeLocation(location)} className="ml-1 hover:text-red-600"><X className="h-3 w-3" /></button>
-                    </Badge>
-                  ))}
-                </div>
+                <MultiSelect
+                  options={locationsOptions}
+                  selected={formData.locations}
+                  onChange={(locations) => setFormData(p => ({ ...p, locations }))}
+                  placeholder="Buscar ubicaciones (ej: Madrid, Barcelona, Valencia...)..."
+                  loading={loadingLists}
+                  emptyText="No se encontraron ubicaciones que coincidan"
+                />
+                {formData.locations.length > 0 && (
+                  <div className="text-sm text-muted-foreground">
+                    {formData.locations.length} ubicación{formData.locations.length !== 1 ? 'es' : ''} seleccionada{formData.locations.length !== 1 ? 's' : ''}
+                  </div>
+                )}
               </CardContent>
             </Card>
 
@@ -250,16 +232,16 @@ export default function NuevoSegmentoPage() {
                 <CardTitle className="flex items-center gap-2">
                   <Building2 className="h-5 w-5" />Sectores
                 </CardTitle>
-                <CardDescription>Selecciona los sectores donde buscar ofertas</CardDescription>
+                <CardDescription>Busca y selecciona múltiples sectores para filtrar ofertas</CardDescription>
               </CardHeader>
               <CardContent className="space-y-4">
                 <MultiSelect
                   options={sectorsOptions}
                   selected={formData.sectors}
                   onChange={(sectors) => setFormData(p => ({ ...p, sectors }))}
-                  placeholder="Selecciona sectores..."
+                  placeholder="Buscar sectores (ej: Hostelería, Turismo, Comercio...)..."
                   loading={loadingLists}
-                  emptyText="No se encontraron sectores"
+                  emptyText="No se encontraron sectores que coincidan"
                 />
                 {formData.sectors.length > 0 && (
                   <div className="text-sm text-muted-foreground">
@@ -275,16 +257,16 @@ export default function NuevoSegmentoPage() {
                 <CardTitle className="flex items-center gap-2">
                   <Briefcase className="h-5 w-5" />Empresas
                 </CardTitle>
-                <CardDescription>Filtra por CompanyName de ofertas activas</CardDescription>
+                <CardDescription>Busca y selecciona múltiples empresas para filtrar ofertas</CardDescription>
               </CardHeader>
               <CardContent className="space-y-4">
                 <MultiSelect
                   options={companiesOptions}
                   selected={formData.companies}
                   onChange={(companies) => setFormData(p => ({ ...p, companies }))}
-                  placeholder="Selecciona empresas..."
+                  placeholder="Buscar empresas (ej: Meliá, NH, Abama Resort...)..."
                   loading={loadingLists}
-                  emptyText="No se encontraron empresas"
+                  emptyText="No se encontraron empresas que coincidan"
                 />
                 {formData.companies.length > 0 && (
                   <div className="text-sm text-muted-foreground">

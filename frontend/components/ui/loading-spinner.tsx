@@ -62,3 +62,4 @@ export function InlineLoadingSpinner({ text = 'Cargando...' }: { text?: string }
 export function ButtonLoadingSpinner() {
   return <Loader2 className="h-4 w-4 animate-spin" />
 }
+
