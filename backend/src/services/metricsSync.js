@@ -12,7 +12,6 @@
  */
 
 const { poolConnect, pool, sql } = require('../db/db');
-const ChannelFactory = require('./channels/channelFactory');
 
 class MetricsSync {
   constructor() {
@@ -117,11 +116,14 @@ class MetricsSync {
    * @param {Object} channelConfig - Configuración del canal
    */
   async syncChannelMetrics(campaignId, userId, channelConfig) {
-    const { channelId, externalCampaignId } = channelConfig;
+    const { ChannelId: channelId, ExternalCampaignId: externalCampaignId } = channelConfig;
     
     try {
       console.log(`📊 Sync métricas ${channelId} para campaña ${campaignId}`);
 
+      // Lazy-load ChannelFactory para evitar circular dependency
+      const ChannelFactory = require('./channels/channelFactory');
+      
       // Obtener servicio del canal
       const channelService = await ChannelFactory.getChannel(channelId, userId);
       
@@ -269,7 +271,8 @@ class MetricsSync {
           c.Id,
           c.UserId,
           c.Name,
-          c.Status
+          c.Status,
+          c.CreatedAt
         FROM Campaigns c
         INNER JOIN CampaignChannels cc ON c.Id = cc.CampaignId
         WHERE c.Status IN ('active', 'running')
@@ -299,12 +302,12 @@ class MetricsSync {
           SELECT 
             ChannelId,
             ExternalCampaignId,
-            BudgetAllocation,
+            AllocatedBudget,
             EstimatedCPC,
             EstimatedApplications
           FROM CampaignChannels
           WHERE CampaignId = @CampaignId
-          AND IsActive = 1
+          AND Status = 'active'
         `);
 
       return result.recordset;

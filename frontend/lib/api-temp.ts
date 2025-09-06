@@ -237,10 +237,16 @@ export async function fetchCampaigns() {
   return res.json();
 }
 
-export async function fetchCampaign(id: number) {
-  const res = await fetch(`${API_URL}/api/campaigns/${id}`, { cache: 'no-store' });
-  if (!res.ok) throw new Error('Error al obtener campaña');
-  return res.json();
+export async function fetchCampaign(id: number, fetchWithAuth?: any) {
+  if (fetchWithAuth) {
+    const res = await fetchWithAuth(`${API_URL}/api/campaigns/${id}`, { cache: 'no-store' });
+    if (!res.ok) throw new Error('Error al obtener campaña');
+    return res.json();
+  } else {
+    const res = await fetch(`${API_URL}/api/campaigns/${id}`, { cache: 'no-store' });
+    if (!res.ok) throw new Error('Error al obtener campaña');
+    return res.json();
+  }
 }
 
 export async function createCampaign(fetchWithAuth: any, data: any) {
@@ -258,17 +264,30 @@ export async function createCampaign(fetchWithAuth: any, data: any) {
   return res.json();
 }
 
-export async function updateCampaign(id: number, data: any) {
-  const res = await fetch(`${API_URL}/api/campaigns/${id}`, {
-    method: 'PUT',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(data),
-  });
-  if (!res.ok) {
-    const error = await res.text();
-    throw new Error(`Error al actualizar campaña: ${error}`);
+export async function updateCampaign(id: number, data: any, fetchWithAuth?: any) {
+  if (fetchWithAuth) {
+    const res = await fetchWithAuth(`${API_URL}/api/campaigns/${id}`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(data),
+    });
+    if (!res.ok) {
+      const error = await res.text();
+      throw new Error(`Error al actualizar campaña: ${error}`);
+    }
+    return res.json();
+  } else {
+    const res = await fetch(`${API_URL}/api/campaigns/${id}`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(data),
+    });
+    if (!res.ok) {
+      const error = await res.text();
+      throw new Error(`Error al actualizar campaña: ${error}`);
+    }
+    return res.json();
   }
-  return res.json();
 }
 
 export async function deleteCampaign(id: number) {

@@ -976,6 +976,26 @@ class InternalLimitsController {
   }
 
   /**
+   * Parsea la configuración interna JSON de la campaña
+   * @param {string|null} internalConfigJson - JSON string de configuración interna
+   * @returns {Object} Configuración parseada o objeto vacío
+   */
+  parseInternalConfig(internalConfigJson) {
+    try {
+      if (!internalConfigJson || typeof internalConfigJson !== 'string') {
+        return {};
+      }
+      
+      const config = JSON.parse(internalConfigJson);
+      return config || {};
+      
+    } catch (error) {
+      console.warn(`⚠️ Error parseando InternalConfig: ${error.message}. Usando configuración vacía.`);
+      return {};
+    }
+  }
+
+  /**
    * Verifica límites para todas las campañas activas
    * @returns {Promise<Object>} Resultados consolidados
    */

@@ -253,13 +253,18 @@ export default function ChannelConfigForm({
         configuration: formData.configuration
       };
 
+      // Determinar el método HTTP: PUT para editar existentes, POST para crear nuevas
+      const httpMethod = existingCredentials ? 'PUT' : 'POST';
+      
       const response = await fetch(`http://localhost:3002/api/users/${userId}/credentials/${channelId}`, {
-        method: 'POST',
+        method: httpMethod,
         headers: {
           'Content-Type': 'application/json'
         },
         body: JSON.stringify(payload)
       });
+      
+      console.log(`📤 ${httpMethod} credenciales para ${channelId}:`, payload);
 
       const data = await response.json();
 

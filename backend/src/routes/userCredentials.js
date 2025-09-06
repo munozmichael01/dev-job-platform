@@ -359,6 +359,106 @@ router.post('/:userId/credentials/:channelId', async (req, res) => {
   }
 });
 
+// PUT /api/users/:userId/credentials/:channelId - Actualizar credenciales existentes
+router.put('/:userId/credentials/:channelId', async (req, res) => {
+  try {
+    const { userId, channelId } = req.params;
+    const { credentials, joobleApiKeys, limits, configuration } = req.body;
+
+    console.log(`🔄 Actualizando credenciales para canal ${channelId}:`, {
+      credentials: credentials ? Object.keys(credentials) : 'vacío',
+      joobleApiKeys: joobleApiKeys ? `${joobleApiKeys.length} países` : 'no definido',
+      limits,
+      configuration
+    });
+
+    // Para Jooble, usar joobleApiKeys si está disponible, sino credentials tradicionales
+    let credentialsToEncrypt = credentials || {};
+    
+    if (channelId === 'jooble' && joobleApiKeys && joobleApiKeys.length > 0) {
+      // Validar que todas las API keys de Jooble tengan país y clave
+      const validApiKeys = joobleApiKeys.filter(item => 
+        item.countryCode && item.countryCode.trim() !== '' &&
+        item.apiKey && item.apiKey.trim() !== ''
+      );
+      
+      if (validApiKeys.length === 0) {
+        return res.status(400).json({
+          success: false,
+          error: 'Se requiere al menos una API key válida con país y clave'
+        });
+      }
+      
+      credentialsToEncrypt = { joobleApiKeys: validApiKeys };
+      console.log(`✅ Jooble: Actualizando con ${validApiKeys.length} API keys válidas`);
+    } else if (!credentials || typeof credentials !== 'object') {
+      return res.status(400).json({
+        success: false,
+        error: 'Credenciales requeridas'
+      });
+    }
+
+    // Encriptar credenciales
+    const encryptedCredentials = credentialsManager.encryptCredentials(credentialsToEncrypt);
+    
+    // Obtener información del canal
+    const channelNames = {
+      'jooble': 'Jooble',
+      'talent': 'Talent.com',
+      'jobrapido': 'JobRapido',
+      'whatjobs': 'WhatJobs',
+      'infojobs': 'InfoJobs',
+      'linkedin': 'LinkedIn',
+      'indeed': 'Indeed'
+    };
+
+    await poolConnect;
+    
+    // Actualizar registro existente en lugar de crear uno nuevo
+    const result = await pool.request()
+      .input('UserId', sql.BigInt, userId)
+      .input('ChannelId', sql.NVarChar(50), channelId)
+      .input('EncryptedCredentials', sql.NVarChar(sql.MAX), encryptedCredentials)
+      .input('DailyBudgetLimit', sql.Decimal(10, 2), limits?.dailyBudgetLimit || null)
+      .input('MonthlyBudgetLimit', sql.Decimal(10, 2), limits?.monthlyBudgetLimit || null)
+      .input('MaxCPA', sql.Decimal(10, 2), limits?.maxCPA || null)
+      .input('UpdatedAt', sql.DateTime2, new Date())
+      .query(`
+        UPDATE UserChannelCredentials SET
+          EncryptedCredentials = @EncryptedCredentials,
+          DailyBudgetLimit = @DailyBudgetLimit,
+          MonthlyBudgetLimit = @MonthlyBudgetLimit,
+          MaxCPA = @MaxCPA,
+          UpdatedAt = @UpdatedAt,
+          IsValidated = 0,
+          ValidationError = NULL,
+          LastValidated = NULL
+        WHERE UserId = @UserId AND ChannelId = @ChannelId AND IsActive = 1
+      `);
+
+    if (result.rowsAffected[0] === 0) {
+      return res.status(404).json({
+        success: false,
+        error: 'Credenciales no encontradas o ya no están activas'
+      });
+    }
+
+    console.log(`✅ Credenciales actualizadas para ${channelNames[channelId] || channelId}`);
+
+    res.json({
+      success: true,
+      message: 'Credenciales actualizadas exitosamente'
+    });
+
+  } catch (error) {
+    console.error('Error actualizando credenciales:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Error actualizando credenciales: ' + error.message
+    });
+  }
+});
+
 // DELETE /api/users/:userId/credentials/:channelId - Eliminar credenciales
 router.delete('/:userId/credentials/:channelId', async (req, res) => {
   try {
@@ -393,10 +493,14 @@ router.post('/:userId/credentials/:channelId/validate', async (req, res) => {
 
     await poolPromise;
     
+    // Mapear canales específicos por país al canal base para credenciales
+    const baseChannelId = channelId.startsWith('jooble-') ? 'jooble' : channelId;
+    console.log(`🔍 Mapeando ${channelId} → ${baseChannelId} para buscar credenciales`);
+    
     // Obtener las credenciales existentes
     const credentialsResult = await pool.request()
       .input('userId', userId)
-      .input('channelId', channelId)
+      .input('channelId', baseChannelId)
       .query('SELECT EncryptedCredentials FROM UserChannelCredentials WHERE UserId = @userId AND ChannelId = @channelId');
 
     if (credentialsResult.recordset.length === 0) {
@@ -412,8 +516,9 @@ router.post('/:userId/credentials/:channelId/validate', async (req, res) => {
 
     let validationResult;
 
-    // Validación específica por canal
-    switch (channelId) {
+    // Validación específica por canal (normalizar para canales específicos por país)
+    const normalizedChannelId = channelId.startsWith('jooble-') ? 'jooble' : channelId;
+    switch (normalizedChannelId) {
       case 'jooble':
         console.log('🎯 Validando credenciales Jooble con nuevo formato multi-país...');
         

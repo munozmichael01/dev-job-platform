@@ -19,6 +19,24 @@ class ChannelFactory {
   }
 
   /**
+   * Singleton instance para uso estático
+   */
+  static getInstance() {
+    if (!ChannelFactory._instance) {
+      ChannelFactory._instance = new ChannelFactory();
+    }
+    return ChannelFactory._instance;
+  }
+
+  /**
+   * Método estático que usa singleton para compatibilidad
+   */
+  static async getChannel(channelId, userId = null) {
+    const instance = ChannelFactory.getInstance();
+    return await instance.getChannel(channelId, {}, userId);
+  }
+
+  /**
    * Obtiene una instancia del servicio de un canal específico
    * @param {String} channelId - ID del canal (talent, jooble, etc.)
    * @param {Object} config - Configuración específica del canal

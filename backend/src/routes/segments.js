@@ -37,14 +37,7 @@ function buildWhereFromFilters(f, sql) {
   if (Array.isArray(f.locations) && f.locations.length > 0) {
     const parts = [];
     f.locations.slice(0, 5).forEach((loc, i) => {
-      parts.push(`City = @locExact${i} OR Region = @locExact${i} OR
-        (CASE WHEN City IS NOT NULL AND Region IS NOT NULL AND Region != '' 
-              THEN CONCAT(City, ', ', Region)
-              WHEN City IS NOT NULL THEN City ELSE Region END) = @locExact${i}
-        OR City LIKE @loc${i} OR Region LIKE @loc${i} OR
-        (CASE WHEN City IS NOT NULL AND Region IS NOT NULL AND Region != '' 
-              THEN CONCAT(City, ', ', Region)
-              WHEN City IS NOT NULL THEN City ELSE Region END) LIKE @loc${i}`);
+      parts.push(`City = @locExact${i} OR Region = @locExact${i} OR (CASE WHEN City IS NOT NULL AND Region IS NOT NULL AND Region != '' THEN CONCAT(City, ', ', Region) WHEN City IS NOT NULL THEN City ELSE Region END) = @locExact${i} OR City LIKE @loc${i} OR Region LIKE @loc${i} OR (CASE WHEN City IS NOT NULL AND Region IS NOT NULL AND Region != '' THEN CONCAT(City, ', ', Region) WHEN City IS NOT NULL THEN City ELSE Region END) LIKE @loc${i}`);
       inputs.push({ name: `locExact${i}`, type: sql.NVarChar, value: loc });
       inputs.push({ name: `loc${i}`, type: sql.NVarChar, value: `%${loc}%` });
     });

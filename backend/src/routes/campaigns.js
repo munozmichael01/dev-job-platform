@@ -1003,18 +1003,24 @@ router.post('/:id/activate', async (req, res) => {
           
           // Determinar qué API key usar según el país especificado
           let targetApiKey;
+          
+          // Validar estructura de credenciales
+          if (!credentials.joobleApiKeys || !Array.isArray(credentials.joobleApiKeys) || credentials.joobleApiKeys.length === 0) {
+            throw new Error(`Credenciales de Jooble malformadas o vacías. Estructura recibida: ${JSON.stringify(credentials, null, 2)}`);
+          }
+          
           if (channelId.startsWith('jooble-')) {
             const countryCode = channelId.split('-')[1].toUpperCase(); // jooble-es -> ES
             console.log(`🔍 Buscando API key para país: ${countryCode}`);
             console.log(`🔍 Credenciales disponibles:`, credentials.joobleApiKeys);
-            targetApiKey = credentials.joobleApiKeys?.find(key => key.countryCode.toUpperCase() === countryCode);
+            targetApiKey = credentials.joobleApiKeys.find(key => key.countryCode.toUpperCase() === countryCode);
             if (!targetApiKey) {
-              throw new Error(`No se encontró API key para Jooble ${countryCode}. Países disponibles: ${credentials.joobleApiKeys?.map(k => k.countryCode).join(', ') || 'ninguno'}`);
+              throw new Error(`No se encontró API key para Jooble ${countryCode}. Países disponibles: ${credentials.joobleApiKeys.map(k => k.countryCode).join(', ')}`);
             }
             console.log(`🌍 Enviando campaña a Jooble ${countryCode.toUpperCase()}`);
           } else {
             // Jooble genérico - usar primer API key disponible
-            targetApiKey = credentials.joobleApiKeys?.[0];
+            targetApiKey = credentials.joobleApiKeys[0];
             if (!targetApiKey) {
               throw new Error('No se encontraron API keys de Jooble configuradas');
             }

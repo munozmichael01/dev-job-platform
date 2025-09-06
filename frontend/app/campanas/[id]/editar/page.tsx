@@ -55,7 +55,7 @@ export default function EditarCampanaPage() {
   const loadCampaignData = async () => {
     try {
       setLoading(true)
-      const campaign = await fetchCampaign(Number(campaignId))
+      const campaign = await fetchCampaign(Number(campaignId), authFetch)
       
       // Formatear fechas para inputs de tipo date
       const formatDateForInput = (dateString: string | null) => {
@@ -153,7 +153,7 @@ export default function EditarCampanaPage() {
         manualBid: formData.manualBid ? Number(formData.manualBid) : null,
         priority: formData.priority,
         autoOptimization: formData.autoOptimization,
-      })
+      }, authFetch)
       toast({ title: "Campaña actualizada", description: `La campaña "${formData.name}" ha sido actualizada exitosamente` })
       router.push("/campanas")
     } catch (error: any) {
