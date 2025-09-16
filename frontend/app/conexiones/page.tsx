@@ -670,12 +670,12 @@ export default function ConexionesPage() {
                 Nueva Conexión
               </Button>
             </DialogTrigger>
-            <DialogContent>
+            <DialogContent className="max-h-[90vh] overflow-y-auto">
               <DialogHeader>
                 <DialogTitle>Nueva Conexión de Datos</DialogTitle>
                 <DialogDescription>Configura una nueva fuente de datos para importar ofertas</DialogDescription>
               </DialogHeader>
-              <div className="space-y-4">
+              <div className="space-y-4 max-h-[70vh] overflow-y-auto pr-2">
                 <div className="space-y-2">
                   <Label htmlFor="name">Nombre de la conexión *</Label>
                   <Input
@@ -872,7 +872,7 @@ export default function ConexionesPage() {
                               <textarea
                                 id="payloadTemplate"
                                 className="w-full min-h-[100px] px-3 py-2 text-sm ring-offset-background placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 border border-input bg-background rounded-md"
-                                value={newConnection.notes}
+                                value={newConnection.payloadTemplate}
                                 onChange={(e) => setNewConnection((prev) => ({ ...prev, payloadTemplate: e.target.value }))}
                                 placeholder='{"query": "{query}", "limit": 100}'
                               />
@@ -889,7 +889,7 @@ export default function ConexionesPage() {
                           <textarea
                             id="notes"
                             className="w-full min-h-[60px] px-3 py-2 text-sm ring-offset-background placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 border border-input bg-background rounded-md"
-                            value={newConnection.payloadTemplate}
+                            value={newConnection.notes}
                             onChange={(e) => setNewConnection((prev) => ({ ...prev, notes: e.target.value }))}
                             placeholder="Notas sobre esta conexión..."
                           />
@@ -898,21 +898,21 @@ export default function ConexionesPage() {
                     </div>
                   </>
                 )}
-                <div className="flex gap-2 pt-4">
-                  <Button onClick={handleCreateConnection} className="flex-1" disabled={creating}>
-                    {creating ? (
-                      <>
-                        <RefreshCw className="h-4 w-4 mr-2 animate-spin" />
-                        Creando...
-                      </>
-                    ) : (
-                      "Crear Conexión"
-                    )}
-                  </Button>
-                  <Button variant="outline" onClick={() => setIsDialogOpen(false)} disabled={creating}>
-                    Cancelar
-                  </Button>
-                </div>
+              </div>
+              <div className="flex gap-2 pt-4 bg-background border-t sticky bottom-0 mt-4">
+                <Button onClick={handleCreateConnection} className="flex-1" disabled={creating}>
+                  {creating ? (
+                    <>
+                      <RefreshCw className="h-4 w-4 mr-2 animate-spin" />
+                      Creando...
+                    </>
+                  ) : (
+                    "Crear Conexión"
+                  )}
+                </Button>
+                <Button variant="outline" onClick={() => setIsDialogOpen(false)} disabled={creating}>
+                  Cancelar
+                </Button>
               </div>
             </DialogContent>
           </Dialog>

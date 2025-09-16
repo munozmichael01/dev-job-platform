@@ -1,0 +1,60 @@
+{
+  "connectionData": {
+    "name": "Turijobs Next API",
+    "description": "Endpoint actualizado de Turijobs con paginación estable",
+    "type": "API",
+    "method": "POST",
+    "url": "https://next.turijobs.com/ngapi/api/search",
+    "headers": {
+      "accept": "*/*",
+      "x-site-id": "6",
+      "x-lang-id": "7", 
+      "x-country-id": "40",
+      "Content-Type": "application/json"
+    },
+    "body": {
+      "userId": null,
+      "page": {
+        "index": 1,
+        "size": 8,
+        "featuredSize": 4,
+        "difussionSize": 2
+      },
+      "filter": {}
+    }
+  },
+  
+  "expectedResponse": {
+    "structure": {
+      "total": "number - Total de ofertas disponibles",
+      "pages": "number - Número total de páginas",
+      "offers": "array - Array de ofertas"
+    },
+    "offerFields": {
+      "id": "ID único de la oferta",
+      "title": "Título del puesto",
+      "description": "Descripción completa",
+      "publicationDate": "Fecha de publicación",
+      "location": "Ubicación/localización",
+      "company": "Información de la empresa",
+      "url": "Ruta relativa de la oferta",
+      "externalUrl": "Enlace externo si aplica"
+    }
+  },
+  
+  "paginationStrategy": {
+    "type": "page-based",
+    "pageParameter": "page.index",
+    "sizeParameter": "page.size", 
+    "defaultSize": 8,
+    "totalPages": "response.pages",
+    "totalItems": "response.total"
+  },
+  
+  "processingRules": {
+    "archivingLogic": "Archivar ofertas que no aparecen en la respuesta actual",
+    "insertionLogic": "MERGE con ExternalId como clave única",
+    "batchSize": 100,
+    "mappingRequired": true
+  }
+}

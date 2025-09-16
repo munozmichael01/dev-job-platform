@@ -387,6 +387,98 @@ export default function MapeoPage({ params }: { params: Promise<{ id: string }> 
   }
 
   // Save mapping
+  // Function to clean duplicate mappings
+  const cleanupMappingDuplicates = (mappingObject: Record<string, string>) => {
+    console.log('🧹 LIMPIANDO MAPEOS DUPLICADOS');
+    console.log(`📥 Mapeos originales: ${Object.keys(mappingObject).length}`);
+
+    const cleanMapping: Record<string, string> = {};
+    const seenTargetFields = new Set<string>();
+    const duplicates: string[] = [];
+
+    // Normalization map for standard fields
+    const normalizationMap: Record<string, string> = {
+      // Title variations
+      'title': 'Title',
+      'Title': 'Title',
+      'job_title': 'JobTitle',
+      'JobTitle': 'JobTitle',
+
+      // Description variations
+      'description': 'Description',
+      'Description': 'Description',
+
+      // Company variations
+      'company': 'CompanyName',
+      'Company': 'CompanyName',
+      'CompanyName': 'CompanyName',
+      'company_name': 'CompanyName',
+
+      // Location variations
+      'location': 'City', // Default location to City
+      'city': 'City',
+      'City': 'City',
+      'region': 'Region',
+      'Region': 'Region',
+      'country': 'Country',
+      'Country': 'Country',
+
+      // URL variations
+      'url': 'ApplicationUrl',
+      'apply_url': 'ApplicationUrl',
+      'ApplicationUrl': 'ApplicationUrl',
+      'application_url': 'ApplicationUrl',
+      'ExternalUrl': 'ExternalUrl',
+      'external_url': 'ExternalUrl',
+
+      // Date variations
+      'published_at': 'PublicationDate',
+      'publication_date': 'PublicationDate',
+      'PublicationDate': 'PublicationDate',
+
+      // Salary variations
+      'salary_min': 'SalaryMin',
+      'salary_max': 'SalaryMax',
+      'SalaryMin': 'SalaryMin',
+      'SalaryMax': 'SalaryMax',
+      'salary': 'SalaryMin', // Default single salary to min
+
+      // ID variations
+      'id': 'ExternalId',
+      'external_id': 'ExternalId',
+      'ExternalId': 'ExternalId',
+
+      // Sector variations
+      'sector': 'Sector',
+      'Sector': 'Sector',
+      'sector_id': 'Sector',
+      'sectorId': 'Sector'
+    };
+
+    // Process each mapping
+    Object.entries(mappingObject).forEach(([targetField, sourceField]) => {
+      const normalizedTarget = normalizationMap[targetField] || targetField;
+
+      if (seenTargetFields.has(normalizedTarget)) {
+        duplicates.push(`${targetField} -> ${normalizedTarget} (duplicate)`);
+        return; // Skip duplicate
+      }
+
+      seenTargetFields.add(normalizedTarget);
+      cleanMapping[normalizedTarget] = sourceField;
+    });
+
+    console.log(`✅ Mapeos limpios: ${Object.keys(cleanMapping).length}`);
+    console.log(`❌ Duplicados eliminados: ${duplicates.length}`);
+
+    if (duplicates.length > 0) {
+      console.log('🗑️ Duplicados eliminados:');
+      duplicates.forEach(dup => console.log(`  - ${dup}`));
+    }
+
+    return cleanMapping;
+  };
+
   const saveMapping = async () => {
     const errors = validateMapping()
     if (errors.length > 0) {
@@ -402,11 +494,14 @@ export default function MapeoPage({ params }: { params: Promise<{ id: string }> 
       setSaving(true)
       console.log("🔄 Guardando mapeo...")
 
+      // Clean duplicates before sending
+      const cleanedMapping = cleanupMappingDuplicates(fieldMapping);
+
       // Convert to backend format - ensure ALL mapped fields are included
-      console.log("💾 Guardando mapeo completo:", fieldMapping)
+      console.log("💾 Guardando mapeo limpio:", cleanedMapping)
       console.log("💾 Transformaciones:", transformations)
-      
-      const mappings: FieldMapping[] = Object.entries(fieldMapping)
+
+      const mappings: FieldMapping[] = Object.entries(cleanedMapping)
         .filter(([_, sourceField]) => sourceField && sourceField.trim() !== '') // Only include non-empty mappings
         .map(([targetField, sourceField]) => ({
           ConnectionId: connectionId,
@@ -425,11 +520,6 @@ export default function MapeoPage({ params }: { params: Promise<{ id: string }> 
       })
       
       console.log("✅ Respuesta del backend:", response)
-
-      toast({
-        title: "Mapeo guardado",
-        description: "La configuración de mapeo ha sido guardada exitosamente",
-      })
 
       setCurrentMappings(mappings)
       
@@ -455,13 +545,13 @@ export default function MapeoPage({ params }: { params: Promise<{ id: string }> 
 
         console.log("🔄 Mapeo reconstruido:", mappingObj)
         
-        // Compare what we sent vs what we got back
-        const sentFields = Object.keys(fieldMapping).sort()
+        // Compare what we sent vs what we got back (use cleaned mapping for comparison)
+        const sentFields = Object.keys(cleanedMapping).sort()
         const receivedFields = Object.keys(mappingObj).sort()
-        
-        console.log("📊 Campos enviados:", sentFields)
+
+        console.log("📊 Campos limpios enviados:", sentFields)
         console.log("📊 Campos recibidos:", receivedFields)
-        
+
         const missingFields = sentFields.filter(field => !receivedFields.includes(field))
         if (missingFields.length > 0) {
           console.error("❌ Campos perdidos después de guardar:", missingFields)
@@ -470,16 +560,19 @@ export default function MapeoPage({ params }: { params: Promise<{ id: string }> 
             description: `Algunos campos no se guardaron correctamente: ${missingFields.join(", ")}`,
             variant: "destructive",
           })
+        } else {
+          // Success! Update state with cleaned mapping
+          console.log("✅ Todos los campos se guardaron correctamente")
+          toast({
+            title: "Mapeo guardado",
+            description: `Se guardaron ${sentFields.length} campos sin duplicados`,
+          })
         }
 
-        // Don't update the state if fields are missing
-        if (missingFields.length === 0) {
-          setFieldMapping(mappingObj)
-          setTransformations(transformObj)
-          setCurrentMappings(reloadedMappings)
-        } else {
-          console.warn("⚠️ Manteniendo el mapeo local debido a campos faltantes")
-        }
+        // Update the state with cleaned mapping (always, to remove duplicates from UI)
+        setFieldMapping(mappingObj)
+        setTransformations(transformObj)
+        setCurrentMappings(reloadedMappings)
       } catch (reloadError) {
         console.error("⚠️ Error recargando mapeos:", reloadError)
       }

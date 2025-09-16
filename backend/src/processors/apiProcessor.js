@@ -124,6 +124,28 @@ class APIProcessor {
   // ✅ OBTENER VALOR DE MUESTRA
   getSampleValue(value) {
     if (!value) return ""
+
+    // ✅ ARREGLO: Manejar objetos para mostrar valores útiles en lugar de [object Object]
+    if (typeof value === 'object' && value !== null && !Array.isArray(value)) {
+      // Para objetos específicos de Turijobs
+      if (value.cityName || value.regionName || value.countryName) {
+        // Objeto location
+        return [value.cityName, value.regionName, value.countryName].filter(Boolean).join(', ');
+      } else if (value.enterpriseName || value.companyName || value.name || value.title) {
+        // Objeto company
+        return value.enterpriseName || value.companyName || value.name || value.title;
+      } else if (value.salaryMin || value.salaryMax || value.min || value.max) {
+        // Objeto salary
+        const min = value.salaryMin || value.min;
+        const max = value.salaryMax || value.max;
+        return min && max ? `${min} - ${max}` : (min || max || '');
+      } else {
+        // Para otros objetos, mostrar las claves principales
+        const keys = Object.keys(value).slice(0, 3);
+        return keys.length > 0 ? `{${keys.join(', ')}}` : '[Empty Object]';
+      }
+    }
+
     const strValue = String(value).trim()
     return strValue.length > 100 ? strValue.substring(0, 100) + "..." : strValue
   }
@@ -252,7 +274,7 @@ class APIProcessor {
     }
   }
 
-  async fetch() {
+  async fetch(pageIndex = 1, pageSize = 8) {
     try {
       const url = this.connection.url || this.connection.Url || this.connection.Endpoint
 
@@ -260,7 +282,7 @@ class APIProcessor {
         throw new Error("URL not found in connection")
       }
 
-      console.log(`🔗 Fetching API from: ${url}`)
+      console.log(`🔗 Fetching API page ${pageIndex} from: ${url}`)
 
       const headers = {}
       if (this.connection.Headers) {
@@ -271,6 +293,22 @@ class APIProcessor {
         }
       }
 
+      // Construir body con paginación
+      let requestBody = {}
+      if (this.connection.Body) {
+        try {
+          requestBody = JSON.parse(this.connection.Body)
+        } catch (error) {
+          console.warn("⚠️ Invalid body format, using default")
+        }
+      }
+
+      // Actualizar paginación en el body para Turijobs
+      if (requestBody.page) {
+        requestBody.page.index = pageIndex
+        requestBody.page.size = pageSize
+      }
+
       const response = await axios({
         method: this.connection.Method || "GET",
         url: url,
@@ -278,19 +316,103 @@ class APIProcessor {
           "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
           ...headers,
         },
-        data: this.connection.Body ? JSON.parse(this.connection.Body) : undefined,
+        data: Object.keys(requestBody).length > 0 ? requestBody : undefined,
         timeout: 60000,
         httpsAgent: new (require('https').Agent)({
           rejectUnauthorized: false
         })
       })
 
-      console.log(`✅ API fetched successfully, status: ${response.status}`)
+      console.log(`✅ API page ${pageIndex} fetched successfully, status: ${response.status}`)
       return response.data
     } catch (error) {
-      console.error("❌ Error fetching API:", error.message)
+      console.error(`❌ Error fetching API page ${pageIndex}:`, error.message)
       throw new Error(`Error fetching API: ${error.message}`)
     }
+  }
+
+  /**
+   * Obtiene todas las páginas de la API automáticamente
+   * @returns {Array} Todas las ofertas de todas las páginas
+   */
+  async fetchAllPages() {
+    try {
+      console.log("📋 Iniciando importación con paginación automática...")
+      
+      let allOffers = []
+      let currentPage = 1
+      let totalPages = 1
+      let pageSize = 8 // Default de Turijobs
+      
+      // Obtener primera página para determinar total
+      const firstPageData = await this.fetch(currentPage, pageSize)
+      
+      // Extraer ofertas de la primera página
+      const firstPageOffers = this.extractOffersFromResponse(firstPageData)
+      allOffers.push(...firstPageOffers)
+      
+      // Determinar total de páginas
+      if (firstPageData.pages) {
+        totalPages = firstPageData.pages
+      } else if (firstPageData.total && pageSize) {
+        totalPages = Math.ceil(firstPageData.total / pageSize)
+      }
+      
+      console.log(`📊 Primera página: ${firstPageOffers.length} ofertas, total páginas: ${totalPages}`)
+      
+      // Obtener páginas restantes
+      for (currentPage = 2; currentPage <= totalPages; currentPage++) {
+        console.log(`🔄 Obteniendo página ${currentPage}/${totalPages}...`)
+        
+        try {
+          const pageData = await this.fetch(currentPage, pageSize)
+          const pageOffers = this.extractOffersFromResponse(pageData)
+          
+          allOffers.push(...pageOffers)
+          console.log(`✅ Página ${currentPage}: ${pageOffers.length} ofertas añadidas`)
+          
+          // Pequeña pausa entre requests para ser amigable con el servidor
+          await new Promise(resolve => setTimeout(resolve, 200))
+          
+        } catch (pageError) {
+          console.warn(`⚠️ Error en página ${currentPage}: ${pageError.message}. Continuando...`)
+          // Continuar con las siguientes páginas
+        }
+      }
+      
+      console.log(`✅ Paginación completada: ${allOffers.length} ofertas obtenidas de ${totalPages} páginas`)
+      return allOffers
+      
+    } catch (error) {
+      console.error("❌ Error en paginación automática:", error.message)
+      throw error
+    }
+  }
+
+  /**
+   * Extrae ofertas de diferentes estructuras de respuesta
+   * @param {Object} apiData - Datos de respuesta de la API
+   * @returns {Array} Array de ofertas
+   */
+  extractOffersFromResponse(apiData) {
+    let offers = []
+    
+    if (apiData.data && Array.isArray(apiData.data)) {
+      offers = apiData.data
+    } else if (apiData.results && Array.isArray(apiData.results)) {
+      offers = apiData.results
+    } else if (apiData.jobs && Array.isArray(apiData.jobs)) {
+      offers = apiData.jobs
+    } else if (apiData.offers && Array.isArray(apiData.offers)) {
+      offers = apiData.offers
+    } else if (Array.isArray(apiData)) {
+      offers = apiData
+    } else {
+      console.warn("⚠️ No se encontró array de ofertas en la respuesta. Estructura:", Object.keys(apiData))
+      return []
+    }
+    
+    return offers
   }
 
   async process(batchSize = 100) {
@@ -304,36 +426,22 @@ class APIProcessor {
         console.log("⚠️ No mappings found, using default mapping")
       }
 
-      // 2. Obtener datos de API
-      const apiData = await this.fetch()
+      // 2. Obtener todas las ofertas con paginación automática
+      const allOffers = await this.fetchAllPages()
 
-      // 3. Extraer ofertas de diferentes estructuras posibles
-      let offers = []
-      if (apiData.data && Array.isArray(apiData.data)) {
-        offers = apiData.data
-      } else if (apiData.results && Array.isArray(apiData.results)) {
-        offers = apiData.results
-      } else if (apiData.jobs && Array.isArray(apiData.jobs)) {
-        offers = apiData.jobs
-      } else if (apiData.offers && Array.isArray(apiData.offers)) {
-        offers = apiData.offers
-      } else if (Array.isArray(apiData)) {
-        offers = apiData
-      } else {
-        console.log("⚠️ No array data found in API response structure:", Object.keys(apiData))
+      // 💾 CACHE: Guardar respuesta raw para re-mapeo futuro
+      await this.cacheApiResponse(allOffers)
+
+      console.log(`📊 Found ${allOffers.length} offers from API with pagination`)
+
+      if (allOffers.length === 0) {
         return { imported: 0, errors: 0, failedOffers: [] }
       }
 
-      console.log(`📊 Found ${offers.length} offers in API`)
+      // 3. Transformar según mappings
+      const transformedOffers = allOffers.map((offer) => this.mapToStandardFormat(offer, mappings))
 
-      if (offers.length === 0) {
-        return { imported: 0, errors: 0, failedOffers: [] }
-      }
-
-      // 4. Transformar según mappings
-      const transformedOffers = offers.map((offer) => this.mapToStandardFormat(offer, mappings))
-
-      // 5. Procesar por lotes
+      // 4. Procesar por lotes
       const batches = this.splitIntoBatches(transformedOffers, batchSize)
       let totalProcessed = 0
       let totalFailed = 0
@@ -347,7 +455,7 @@ class APIProcessor {
         failedOffers.push(...batchResult.failed)
       }
 
-      // 6. Archivar ofertas antiguas (CORREGIDO)
+      // 5. Archivar ofertas antiguas (CORREGIDO)
       await this.archiveOldOffers(transformedOffers.map((o) => o.ExternalId))
 
       console.log(`✅ Processing completed: ${totalProcessed} processed, ${totalFailed} failed`)
@@ -361,7 +469,7 @@ class APIProcessor {
       // 7. Generar mapeo automático SIEMPRE que se procesen ofertas exitosamente
       if (totalProcessed > 0) {
         console.log("🔄 Generating/updating automatic mapping...")
-        await this.generateAutomaticMapping(offers[0])
+        await this.generateAutomaticMapping(allOffers[0])
       }
 
       return {
@@ -413,42 +521,98 @@ class APIProcessor {
         try {
           const value = this.getValueFromPath(offer, mapping.SourceField)
 
-          standardOffer[mapping.TargetField] = this.transformValue(
+          const normalizedTarget = this.normalizeFieldName(mapping.TargetField)
+          standardOffer[normalizedTarget] = this.transformValue(
             value,
             mapping.TransformationType || "STRING",
             mapping.TransformationRule,
           )
         } catch (error) {
-          standardOffer[mapping.TargetField] = null
+          const normalizedTarget = this.normalizeFieldName(mapping.TargetField)
+          standardOffer[normalizedTarget] = null
         }
       }
     } else {
-      // Mapeo automático por defecto
+      // Mapeo automático por defecto con manejo especial para Turijobs
       standardOffer.ExternalId = String(offer.id || offer.ID || offer.Id || Math.random().toString(36).substr(2, 9))
       standardOffer.Title = String(offer.title || offer.job_title || offer.jobtitle || "")
       standardOffer.JobTitle = String(offer.job_title || offer.jobtitle || offer.title || "")
       standardOffer.Description = String(offer.description || offer.content || offer.job_description || "")
-      standardOffer.CompanyName = String(offer.company || offer.company_name || "")
+      
+      // ✅ ARREGLO: Manejar objeto company de Turijobs
+      if (offer.company && typeof offer.company === 'object') {
+        standardOffer.CompanyName = String(offer.company.enterpriseName || offer.company.name || offer.company.company_name || offer.company.title || "")
+        // También extraer sector de company si está disponible
+        if (!standardOffer.Sector && offer.company.sector) {
+          standardOffer.Sector = String(offer.company.sector);
+        }
+      } else {
+        standardOffer.CompanyName = String(offer.company || offer.company_name || "")
+      }
+      
       standardOffer.Sector = String(offer.category || offer.sector || "")
-      standardOffer.Address = String(offer.address || offer.location || "")
-      standardOffer.Country = String(offer.country || offer.pais || "")
-      standardOffer.Region = String(offer.region || "")
-      standardOffer.City = String(offer.city || offer.location_city || "")
-      standardOffer.Postcode = String(offer.postcode || offer.postal_code || "")
+      
+      // ✅ ARREGLO: Manejar objeto location de Turijobs
+      if (offer.location && typeof offer.location === 'object') {
+        standardOffer.Address = String(offer.location.address || offer.location.locationDescription || "")
+        standardOffer.Country = String(offer.location.countryName || offer.location.country || "")
+        standardOffer.Region = String(offer.location.regionName || offer.location.region || "")
+        standardOffer.City = String(offer.location.cityName || offer.location.city || "")
+        standardOffer.Postcode = String(offer.location.zipCode || offer.location.postal_code || "")
+        standardOffer.CountryId = Number(offer.location.countryId || null) || null
+        standardOffer.RegionId = Number(offer.location.regionId || null) || null
+        standardOffer.CityId = Number(offer.location.cityId || null) || null
+        standardOffer.Latitude = Number(offer.location.latitude || offer.location.lat || null) || null
+        standardOffer.Longitude = Number(offer.location.longitude || offer.location.lng || null) || null
+      } else {
+        standardOffer.Address = String(offer.address || offer.location || "")
+        standardOffer.Country = String(offer.country || offer.pais || "")
+        standardOffer.Region = String(offer.region || "")
+        standardOffer.City = String(offer.city || offer.location_city || "")
+        standardOffer.Postcode = String(offer.postcode || offer.postal_code || "")
+        standardOffer.CountryId = Number(offer.country_id || offer.countryId || null) || null
+        standardOffer.RegionId = Number(offer.region_id || offer.regionId || null) || null
+        standardOffer.CityId = Number(offer.city_id || offer.cityId || null) || null
+        standardOffer.Latitude = Number(offer.latitude || offer.lat || null) || null
+        standardOffer.Longitude = Number(offer.longitude || offer.lng || null) || null
+      }
+      
       standardOffer.Vacancies = Number(offer.vacancies || offer.num_vacancies || 1)
       standardOffer.JobType = String(offer.job_type || offer.jobtype || "")
-      standardOffer.ExternalUrl = String(offer.url || offer.external_url || "")
-      standardOffer.ApplicationUrl = String(offer.application_url || offer.url_apply || offer.apply_url || "")
+      
+      // ✅ UNIVERSAL: Agregar prefijo de Turijobs solo si no existe y es relativa
+      let baseUrl = offer.url || offer.external_url || ""
+      let applyUrl = offer.application_url || offer.url_apply || offer.apply_url || ""
+      
+      // UNIVERSAL: Agregar prefijo solo si la URL es relativa y no tiene protocolo
+      if (baseUrl && !baseUrl.startsWith('http') && !baseUrl.startsWith('//')) {
+        // Detectar si es Turijobs por el dominio de la conexión
+        const connectionUrl = this.connection.url || this.connection.Url || this.connection.Endpoint || '';
+        if (connectionUrl.includes('turijobs.com')) {
+          baseUrl = `https://www.turijobs.com/es-es/oferta-trabajo/${baseUrl}`
+        }
+      }
+      if (applyUrl && !applyUrl.startsWith('http') && !applyUrl.startsWith('//')) {
+        const connectionUrl = this.connection.url || this.connection.Url || this.connection.Endpoint || '';
+        if (connectionUrl.includes('turijobs.com')) {
+          applyUrl = `https://www.turijobs.com/es-es/oferta-trabajo/${applyUrl}`
+        }
+      }
+      
+      standardOffer.ExternalUrl = String(baseUrl)
+      standardOffer.ApplicationUrl = String(applyUrl)
       standardOffer.PublicationDate = this.parseDate(
-        offer.publication_date || offer.created_at || offer.publication || offer.date,
+        offer.publication_date || offer.published_at || offer.created_at || offer.publication || offer.date,
       )
-      standardOffer.SalaryMin = Number(offer.salary_min || offer.salaryMin || 0) || null
-      standardOffer.SalaryMax = Number(offer.salary_max || offer.salaryMax || 0) || null
-      standardOffer.CountryId = Number(offer.country_id || offer.countryId || null) || null
-      standardOffer.RegionId = Number(offer.region_id || offer.regionId || null) || null
-      standardOffer.CityId = Number(offer.city_id || offer.cityId || null) || null
-      standardOffer.Latitude = Number(offer.latitude || offer.lat || null) || null
-      standardOffer.Longitude = Number(offer.longitude || offer.lng || null) || null
+
+      // ✅ ARREGLO: Manejar objeto salary de Turijobs
+      if (offer.salary && typeof offer.salary === 'object') {
+        standardOffer.SalaryMin = Number(offer.salary.salaryMin || offer.salary.min || 0) || null
+        standardOffer.SalaryMax = Number(offer.salary.salaryMax || offer.salary.max || 0) || null
+      } else {
+        standardOffer.SalaryMin = Number(offer.salary_min || offer.salaryMin || 0) || null
+        standardOffer.SalaryMax = Number(offer.salary_max || offer.salaryMax || 0) || null
+      }
     }
 
     // Campos obligatorios
@@ -472,12 +636,80 @@ class APIProcessor {
     return standardOffer
   }
 
+  /**
+   * Normaliza nombres de campos target para compatibilidad con BD
+   * @param {string} fieldName - Nombre del campo
+   * @returns {string} Nombre normalizado
+   */
+  normalizeFieldName(fieldName) {
+    // Mapear campos target específicos a los nombres esperados por la BD
+    const fieldMapping = {
+      'external_id': 'ExternalId',
+      'title': 'Title',
+      'job_title': 'JobTitle', 
+      'description': 'Description',
+      'company_name': 'CompanyName',
+      'sector': 'Sector',
+      'address': 'Address',
+      'country': 'Country',
+      'region': 'Region',
+      'city': 'City',
+      'postcode': 'Postcode',
+      'latitude': 'Latitude',
+      'longitude': 'Longitude',
+      'vacancies': 'Vacancies',
+      'salary_min': 'SalaryMin',
+      'salary_max': 'SalaryMax',
+      'job_type': 'JobType',
+      'external_url': 'ExternalUrl',
+      'application_url': 'ApplicationUrl',
+      'budget': 'Budget',
+      'applications_goal': 'ApplicationsGoal',
+      'source': 'Source',
+      'publication_date': 'PublicationDate'
+    }
+    
+    return fieldMapping[fieldName] || fieldName
+  }
+
   getValueFromPath(obj, path) {
     return path.split(".").reduce((current, part) => current?.[part], obj)
   }
 
   transformValue(value, type, rule) {
     if (value === undefined || value === null) return null
+
+    // ✅ UNIVERSAL: Manejar objetos - extraer valores útiles
+    if (typeof value === 'object' && value !== null && !Array.isArray(value)) {
+      // Para objetos, intentar obtener propiedades específicas según el contexto
+      const possibleValues = [
+        value.name, value.title, value.text, value.content, value.value,
+        value.address, value.description, value.cityName, value.regionName,
+        value.countryName, value.company_name, value.enterpriseName, value.location,
+        value.salaryType, value.salaryMin, value.salaryMax, value.min, value.max
+      ];
+
+      // Buscar un valor válido que no sea objeto
+      let extractedValue = possibleValues.find(v => v !== undefined && v !== null && typeof v !== 'object');
+
+      // Si no encontramos nada útil, convertir a string representativo
+      if (!extractedValue) {
+        // Para objetos de salary, location, etc, intentar obtener info relevante
+        if (value.min || value.max) {
+          extractedValue = value.min || value.max;
+        } else if (value.cityName || value.regionName || value.countryName) {
+          extractedValue = [value.cityName, value.regionName, value.countryName].filter(Boolean).join(', ');
+        } else if (value.enterpriseName || value.name) {
+          extractedValue = value.enterpriseName || value.name;
+        } else {
+          // Como último recurso, convertir a JSON pero solo mostrar las claves principales
+          const keys = Object.keys(value).slice(0, 3);
+          extractedValue = keys.length > 0 ? `{${keys.join(', ')}}` : '';
+        }
+      }
+
+      value = extractedValue;
+    }
 
     switch (type) {
       case "DATE":
@@ -860,6 +1092,123 @@ class APIProcessor {
 
     // Por defecto string
     return "STRING"
+  }
+
+  // 💾 CACHE: Guardar respuesta raw de API
+  async cacheApiResponse(offers) {
+    try {
+      const cacheData = {
+        connectionId: this.connection.id,
+        timestamp: new Date(),
+        totalOffers: offers.length,
+        sampleOffer: offers[0] || {},
+        rawData: offers.slice(0, 10), // Guardar solo primeras 10 para análisis
+        structure: this.analyzeStructure(offers[0] || {})
+      }
+
+      await pool
+        .request()
+        .input("ConnectionId", sql.Int, this.connection.id)
+        .input("CacheData", sql.NVarChar(sql.MAX), JSON.stringify(cacheData))
+        .input("CreatedAt", sql.DateTime2, new Date())
+        .query(`
+          MERGE INTO ApiResponseCache WITH (HOLDLOCK) AS Target
+          USING (SELECT @ConnectionId AS ConnectionId) AS Source
+          ON Target.ConnectionId = Source.ConnectionId
+          WHEN MATCHED THEN
+              UPDATE SET
+                  CacheData = @CacheData,
+                  CreatedAt = @CreatedAt
+          WHEN NOT MATCHED THEN
+              INSERT (ConnectionId, CacheData, CreatedAt)
+              VALUES (@ConnectionId, @CacheData, @CreatedAt);
+        `)
+
+      console.log(`💾 Cached API response: ${offers.length} offers`)
+    } catch (error) {
+      console.warn("⚠️ Could not cache API response:", error.message)
+      // No interrumpir el proceso principal
+    }
+  }
+
+  // 🔍 ANALIZAR ESTRUCTURA DE DATOS
+  analyzeStructure(obj, prefix = '', maxDepth = 3, currentDepth = 0) {
+    if (currentDepth >= maxDepth || !obj || typeof obj !== 'object') {
+      return {}
+    }
+
+    const structure = {}
+
+    for (const [key, value] of Object.entries(obj)) {
+      const fullKey = prefix ? `${prefix}.${key}` : key
+
+      if (value && typeof value === 'object' && !Array.isArray(value)) {
+        // Objeto anidado
+        Object.assign(structure, this.analyzeStructure(value, fullKey, maxDepth, currentDepth + 1))
+      } else if (Array.isArray(value)) {
+        // Array - analizar primer elemento
+        structure[fullKey] = `Array[${value.length}]`
+        if (value.length > 0 && typeof value[0] === 'object') {
+          Object.assign(structure, this.analyzeStructure(value[0], `${fullKey}[0]`, maxDepth, currentDepth + 1))
+        }
+      } else {
+        // Valor primitivo
+        structure[fullKey] = typeof value
+      }
+    }
+
+    return structure
+  }
+
+  // 🔄 RE-MAPEAR DESDE CACHE (sin llamar API)
+  async reprocessFromCache(newMappings) {
+    try {
+      console.log("🔄 Re-processing from cached data...")
+
+      const result = await pool
+        .request()
+        .input("ConnectionId", sql.Int, this.connection.id)
+        .query(`
+          SELECT TOP 1 CacheData
+          FROM ApiResponseCache
+          WHERE ConnectionId = @ConnectionId
+          ORDER BY CreatedAt DESC
+        `)
+
+      if (result.recordset.length === 0) {
+        throw new Error("No cached data found. Please run a fresh import first.")
+      }
+
+      const cacheData = JSON.parse(result.recordset[0].CacheData)
+      console.log(`📊 Using cached data: ${cacheData.totalOffers} offers`)
+
+      // Usar datos en cache para re-mapear
+      const transformedOffers = cacheData.rawData.map((offer) =>
+        this.mapToStandardFormat(offer, newMappings)
+      )
+
+      // Procesar solo los datos en cache (para testing rápido)
+      const batches = this.splitIntoBatches(transformedOffers, 50)
+      let totalProcessed = 0
+      let totalFailed = 0
+
+      for (const batch of batches) {
+        const batchResult = await this.processBatch(batch)
+        totalProcessed += batchResult.processed
+        totalFailed += batchResult.failed.length
+      }
+
+      console.log(`✅ Re-processing completed: ${totalProcessed} processed, ${totalFailed} failed`)
+      return {
+        imported: totalProcessed,
+        errors: totalFailed,
+        fromCache: true
+      }
+
+    } catch (error) {
+      console.error("❌ Error re-processing from cache:", error.message)
+      throw error
+    }
   }
 }
 

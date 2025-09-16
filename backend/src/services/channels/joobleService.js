@@ -14,10 +14,22 @@ const { ChannelLimitsMiddleware } = require('../../middleware/channelLimitsMiddl
 class JoobleService {
   
   constructor(config = {}) {
+    // Manejar formato multi-país joobleApiKeys
+    let apiKey = config.apiKey || process.env.JOOBLE_API_KEY;
+    let countryCode = config.countryCode || process.env.JOOBLE_COUNTRY || 'es';
+    
+    // Si config tiene joobleApiKeys (formato multi-país), usar el primer país como default
+    if (config.joobleApiKeys && Array.isArray(config.joobleApiKeys) && config.joobleApiKeys.length > 0) {
+      const firstCountry = config.joobleApiKeys[0];
+      apiKey = firstCountry.apiKey;
+      countryCode = firstCountry.countryCode;
+      console.log(`🌍 Usando credenciales multi-país: ${config.joobleApiKeys.length} países disponibles, default: ${countryCode}`);
+    }
+    
     this.config = {
-      apiKey: config.apiKey || process.env.JOOBLE_API_KEY,
-      countryCode: config.countryCode || process.env.JOOBLE_COUNTRY || 'es', // España por defecto
-      baseUrl: `https://${config.countryCode || 'es'}.jooble.org/auction/api`,
+      apiKey: apiKey,
+      countryCode: countryCode,
+      baseUrl: `https://${countryCode}.jooble.org/auction/api`,
       defaultTimeout: config.timeout || 30000,
       ...config
     };
@@ -27,6 +39,8 @@ class JoobleService {
     
     if (!this.config.apiKey) {
       console.warn('⚠️ JOOBLE_API_KEY no configurada. Funcionará en modo simulación.');
+    } else {
+      console.log(`✅ JoobleService configurado: ${countryCode} con API key ${this.config.apiKey.substring(0, 10)}...`);
     }
 
     // Configuración de axios para Jooble API
@@ -104,6 +118,9 @@ class JoobleService {
         const exampleUrl = offersWithTracking[0]?.trackingUrl;
         return this.simulateCreateCampaign(payloadToJooble, internalData, exampleUrl);
       }
+      
+      // 🎆 ¡CREDENCIALES REALES ENCONTRADAS! - Usar API real de Jooble
+      console.log('🎆 Enviando campaña REAL a Jooble API...');
       
       // DEBUG: Log payload exacto antes de enviar
       console.log(`🐛 DEBUG - Payload completo a Jooble:`, JSON.stringify(payloadToJooble, null, 2));
@@ -642,6 +659,9 @@ class JoobleService {
       if (!this.config.apiKey) {
         return this.simulateStatistics(payload);
       }
+      
+      // 🎆 ¡CREDENCIALES REALES ENCONTRADAS! - Obtener métricas reales de Jooble
+      console.log('🎆 Obteniendo métricas REALES de Jooble API...');
       
       const response = await this.httpClient.post(`/${this.config.apiKey}`, payload);
       
