@@ -116,13 +116,24 @@ export function useApi() {
         method: 'DELETE'
       })
       if (!res.ok) throw new Error('Error al eliminar campaña')
-      
+
       const text = await res.text()
       try {
         return text ? JSON.parse(text) : { success: true }
       } catch {
         return { success: true }
       }
+    },
+
+    activateCampaign: async (id: number) => {
+      const res = await fetchWithAuth(`${API_URL}/api/campaigns/${id}/activate`, {
+        method: 'POST'
+      })
+      if (!res.ok) {
+        const error = await res.json()
+        throw new Error(error.error || 'Error al activar campaña')
+      }
+      return res.json()
     },
 
     // -------- Dashboard --------

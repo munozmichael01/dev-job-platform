@@ -751,42 +751,49 @@ class XMLProcessor {
     try {
       console.log(`🗄️ Archiving old offers, keeping ${activeExternalIds.length} active...`)
 
-      // Dividir en lotes de máximo 2000 IDs para evitar el límite de SQL Server
-      const batchSize = 2000
-      const batches = []
+      // Enfoque optimizado: usar tabla temporal en lugar de NOT IN con miles de parámetros
+      const connectionId = this.safeNumber(this.connection.id || this.connection.Id, 1)
+      const request = pool.request()
+        .input("ConnectionId", sql.Int, connectionId)
 
+      // Crear tabla temporal con los IDs activos
+      await request.query(`
+        CREATE TABLE #ActiveIds (ExternalId NVARCHAR(255));
+      `)
+
+      // Insertar IDs en lotes de 1000 para mejor performance
+      const batchSize = 1000
       for (let i = 0; i < activeExternalIds.length; i += batchSize) {
-        batches.push(activeExternalIds.slice(i, i + batchSize))
-      }
+        const batch = activeExternalIds.slice(i, i + batchSize)
+        const values = batch.map(id => `('${String(id).replace(/'/g, "''")}')`).join(',')
 
-      for (let i = 0; i < batches.length; i++) {
-        const batch = batches[i]
-        console.log(`🗄️ Processing archive batch ${i + 1}/${batches.length} (${batch.length} IDs)... [FIXED]`)
-
-        // Crear lista de parámetros seguros
-        const placeholders = batch.map((_, index) => `@id${index}`).join(",")
-        const connectionId = this.safeNumber(this.connection.id || this.connection.Id, 1)
-        console.log(`🔍 DEBUG connectionId: ${connectionId}, this.connection.id: ${this.connection.id}, this.connection.Id: ${this.connection.Id}`)
-        const request = pool.request().input("ConnectionId", sql.Int, connectionId)
-
-        // Agregar cada ID como parámetro
-        batch.forEach((id, index) => {
-          request.input(`id${index}`, sql.NVarChar(255), String(id))
-        })
-
-        await request.query(`
-          UPDATE JobOffers
-          SET StatusId = 5  -- ARCHIVADA (no pausada)
-          WHERE ConnectionId = @ConnectionId
-          AND Source = 'XML'
-          AND StatusId NOT IN (2, 3, 4)  -- NO tocar pausadas, objetivos o presupuestos completados
-          AND ExternalId NOT IN (${placeholders})
+        await pool.request().query(`
+          INSERT INTO #ActiveIds (ExternalId) VALUES ${values}
         `)
       }
 
-      console.log("✅ Old offers archived successfully")
+      // Archivar ofertas que no están en la tabla temporal (mucho más rápido)
+      const result = await pool.request()
+        .input("ConnectionId", sql.Int, connectionId)
+        .query(`
+          UPDATE JobOffers
+          SET StatusId = 5  -- ARCHIVADA
+          WHERE ConnectionId = @ConnectionId
+          AND Source = 'XML'
+          AND StatusId NOT IN (2, 3, 4)  -- NO tocar pausadas, objetivos o presupuestos completados
+          AND ExternalId NOT IN (SELECT ExternalId FROM #ActiveIds)
+        `)
+
+      // Limpiar tabla temporal
+      await pool.request().query(`DROP TABLE #ActiveIds`)
+
+      console.log(`✅ Old offers archived successfully (${result.rowsAffected[0]} offers archived)`)
     } catch (error) {
       console.error("❌ Error archiving old offers:", error.message)
+      // Intentar limpiar tabla temporal si existe
+      try {
+        await pool.request().query(`IF OBJECT_ID('tempdb..#ActiveIds') IS NOT NULL DROP TABLE #ActiveIds`)
+      } catch {}
       // No lanzar error para no interrumpir el proceso principal
     }
   }

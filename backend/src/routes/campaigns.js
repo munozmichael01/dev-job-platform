@@ -898,9 +898,13 @@ router.post('/:id/activate', async (req, res) => {
     const userId = req.userId;
     
     console.log(`🚀 Activando campaña ${campaignId} para usuario ${userId}...`);
-    
+
+    // Declarar results al principio para evitar errores de scope
+    const results = [];
+    let hasSuccess = false;
+
     await poolConnect;
-    
+
     // 1. Obtener datos de la campaña
     const campaignResult = await pool.request()
       .input('Id', sql.Int, campaignId)
@@ -911,20 +915,20 @@ router.post('/:id/activate', async (req, res) => {
         LEFT JOIN Segments s ON c.SegmentId = s.Id
         WHERE c.Id = @Id ${!isSuperAdmin(req) ? 'AND c.UserId = @UserId' : ''}
       `);
-    
+
     if (campaignResult.recordset.length === 0) {
       return res.status(404).json({ error: 'Campaña no encontrada' });
     }
-    
+
     const campaign = campaignResult.recordset[0];
-    
+
     // Verificar que está en estado draft
     if (campaign.Status !== 'draft') {
-      return res.status(400).json({ 
-        error: `Campaña ya está en estado '${campaign.Status}'. Solo se pueden activar campañas en estado 'draft'` 
+      return res.status(400).json({
+        error: `Campaña ya está en estado '${campaign.Status}'. Solo se pueden activar campañas en estado 'draft'`
       });
     }
-    
+
     // 2. Obtener segmentos asociados a la campaña
     const segmentsResult = await pool.request()
       .input('CampaignId', sql.Int, campaignId)
@@ -935,27 +939,25 @@ router.post('/:id/activate', async (req, res) => {
         WHERE cs.CampaignId = @CampaignId
         ORDER BY cs.CreatedAt
       `);
-    
+
     const segmentIds = segmentsResult.recordset.map(s => s.SegmentId);
-    
+
     if (segmentIds.length === 0) {
       return res.status(400).json({ error: 'Campaña no tiene segmentos asociados' });
     }
-    
+
     // 3. Obtener ofertas de todos los segmentos
     const offers = await CampaignDistributionService.getOffersFromSegment(segmentIds);
-    
+
     if (offers.length === 0) {
-      return res.status(400).json({ 
+      return res.status(400).json({
         error: 'No se encontraron ofertas en los segmentos de la campaña',
         segmentIds: segmentIds
       });
     }
-    
+
     // 4. Obtener canales configurados del usuario
     const channels = parseJSON(campaign.Channels);
-    const results = [];
-    let hasSuccess = false;
     
     // 5. Enviar a cada canal configurado
     for (const channelId of channels) {

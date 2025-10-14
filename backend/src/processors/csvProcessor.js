@@ -810,40 +810,48 @@ class CSVProcessor {
     try {
       console.log(`🗄️ Archiving old offers, keeping ${activeExternalIds.length} active...`)
 
-      // Dividir en lotes de máximo 2000 IDs para evitar el límite de SQL Server
-      const batchSize = 2000
-      const batches = []
+      // Enfoque optimizado: usar tabla temporal en lugar de NOT IN con miles de parámetros
+      const request = pool.request()
+        .input("ConnectionId", sql.Int, this.connection.id)
 
+      // Crear tabla temporal con los IDs activos
+      await request.query(`
+        CREATE TABLE #ActiveIds (ExternalId NVARCHAR(255));
+      `)
+
+      // Insertar IDs en lotes de 1000 para mejor performance
+      const batchSize = 1000
       for (let i = 0; i < activeExternalIds.length; i += batchSize) {
-        batches.push(activeExternalIds.slice(i, i + batchSize))
-      }
+        const batch = activeExternalIds.slice(i, i + batchSize)
+        const values = batch.map(id => `('${String(id).replace(/'/g, "''")}')`).join(',')
 
-      for (let i = 0; i < batches.length; i++) {
-        const batch = batches[i]
-        console.log(`🗄️ Processing archive batch ${i + 1}/${batches.length} (${batch.length} IDs)...`)
-
-        // Crear lista de parámetros seguros
-        const placeholders = batch.map((_, index) => `@id${index}`).join(",")
-        const request = pool.request().input("ConnectionId", sql.Int, this.connection.id)
-
-        // Agregar cada ID como parámetro
-        batch.forEach((id, index) => {
-          request.input(`id${index}`, sql.NVarChar(255), String(id))
-        })
-
-        await request.query(`
-          UPDATE JobOffers
-          SET StatusId = 5  -- ARCHIVADA (no pausada)
-          WHERE ConnectionId = @ConnectionId
-          AND Source = 'CSV'
-          AND StatusId NOT IN (2, 3, 4)  -- NO tocar pausadas, objetivos o presupuestos completados
-          AND ExternalId NOT IN (${placeholders})
+        await pool.request().query(`
+          INSERT INTO #ActiveIds (ExternalId) VALUES ${values}
         `)
       }
 
-      console.log("✅ Old offers archived successfully")
+      // Archivar ofertas que no están en la tabla temporal (mucho más rápido)
+      const result = await pool.request()
+        .input("ConnectionId", sql.Int, this.connection.id)
+        .query(`
+          UPDATE JobOffers
+          SET StatusId = 5  -- ARCHIVADA
+          WHERE ConnectionId = @ConnectionId
+          AND Source = 'CSV'
+          AND StatusId NOT IN (2, 3, 4)  -- NO tocar pausadas, objetivos o presupuestos completados
+          AND ExternalId NOT IN (SELECT ExternalId FROM #ActiveIds)
+        `)
+
+      // Limpiar tabla temporal
+      await pool.request().query(`DROP TABLE #ActiveIds`)
+
+      console.log(`✅ Old offers archived successfully (${result.rowsAffected[0]} offers archived)`)
     } catch (error) {
       console.error("❌ Error archiving old offers:", error.message)
+      // Intentar limpiar tabla temporal si existe
+      try {
+        await pool.request().query(`IF OBJECT_ID('tempdb..#ActiveIds') IS NOT NULL DROP TABLE #ActiveIds`)
+      } catch {}
       // No lanzar error para no interrumpir el proceso principal
     }
   }
@@ -930,13 +938,16 @@ class CSVProcessor {
       // Crear mapeos automáticos con manejo inteligente de ubicación
       let locationMappingCreated = false
 
+      // FIX: Usar UserId en lugar de clientId (que puede ser NULL)
+      const clientId = this.connection.clientId || this.connection.UserId || this.connection.userId
+
       // Primero, buscar el campo de ubicación con mayor prioridad
       for (const priorityField of locationPriorities) {
         const foundField = offerFields.find(field => field.toLowerCase() === priorityField)
         if (foundField && !locationMappingCreated) {
           mappings.push({
             ConnectionId: this.connection.id,
-            ClientId: this.connection.clientId,
+            ClientId: clientId,
             SourceField: foundField,
             TargetField: 'location',
             TransformationType: this.detectMappingType(foundField, sampleOffer[foundField]),
@@ -951,7 +962,7 @@ class CSVProcessor {
       // Luego, crear mapeos para todos los otros campos (excepto ubicación)
       for (const sourceField of offerFields) {
         const lowerField = sourceField.toLowerCase()
-        
+
         // Skip si es un campo de ubicación (ya procesado arriba)
         if (locationPriorities.includes(lowerField)) {
           continue
@@ -961,7 +972,7 @@ class CSVProcessor {
         if (targetField) {
           mappings.push({
             ConnectionId: this.connection.id,
-            ClientId: this.connection.clientId,
+            ClientId: clientId,
             SourceField: sourceField,
             TargetField: targetField,
             TransformationType: this.detectMappingType(sourceField, sampleOffer[sourceField]),

@@ -58,19 +58,20 @@ class ChannelFactory {
       try {
         const CredentialsManager = require('../credentialsManager');
         const credentialsManager = new CredentialsManager();
-        
+
         const userCredentials = await credentialsManager.getUserChannelCredentials(userId, channelId);
-        
-        // Combinar credenciales del usuario con config proporcionado
-        finalConfig = {
-          ...finalConfig,
-          ...userCredentials.credentials,
-          userLimits: userCredentials.limits,
-          userConfiguration: userCredentials.configuration
-        };
-        
-        console.log(`🔐 Usando credenciales específicas del usuario ${userId} para canal ${channelId}`);
-        
+
+        if (userCredentials) {
+          // FIX: getUserChannelCredentials ya devuelve las credenciales directamente
+          // No necesitamos acceder a .credentials
+          finalConfig = {
+            ...finalConfig,
+            ...userCredentials
+          };
+
+          console.log(`🔐 Usando credenciales específicas del usuario ${userId} para canal ${channelId}`);
+        }
+
       } catch (error) {
         console.warn(`⚠️ No se pudieron cargar credenciales del usuario ${userId} para ${channelId}: ${error.message}`);
         // Continuar con configuración por defecto

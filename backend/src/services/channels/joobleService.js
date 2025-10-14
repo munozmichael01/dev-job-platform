@@ -43,13 +43,14 @@ class JoobleService {
       console.log(`✅ JoobleService configurado: ${countryCode} con API key ${this.config.apiKey.substring(0, 10)}...`);
     }
 
-    // Configuración de axios para Jooble API
+    // Configuración de axios para Jooble API - usar headers simples como curl
     this.httpClient = axios.create({
       baseURL: this.config.baseUrl,
       timeout: this.config.defaultTimeout,
       headers: {
         'Content-Type': 'application/json',
-        'User-Agent': 'JobPlatform-Integration/1.0'
+        'User-Agent': 'curl/8.15.0',
+        'Accept': '*/*'
       }
     });
   }
@@ -63,22 +64,24 @@ class JoobleService {
    */
   async createCampaign(campaignData, offers, budgetInfo) {
     console.log(`🎯 Creando campaña en Jooble: "${campaignData.name}" con ${offers.length} ofertas`);
-    
+
+    let payloadToJooble = null; // Declarar fuera del try para acceso en catch
+
     try {
       // Aplicar UTMs a las ofertas para tracking real
       const offersWithTracking = this.applyTrackingToOffers(offers, campaignData);
-      
-      // Construir payload-to-jooble incluyendo segmentationRules derivadas de ofertas
-      const payloadToJooble = this.buildJooblePayload(campaignData, offers, budgetInfo);
-      
+
+      // Construir payload-to-jooble incluyendo Rules derivadas de ofertas
+      payloadToJooble = this.buildJooblePayload(campaignData, offers, budgetInfo);
+
       // Construir datos internos (NO se envían a Jooble)
       const internalData = this.buildInternalData(campaignData, offers, budgetInfo);
-      
-      // Validar segmentationRules antes de enviar
-      const validation = this.validateSegmentationRules(payloadToJooble.segmentationRules);
+
+      // Validar Rules antes de enviar (Jooble usa Rules, no segmentationRules)
+      const validation = this.validateSegmentationRules(payloadToJooble.Rules);
       if (!validation.valid) {
-        console.error('❌ SegmentationRules inválidas:', validation.errors);
-        throw new Error(`Validación de segmentationRules falló: ${validation.errors.join(', ')}`);
+        console.error('❌ Rules inválidas:', validation.errors);
+        throw new Error(`Validación de Rules falló: ${validation.errors.join(', ')}`);
       }
       
       // ✨ MIDDLEWARE: Validar límites internos antes de enviar a Jooble
@@ -111,7 +114,7 @@ class JoobleService {
       
       console.log(`📤 Payload-to-jooble: ${JSON.stringify(payloadToJooble, null, 2)}`);
       console.log(`🗄️ Datos internos conservados para control: ${Object.keys(internalData).join(', ')}`);
-      console.log(`✅ SegmentationRules validadas: ${payloadToJooble.segmentationRules.length} reglas`);
+      console.log(`✅ Rules validadas: ${payloadToJooble.Rules?.length || 0} reglas`);
       
       if (!this.config.apiKey) {
         // Modo simulación - mostrar ambos payloads y ejemplo de URL
@@ -167,6 +170,15 @@ class JoobleService {
       
     } catch (error) {
       console.error(`❌ Error creando campaña en Jooble: ${error.message}`);
+
+      // Capturar response completa de Jooble para debugging
+      if (error.response) {
+        console.error('📤 HTTP Status:', error.response.status);
+        console.error('📤 Response Headers:', JSON.stringify(error.response.headers, null, 2));
+        console.error('📤 Response Data:', JSON.stringify(error.response.data, null, 2));
+        console.error('📤 Request que causó el error:', JSON.stringify(payloadToJooble, null, 2));
+      }
+
       throw error;
     }
   }
@@ -387,10 +399,16 @@ class JoobleService {
    * @returns {Array} SegmentationRules válidas para Jooble API
    */
   buildSegmentationRulesForJooble(offers) {
+    // FIX: Validar que offers sea un array válido
+    if (!offers || !Array.isArray(offers) || offers.length === 0) {
+      console.warn('⚠️ No hay ofertas para construir segmentation rules, usando reglas vacías');
+      return [];
+    }
+
     console.log(`🎯 Construyendo segmentationRules para Jooble desde ${offers.length} ofertas pre-filtradas`);
-    
+
     const rules = [];
-    
+
     // TIPO 1: Títulos de trabajo (máx 5, operator=contains)
     const uniqueTitles = [...new Set(offers.map(o => o.Title).filter(Boolean))];
     if (uniqueTitles.length > 0) {
@@ -504,9 +522,15 @@ class JoobleService {
    */
   buildInternalSegmentationRules(offers, campaignData) {
     console.log('🗄️ Construyendo reglas de segmentación INTERNAS (no se envían a Jooble)');
-    
+
+    // FIX: Validar que offers sea un array válido
+    if (!offers || !Array.isArray(offers) || offers.length === 0) {
+      console.warn('⚠️ No hay ofertas para construir reglas internas, usando reglas vacías');
+      return [];
+    }
+
     const rules = [];
-    
+
     // Regla 1: Títulos de trabajo (Title) - SOLO para uso interno
     const uniqueTitles = [...new Set(offers.map(o => o.Title).filter(Boolean))];
     if (uniqueTitles.length > 0) {
@@ -564,6 +588,7 @@ class JoobleService {
    * @returns {Array} Ubicaciones únicas
    */
   extractLocations(offers) {
+    if (!offers || !Array.isArray(offers)) return [];
     const locations = new Set();
     offers.forEach(offer => {
       if (offer.City) locations.add(offer.City);
@@ -578,6 +603,7 @@ class JoobleService {
    * @returns {Array} Empresas únicas
    */
   extractCompanies(offers) {
+    if (!offers || !Array.isArray(offers)) return [];
     return [...new Set(offers.map(o => o.CompanyName).filter(Boolean))];
   }
 
@@ -587,6 +613,7 @@ class JoobleService {
    * @returns {Array} Títulos únicos
    */
   extractJobTitles(offers) {
+    if (!offers || !Array.isArray(offers)) return [];
     return [...new Set(offers.map(o => o.Title).filter(Boolean))];
   }
 

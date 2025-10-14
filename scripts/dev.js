@@ -5,12 +5,13 @@ const path = require("path");
 console.log("🚀 INICIANDO JOB PLATFORM - ARQUITECTURA COMPLETA");
 console.log("=" .repeat(60));
 
-function runService(name, cmd, args = [], options = {}) {
+function runService(name, fullCommand, options = {}) {
   console.log(`\n🚀 Iniciando servicio: ${name}`);
-  console.log(`📍 Comando: ${cmd} ${args.join(' ')}`);
+  console.log(`📍 Comando: ${fullCommand}`);
   console.log(`📁 Directorio: ${options.cwd || process.cwd()}`);
-  
-  const proc = spawn(cmd, args, {
+
+  // FIX DEP0190: Pasar comando completo como string único sin array de args
+  const proc = spawn(fullCommand, {
     stdio: "inherit", // muestra logs en tiempo real
     shell: true,
     ...options,
@@ -34,24 +35,21 @@ function runService(name, cmd, args = [], options = {}) {
   return proc;
 }
 
-// 🎯 Configuración de servicios - Rutas corregidas con comillas
+// 🎯 Configuración de servicios - Comando completo como string para evitar DEP0190
 const services = [
   {
     name: "Landing Page (Puerto 3000)",
-    cmd: '"C:\\Program Files\\nodejs\\npm.cmd"',
-    args: ["run", "dev"],
+    command: '"C:\\Program Files\\nodejs\\npm.cmd" run dev',
     cwd: path.join(__dirname, "..", "..", "landing-page")
   },
   {
     name: "Backend API (Puerto 3002)",
-    cmd: '"C:\\Program Files\\nodejs\\node.exe"',
-    args: ["index.js"],
+    command: '"C:\\Program Files\\nodejs\\node.exe" index.js',
     cwd: path.join(__dirname, "..", "backend")
   },
   {
     name: "Frontend Dashboard (Puerto 3006)",
-    cmd: '"C:\\Program Files\\nodejs\\npm.cmd"',
-    args: ["run", "dev"],
+    command: '"C:\\Program Files\\nodejs\\npm.cmd" run dev',
     cwd: path.join(__dirname, "..", "frontend")
   }
 ];
@@ -67,7 +65,7 @@ console.log("💡 Presiona Ctrl+C para detener todos los servicios\n");
 
 // Ejecutar cada servicio
 services.forEach(service => {
-  runService(service.name, service.cmd, service.args, { cwd: service.cwd });
+  runService(service.name, service.command, { cwd: service.cwd });
 });
 
 // 🎉 Mensaje final

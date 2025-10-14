@@ -3,3 +3,19 @@ node_modules/
 .env
 dist/
 build/
+
+# Backup directories
+backup_*/
+
+# Temporary scripts (use backend/scripts/archive for historical reference)
+backend/check_*.js
+backend/debug_*.js
+backend/test_*.js
+backend/decrypt_*.js
+backend/fix_*.js
+backend/cleanup_*.js
+backend/compare_*.js
+backend/create_*.js
+backend/force_*.js
+backend/optimized_*.js
+backend/reprocess_*.js

@@ -89,38 +89,31 @@ export default function CampanasPage() {
     if (!window.confirm(`¿Estás seguro de que quieres activar y enviar la campaña "${name}" a los canales configurados?`)) {
       return
     }
-    
+
     try {
       setLoading(true)
-      const response = await fetch(`http://localhost:3002/api/campaigns/${id}/activate`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${localStorage.getItem('token')}`
-        }
-      })
-      
-      const result = await response.json()
-      
-      if (response.ok && result.success) {
-        toast({ 
-          title: "Campaña activada", 
-          description: `La campaña "${name}" ha sido enviada exitosamente a ${result.channels.filter((c: any) => c.success).length} canales` 
+      const result = await api.activateCampaign(id)
+
+      if (result.success) {
+        const successfulChannels = result.channels?.filter((c: any) => c.success).length || 0
+        toast({
+          title: "Campaña activada",
+          description: `La campaña "${name}" ha sido enviada exitosamente a ${successfulChannels} canales`
         })
         loadCampaigns()
       } else {
-        toast({ 
-          title: "Error activando campaña", 
+        toast({
+          title: "Error activando campaña",
           description: result.error || 'Error desconocido',
-          variant: "destructive" 
+          variant: "destructive"
         })
       }
     } catch (error: any) {
       console.error("Error activando campaña:", error)
-      toast({ 
-        title: "Error", 
-        description: error.message || "No se pudo activar la campaña", 
-        variant: "destructive" 
+      toast({
+        title: "Error",
+        description: error.message || "No se pudo activar la campaña",
+        variant: "destructive"
       })
     } finally {
       setLoading(false)

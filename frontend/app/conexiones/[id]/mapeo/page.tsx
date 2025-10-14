@@ -570,9 +570,9 @@ export default function MapeoPage({ params }: { params: Promise<{ id: string }> 
         }
 
         // Update the state with cleaned mapping (always, to remove duplicates from UI)
-        setFieldMapping(mappingObj)
-        setTransformations(transformObj)
-        setCurrentMappings(reloadedMappings)
+        setFieldMapping(mappingObj);
+        setTransformations(transformObj);
+        setCurrentMappings(reloadedMappings);
       } catch (reloadError) {
         console.error("⚠️ Error recargando mapeos:", reloadError)
       }
