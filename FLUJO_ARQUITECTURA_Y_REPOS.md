@@ -327,19 +327,36 @@ git log -1 --format="%ai" -- [ruta/archivo]
 - [ ] Verificar que el commit SHA coincide con GitHub
 - [ ] Revisar logs del deploy (sin errores)
 
+### **Scripts de Verificación Rápida:**
+
+```powershell
+# Landing Page
+cd C:\Dev\landing-page
+.\verificar-version.ps1
+
+# Platform (Frontend + Backend)
+cd C:\Dev\job-platform
+.\verificar-version.ps1
+```
+
 ### **Para Verificar en Código Local:**
 
-```bash
-# En cada repositorio
+```powershell
+# Landing Page
 cd C:\Dev\landing-page
-git log -1  # Último commit
+git log -1 --format="%H | %an | %ad | %s" --date=iso
+git status
 
+# Platform Frontend
 cd C:\Dev\job-platform\frontend
-git log -1  # Último commit
+git log -1 --format="%H | %ad | %s" --date=iso
 
+# Platform Backend
 cd C:\Dev\job-platform\backend
-git log -1  # Último commit
+git log -1 --format="%H | %ad | %s" --date=iso
 ```
+
+**Ver documentación completa:** `GUIA_VERIFICACION_VERSIONES.md`
 
 ---
 
