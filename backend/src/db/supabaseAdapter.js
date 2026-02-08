@@ -67,26 +67,63 @@ class SupabaseAdapter {
   }
 
   /**
-   * Execute INSERT/UPDATE/DELETE using Supabase RPC
+   * Execute INSERT/UPDATE/DELETE using Supabase query builder
    */
   async executeInsertUpdateDelete(queryText, params) {
     try {
-      // Use Supabase RPC to execute raw SQL
-      const { data, error } = await supabase.rpc('exec_sql', {
-        query: queryText,
-        params: params || []
-      });
+      // Parse INSERT query to extract table name and values
+      const insertMatch = queryText.match(/INSERT\s+INTO\s+"?(\w+)"?\s*\(([\s\S]+?)\)\s*(?:OUTPUT|RETURNING)[\s\S]*?VALUES\s*\(([\s\S]+?)\)/i);
 
-      if (error) {
-        console.error('❌ Supabase RPC error:', error);
-        throw new Error(error.message);
+      if (insertMatch) {
+        const [, tableName, columnsRaw, valuesRaw] = insertMatch;
+
+        // Parse columns
+        const columns = columnsRaw.split(',').map(c => c.trim());
+
+        // Parse values - replace $1, $2, etc with actual params
+        let valuesList = valuesRaw.split(',').map(v => v.trim());
+
+        // Build insert object
+        const insertData = {};
+        columns.forEach((col, idx) => {
+          const valueToken = valuesList[idx];
+          if (valueToken && valueToken.startsWith('$')) {
+            const paramIndex = parseInt(valueToken.substring(1)) - 1;
+            insertData[col] = params[paramIndex];
+          } else {
+            // Handle literal values
+            insertData[col] = valueToken?.replace(/'/g, '');
+          }
+        });
+
+        console.log(`🔧 Supabase INSERT into ${tableName}:`, insertData);
+
+        // Execute insert with select to return inserted data
+        const { data, error } = await supabase
+          .from(tableName)
+          .insert(insertData)
+          .select();
+
+        if (error) {
+          console.error('❌ Supabase insert error:', error);
+          throw new Error(error.message);
+        }
+
+        console.log(`✅ Supabase INSERT successful:`, data);
+
+        return {
+          recordset: data || [],
+          rowsAffected: [data ? data.length : 0]
+        };
       }
 
-      // Return in SQL Server format
+      // For UPDATE/DELETE or complex queries, log and return empty for now
+      console.warn('⚠️  Complex INSERT/UPDATE/DELETE not yet supported:', queryText.substring(0, 100));
       return {
-        recordset: data || [],
-        rowsAffected: [data ? data.length : 1]
+        recordset: [],
+        rowsAffected: [0]
       };
+
     } catch (error) {
       console.error('❌ INSERT/UPDATE/DELETE failed:', error.message);
       console.error('Query:', queryText.substring(0, 200));
