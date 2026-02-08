@@ -43,7 +43,7 @@ function setCachedData(key, data) {
 
 // 🔧 Performance feature flags
 const USE_INDEX_HINTS = process.env.USE_INDEX_HINTS === 'true';
-require('./scheduler'); // Enabled for metrics sync
+// require('./scheduler'); // Disabled for Vercel deployment (serverless functions don't support cron)
 
 // ✅ SETUP LOGGING TO FILE
 const originalConsoleLog = console.log;
