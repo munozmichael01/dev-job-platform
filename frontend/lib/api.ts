@@ -1,7 +1,7 @@
 import { useAuth } from '@/contexts/AuthContext'
 
-// API base
-const API_URL = 'http://localhost:3002'
+// API base - usa variable de entorno o fallback a localhost
+const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3002'
 
 // Hook para usar API autenticada
 export function useApi() {
