@@ -1,9 +1,16 @@
 const express = require("express")
 const router = express.Router()
 const { pool, sql } = require("../db/db") // sql now comes from db.js (Supabase adapter compatible)
+const { createClient } = require('@supabase/supabase-js')
 const axios = require("axios")
 const xml2js = require("xml2js")
 const { addUserToRequest, requireAuth, onlyOwnData, getUserIdForQuery, isSuperAdmin, addUserIdToRequest } = require('../middleware/authMiddleware')
+
+// Initialize Supabase client
+const supabase = createClient(
+  process.env.NEXT_PUBLIC_SUPABASE_URL,
+  process.env.SUPABASE_SERVICE_ROLE_KEY
+)
 
 
 
@@ -21,35 +28,32 @@ router.get("/", addUserToRequest, requireAuth, onlyOwnData(), async (req, res) =
   console.log(`🔍 GET /api/connections - Usuario: ${req.user.email} (${req.user.role})`)
 
   try {
-    // Construir query con filtrado por usuario (super admin ve todo)
-    let query = `
-      SELECT 
-        id, name, type, url, frequency, status, lastSync, 
-        importedOffers, errorCount, UserId, Method, Headers, Body, 
-        SourceType, Endpoint, PayloadTemplate, FeedUrl, Notes, CreatedAt
-      FROM Connections`;
-    
-    const request = pool.request();
-    
     console.log(`🔍 Connections DEBUG: req.userId = ${req.userId}, req.user.role = ${req.user.role}`);
     console.log(`🔍 Connections DEBUG: isSuperAdmin(req) = ${isSuperAdmin(req)}`);
-    
+
+    // 🆕 SUPABASE NATIVO: Query builder con filtrado condicional
+    let query = supabase
+      .from('Connections')
+      .select('*')
+      .order('CreatedAt', { ascending: false });
+
     if (!isSuperAdmin(req)) {
       // Usuario normal: solo sus conexiones
-      query += ` WHERE UserId = @userId`;
-      request.input('userId', sql.BigInt, req.userId);
+      query = query.eq('UserId', req.userId);
       console.log(`🔒 Filtrando conexiones para usuario ${req.userId}`);
     } else {
       console.log(`🔑 Super admin: mostrando todas las conexiones`);
     }
-    
-    query += ` ORDER BY CreatedAt DESC`;
-    
-    console.log(`🔍 Connections query final:`, query);
-    const result = await request.query(query);
-    
-    console.log(`✅ Encontradas ${result.recordset.length} conexiones`)
-    res.json(result.recordset)
+
+    const { data: connections, error } = await query;
+
+    if (error) {
+      console.error('❌ Supabase select error:', error);
+      throw new Error(error.message);
+    }
+
+    console.log(`✅ Encontradas ${connections.length} conexiones`)
+    res.json(connections)
   } catch (error) {
     console.error("❌ Error listando conexiones:", error)
     res.status(500).json({
@@ -75,36 +79,34 @@ router.get("/:id", addUserToRequest, requireAuth, onlyOwnData(), async (req, res
 
   try {
     console.log(`🔍 GET /api/connections/${id} - Usuario: ${req.user.email} (${req.user.role})`)
-    
-    // Construir query con filtrado por usuario (super admin ve todo)
-    let query = `
-      SELECT 
-        id, name, type, url, frequency, status, lastSync, 
-        importedOffers, errorCount, UserId, Method, Headers, Body, 
-        SourceType, Endpoint, PayloadTemplate, FeedUrl, Notes, CreatedAt
-      FROM Connections 
-      WHERE id = @id`;
-    
-    const request = pool.request().input('id', sql.Int, id);
-    
+
+    // 🆕 SUPABASE NATIVO: Query builder con filtrado condicional
+    let query = supabase
+      .from('Connections')
+      .select('*')
+      .eq('id', id);
+
     if (!isSuperAdmin(req)) {
       // Usuario normal: solo sus conexiones
-      query += ` AND UserId = @userId`;
-      request.input('userId', sql.BigInt, req.userId);
+      query = query.eq('UserId', req.userId);
       console.log(`🔒 Filtrando conexión ${id} para usuario ${req.userId}`);
     } else {
       console.log(`🔑 Super admin: accediendo a conexión ${id} sin filtro`);
     }
-    
-    const result = await request.query(query);
 
-    if (result.recordset.length === 0) {
-      return res.status(404).json({ error: "Conexión no encontrada" })
+    const { data, error } = await query.single();
+
+    if (error) {
+      if (error.code === 'PGRST116') {
+        // No rows returned
+        return res.status(404).json({ error: "Conexión no encontrada" })
+      }
+      console.error('❌ Supabase select error:', error);
+      throw new Error(error.message);
     }
 
-    const connection = result.recordset[0]
-    console.log("✅ Conexión encontrada:", connection)
-    res.json(connection)
+    console.log("✅ Conexión encontrada:", data)
+    res.json(data)
   } catch (error) {
     console.error("❌ Error obteniendo conexión:", error)
     res.status(500).json({
@@ -186,41 +188,42 @@ router.post("/", addUserToRequest, requireAuth, onlyOwnData(), async (req, res) 
     // ClientId: usar userId como clientId (simplificación - tabla Clients no existe en Supabase)
     const clientId = userId;
     console.log(`🔐 Usando userId ${userId} como clientId`)
-    
-    const result = await pool
-      .request()
-      .input("name", sql.NVarChar(255), name)
-      .input("type", sql.NVarChar(50), type)
-      .input("url", sql.NVarChar(sql.MAX), url)
-      .input("frequency", sql.NVarChar(50), frequency)
-      .input("status", sql.NVarChar(50), "pending")
-      .input("importedOffers", sql.Int, 0)
-      .input("errorCount", sql.Int, 0)
 
-      .input("userId", sql.BigInt, userId)
-      .input("clientId", sql.Int, clientId)
-      .input("method", sql.NVarChar(10), method || "GET")
-      .input("headers", sql.NVarChar(sql.MAX), headers || null)
-      .input("body", sql.NVarChar(sql.MAX), body || null)
-      .input("sourceType", sql.NVarChar(500), sourceType || null)
-      .input("endpoint", sql.NVarChar(500), endpoint || null)
-      .input("payloadTemplate", sql.NVarChar(sql.MAX), payloadTemplate || null)
-      .input("feedUrl", sql.NVarChar(500), feedUrl || null)
-      .input("notes", sql.NVarChar(sql.MAX), notes || null)
-      .input("createdAt", sql.DateTime, new Date())
-      .query(`
-        INSERT INTO Connections (
-          name, type, url, frequency, status, importedOffers, errorCount, clientId, UserId,
-          Method, Headers, Body, SourceType, Endpoint, PayloadTemplate, FeedUrl, Notes, CreatedAt
-        )
-        OUTPUT INSERTED.*
-        VALUES (
-          @name, @type, @url, @frequency, @status, @importedOffers, @errorCount, @clientId, @userId,
-          @method, @headers, @body, @sourceType, @endpoint, @payloadTemplate, @feedUrl, @notes, @createdAt
-        )
-      `)
+    // 🆕 SUPABASE NATIVO: Insertar usando query builder
+    const insertData = {
+      name,
+      type,
+      url,
+      frequency,
+      status: 'pending',
+      importedOffers: 0,
+      errorCount: 0,
+      clientId,
+      UserId: userId,
+      Method: method || 'GET',
+      Headers: headers || null,
+      Body: body || null,
+      SourceType: sourceType || null,
+      Endpoint: endpoint || null,
+      PayloadTemplate: payloadTemplate || null,
+      FeedUrl: feedUrl || null,
+      Notes: notes || null,
+      CreatedAt: new Date().toISOString()
+    };
 
-    const newConnection = result.recordset[0]
+    console.log('🔧 Supabase INSERT data:', insertData);
+
+    const { data: newConnection, error } = await supabase
+      .from('Connections')
+      .insert(insertData)
+      .select()
+      .single();
+
+    if (error) {
+      console.error('❌ Supabase insert error:', error);
+      throw new Error(error.message);
+    }
+
     console.log("✅ Conexión creada exitosamente:", newConnection)
 
     res.status(201).json(newConnection)
