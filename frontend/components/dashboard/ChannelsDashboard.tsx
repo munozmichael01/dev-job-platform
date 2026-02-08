@@ -6,6 +6,7 @@ import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Progress } from '@/components/ui/progress';
 import { Alert, AlertDescription } from '@/components/ui/alert';
+import { API_URL } from '@/lib/config';
 import { 
   CheckCircle, 
   XCircle, 
@@ -61,7 +62,7 @@ export default function ChannelsDashboard({ userId = 1 }: ChannelsDashboardProps
 
   const loadChannelsData = async () => {
     try {
-      const response = await fetch(`http://localhost:3002/api/users/${userId}/credentials`);
+      const response = await fetch(`${API_URL}/api/users/${userId}/credentials`);
       const data = await response.json();
       
       // Simular datos de performance (en implementación real vendrían del backend)
