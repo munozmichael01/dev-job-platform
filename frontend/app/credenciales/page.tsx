@@ -20,6 +20,7 @@ import {
 import ChannelConfigForm from '@/components/credentials/ChannelConfigForm';
 import { useApi } from "@/lib/api";
 import { useAuth } from "@/contexts/AuthContext";
+import { API_URL } from '@/lib/config';
 
 interface ChannelCredentials {
   channelId: string;
@@ -81,7 +82,7 @@ export default function CredencialesPage() {
   const loadAvailableChannels = async () => {
     try {
       // Cargar canales desde la API del backend usando fetch autenticado
-      const response = await fetchWithAuth('http://localhost:3002/api/credentials/channels');
+      const response = await fetchWithAuth(`${API_URL}/api/credentials/channels`);
       if (response.ok) {
         const data = await response.json();
         setAvailableChannels(data.channels || {});
@@ -179,7 +180,7 @@ export default function CredencialesPage() {
     }
 
     try {
-      const response = await fetch(`http://localhost:3002/api/users/${user?.id}/credentials/${channelId}`, {
+      const response = await fetch(`${API_URL}/api/users/${user?.id}/credentials/${channelId}`, {
         method: 'DELETE'
       });
 
@@ -197,7 +198,7 @@ export default function CredencialesPage() {
 
   const handleValidateCredentials = async (channelId: string) => {
     try {
-      const response = await fetch(`http://localhost:3002/api/users/${user?.id}/credentials/${channelId}/validate`, {
+      const response = await fetch(`${API_URL}/api/users/${user?.id}/credentials/${channelId}/validate`, {
         method: 'POST'
       });
 

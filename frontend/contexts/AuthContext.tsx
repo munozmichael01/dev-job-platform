@@ -5,6 +5,7 @@ import { AuthError, logError } from '@/lib/errors'
 import { useToast } from '@/hooks/use-toast'
 import { authSyncManager, useAuthSync, type AuthEvent } from '@/lib/auth-sync'
 import { logger } from '@/lib/logger'
+import { API_URL } from '@/lib/config';
 
 interface User {
   id: string
@@ -387,7 +388,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       // Call backend logout endpoint if token exists
       if (authState.token) {
         try {
-          const response = await fetch('http://localhost:3002/api/auth/logout', {
+          const response = await fetch(`${API_URL}/api/auth/logout`, {
             method: 'POST',
             headers: {
               'Authorization': `Bearer ${authState.token}`,

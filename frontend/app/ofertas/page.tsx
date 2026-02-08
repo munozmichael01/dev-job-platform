@@ -19,6 +19,7 @@ import { useKeysetPaginationAuth } from "@/hooks/use-keyset-pagination-auth"
 import { ResultsCounter } from "@/components/ui/infinite-loader"
 import { ErrorMessage } from "@/components/ui/error-message"
 import { useApi } from "@/lib/api"
+import { API_URL } from '@/lib/config';
 
 // Tipos TypeScript actualizados para keyset pagination
 interface Oferta {
@@ -197,7 +198,7 @@ export default function OfertasPage() {
     reset
   } = useKeysetPaginationAuth({
     limit: 20,
-    baseUrl: 'http://localhost:3002/job-offers', // URL completa del backend
+    baseUrl: `${API_URL}/job-offers`, // URL completa del backend
     initialParams: {} // Sin parámetros iniciales - se cargarán en el useEffect
   });
 
