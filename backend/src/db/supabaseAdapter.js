@@ -26,6 +26,11 @@ class SupabaseAdapter {
         return await this.executeWithQueryBuilder(queryText, params);
       }
 
+      // For INSERT/UPDATE/DELETE with RETURNING, use RPC
+      if (this.isInsertUpdateDelete(queryText)) {
+        return await this.executeInsertUpdateDelete(queryText, params);
+      }
+
       // For complex queries, use RPC with raw SQL
       return await this.executeWithRPC(queryText, params);
     } catch (error) {
@@ -47,6 +52,46 @@ class SupabaseAdapter {
       !normalized.includes('with')
       // Allow CASE statements - they're common in SELECTs
     );
+  }
+
+  /**
+   * Check if query is INSERT/UPDATE/DELETE
+   */
+  isInsertUpdateDelete(queryText) {
+    const normalized = queryText.trim().toLowerCase();
+    return (
+      normalized.startsWith('insert') ||
+      normalized.startsWith('update') ||
+      normalized.startsWith('delete')
+    );
+  }
+
+  /**
+   * Execute INSERT/UPDATE/DELETE using Supabase RPC
+   */
+  async executeInsertUpdateDelete(queryText, params) {
+    try {
+      // Use Supabase RPC to execute raw SQL
+      const { data, error } = await supabase.rpc('exec_sql', {
+        query: queryText,
+        params: params || []
+      });
+
+      if (error) {
+        console.error('❌ Supabase RPC error:', error);
+        throw new Error(error.message);
+      }
+
+      // Return in SQL Server format
+      return {
+        recordset: data || [],
+        rowsAffected: [data ? data.length : 1]
+      };
+    } catch (error) {
+      console.error('❌ INSERT/UPDATE/DELETE failed:', error.message);
+      console.error('Query:', queryText.substring(0, 200));
+      throw error;
+    }
   }
 
   /**
@@ -181,6 +226,9 @@ class SupabaseAdapter {
           paramValues.push(value);
           paramIndex++;
         }
+
+        // Convert SQL Server OUTPUT INSERTED.* to PostgreSQL RETURNING *
+        pgQuery = pgQuery.replace(/OUTPUT\s+INSERTED\.\*/gi, 'RETURNING *');
 
         return await adapter.query(pgQuery, paramValues);
       }
