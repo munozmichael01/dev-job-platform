@@ -11,7 +11,6 @@ import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Badge } from '@/components/ui/badge';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { 
-import { API_URL } from '@/lib/config';
   Save, 
   X, 
   AlertTriangle, 
@@ -99,7 +98,7 @@ export default function ChannelConfigForm({
       try {
         console.log('🔄 Cargando credenciales existentes para edición...');
         
-        const response = await fetch(`${API_URL}/api/users/${userId}/credentials/${channelId}/details`);
+        const response = await fetch(`http://localhost:3002/api/users/${userId}/credentials/${channelId}/details`);
         const data = await response.json();
         
         if (data.success) {
@@ -210,7 +209,7 @@ export default function ChannelConfigForm({
       if (!saveResponse) return;
 
       // Luego validar
-      const response = await fetch(`${API_URL}/api/users/${userId}/credentials/${channelId}/validate`, {
+      const response = await fetch(`http://localhost:3002/api/users/${userId}/credentials/${channelId}/validate`, {
         method: 'POST'
       });
 
@@ -257,7 +256,7 @@ export default function ChannelConfigForm({
       // Determinar el método HTTP: PUT para editar existentes, POST para crear nuevas
       const httpMethod = existingCredentials ? 'PUT' : 'POST';
       
-      const response = await fetch(`${API_URL}/api/users/${userId}/credentials/${channelId}`, {
+      const response = await fetch(`http://localhost:3002/api/users/${userId}/credentials/${channelId}`, {
         method: httpMethod,
         headers: {
           'Content-Type': 'application/json'

@@ -32,7 +32,6 @@ import { useRouter } from "next/navigation"
 import { useAuth } from "@/contexts/AuthContext"
 import { PageLoadingSpinner } from "@/components/ui/loading-spinner"
 import { getErrorMessage, logError } from "@/lib/errors"
-import { API_URL } from '@/lib/config';
 
 interface Conexion {
   id: number
@@ -148,7 +147,7 @@ export default function MapeoPage({ params }: { params: Promise<{ id: string }> 
         setLoading(true)
         console.log(`🔄 Cargando conexión ${connectionId}...`)
 
-        const conexionData = await authFetchJSON<Conexion>(`${API_URL}/api/connections/${connectionId}`)
+        const conexionData = await authFetchJSON<Conexion>(`http://localhost:3002/api/connections/${connectionId}`)
         setConexion(conexionData)
         console.log("✅ Conexión cargada:", conexionData)
         setError(null)
@@ -181,7 +180,7 @@ export default function MapeoPage({ params }: { params: Promise<{ id: string }> 
         console.log(`🔄 Cargando campos origen para conexión ${connectionId}...`)
 
         const data = await authFetchJSON<{ success: boolean; fields: SourceField[] }>(
-          `${API_URL}/api/connections/${connectionId}/fields`
+          `http://localhost:3002/api/connections/${connectionId}/fields`
         )
 
         if (data.success && data.fields && Array.isArray(data.fields)) {
@@ -218,7 +217,7 @@ export default function MapeoPage({ params }: { params: Promise<{ id: string }> 
       try {
         console.log(`🔄 Cargando mapeo actual para conexión ${connectionId}...`)
 
-        const response = await authFetch(`${API_URL}/api/connections/${connectionId}/mappings`)
+        const response = await authFetch(`http://localhost:3002/api/connections/${connectionId}/mappings`)
         
         if (response.ok) {
           const existingMappings = await response.json()
@@ -515,7 +514,7 @@ export default function MapeoPage({ params }: { params: Promise<{ id: string }> 
       console.log("📤 Enviando mapeos al backend:", mappings)
       console.log("📤 Total de mapeos a enviar:", mappings.length)
 
-      const response = await authFetchJSON(`${API_URL}/api/connections/${connectionId}/mappings`, {
+      const response = await authFetchJSON(`http://localhost:3002/api/connections/${connectionId}/mappings`, {
         method: "POST",
         body: JSON.stringify({ mappings }),
       })
@@ -528,7 +527,7 @@ export default function MapeoPage({ params }: { params: Promise<{ id: string }> 
       try {
         console.log("🔄 Recargando mapeos para confirmar...")
         const reloadedMappings = await authFetchJSON<FieldMapping[]>(
-          `${API_URL}/api/connections/${connectionId}/mapping`
+          `http://localhost:3002/api/connections/${connectionId}/mapping`
         )
         
         console.log("📥 Mapeos recargados desde el backend:", reloadedMappings)
@@ -598,7 +597,7 @@ export default function MapeoPage({ params }: { params: Promise<{ id: string }> 
       setTesting(true)
       console.log("🔄 Probando mapeo...")
 
-      await authFetchJSON(`${API_URL}/api/connections/${connectionId}/test-mapping`, {
+      await authFetchJSON(`http://localhost:3002/api/connections/${connectionId}/test-mapping`, {
         method: "POST",
         body: JSON.stringify({ fieldMapping, transformations }),
       })
@@ -628,7 +627,7 @@ export default function MapeoPage({ params }: { params: Promise<{ id: string }> 
       setDeleting(true)
       console.log("🔄 Eliminando conexión...")
 
-      await authFetchJSON(`${API_URL}/api/connections/${connectionId}`, {
+      await authFetchJSON(`http://localhost:3002/api/connections/${connectionId}`, {
         method: "DELETE",
       })
 
