@@ -34,7 +34,7 @@ export default function LoginPage() {
       console.log('📧 Frontend Login: Email:', email)
       
       // Llamar directamente al backend
-      const apiUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3002'
+      const apiUrl = (process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3002').replace(/\/+$/, '')
       const response = await fetch(`${apiUrl}/api/auth/login`, {
         method: 'POST',
         headers: {
