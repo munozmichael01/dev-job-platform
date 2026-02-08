@@ -82,8 +82,8 @@ const allowedOrigins = [
   'http://localhost:3004', 'http://127.0.0.1:3004',
   'http://localhost:3006', 'http://127.0.0.1:3006',
   'http://localhost:3007', 'http://127.0.0.1:3007',
-  // Add prod domains via env: ALLOWED_ORIGINS=https://app.example.com,https://landing.example.com
-  ...(process.env.ALLOWED_ORIGINS ? process.env.ALLOWED_ORIGINS.split(',') : [])
+  // Add prod domains via env: CORS_ORIGIN=https://app.example.com,https://landing.example.com
+  ...(process.env.CORS_ORIGIN ? process.env.CORS_ORIGIN.split(',') : [])
 ];
 
 const corsOptions = {
