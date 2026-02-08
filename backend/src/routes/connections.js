@@ -188,21 +188,10 @@ router.post("/", addUserToRequest, requireAuth, onlyOwnData(), async (req, res) 
     // Usar UserId del usuario autenticado
     const userId = req.userId;
     console.log(`🔐 Creando conexión para usuario ${userId} (${req.user.email})`)
-    
-    // Obtener clientId del usuario - cada usuario tiene su cliente asociado
-    const clientQuery = await pool.request()
-      .input('userId', sql.BigInt, userId)
-      .query('SELECT Id FROM Clients WHERE UserId = @userId');
-    
-    let clientId;
-    if (clientQuery.recordset.length > 0) {
-      clientId = clientQuery.recordset[0].Id;
-      console.log(`🔐 Usuario ${userId} tiene clientId = ${clientId}`);
-    } else {
-      // Fallback: usar clientId = 1 (cliente por defecto)
-      clientId = 1;
-      console.log(`⚠️ Usuario ${userId} sin cliente asociado, usando clientId por defecto = ${clientId}`);
-    }
+
+    // ClientId: usar userId como clientId (simplificación - tabla Clients no existe en Supabase)
+    const clientId = userId;
+    console.log(`🔐 Usando userId ${userId} como clientId`)
     
     const result = await pool
       .request()

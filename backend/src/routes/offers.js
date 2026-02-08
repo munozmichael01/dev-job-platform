@@ -39,7 +39,7 @@ router.get('/unassigned', async (req, res) => {
         WHERE UserId = @UserId
       `);
       
-      const connectionCount = parseInt(connectionsResult.recordset[0].ConnectionCount || 0);
+      const connectionCount = parseInt(connectionsResult?.recordset?.[0]?.ConnectionCount || 0);
       
       console.log(`📊 Usuario ${req.userId} tiene ${connectionCount} conexiones`);
       
@@ -186,7 +186,7 @@ router.get('/stats', async (req, res) => {
         WHERE UserId = @UserId
       `);
       
-      const connectionCount = parseInt(connectionsResult.recordset[0].ConnectionCount || 0);
+      const connectionCount = parseInt(connectionsResult?.recordset?.[0]?.ConnectionCount || 0);
       
       console.log(`📊 Usuario ${req.userId} tiene ${connectionCount} conexiones para stats`);
       
