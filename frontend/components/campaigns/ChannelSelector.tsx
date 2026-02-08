@@ -21,6 +21,7 @@ import {
 } from 'lucide-react';
 import Link from 'next/link';
 import { useAuth } from '@/contexts/AuthContext';
+import { API_URL } from '@/lib/config';
 
 interface ChannelInfo {
   id: string;
@@ -99,14 +100,14 @@ export default function ChannelSelector({
     try {
       setLoading(true);
       // Cargar credenciales del usuario (ya expandidas por países desde el backend)
-      const credentialsResponse = await fetchWithAuth(`http://localhost:3002/api/users/${user.id}/credentials`);
+      const credentialsResponse = await fetchWithAuth(`${API_URL}/api/users/${user.id}/credentials`);
       const credentialsData = await credentialsResponse.json();
       
       // El backend ya maneja la expansión de Jooble por países
       setUserCredentials(credentialsData.channels || []);
       
       // Cargar canales disponibles desde la API del backend
-      const channelsResponse = await fetchWithAuth('http://localhost:3002/api/credentials/channels');
+      const channelsResponse = await fetchWithAuth(`${API_URL}/api/credentials/channels');
       if (channelsResponse.ok) {
         const channelsData = await channelsResponse.json();
         

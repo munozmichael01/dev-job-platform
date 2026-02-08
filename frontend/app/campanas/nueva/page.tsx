@@ -20,6 +20,7 @@ import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group"
 import { MultiSelect } from "@/components/ui/multi-select"
 import ChannelSelector from "@/components/campaigns/ChannelSelector"
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog"
+import { API_URL } from '@/lib/config';
 
 export default function NuevaCampanaPage() {
   const { toast } = useToast()
@@ -76,7 +77,7 @@ export default function NuevaCampanaPage() {
     
     const loadChannels = async () => {
       try {
-        const response = await fetchWithAuth(`http://localhost:3002/api/users/${user.id}/credentials`)
+        const response = await fetchWithAuth(`${API_URL}/api/users/${user.id}/credentials`)
         const data = await response.json()
         const configured = data.channels?.filter((c: any) => c.isActive && c.isValidated).map((c: any) => c.channelId) || []
         setConfiguredChannels(configured)
@@ -229,7 +230,7 @@ export default function NuevaCampanaPage() {
       setIsActivatingCampaign(true)
       
       // 2. Activar y enviar a canales
-      const activateResponse = await fetchWithAuth(`http://localhost:3002/api/campaigns/${campaignId}/activate`, {
+      const activateResponse = await fetchWithAuth(`${API_URL}/api/campaigns/${campaignId}/activate`, {
         method: 'POST',
       })
       
