@@ -1,5 +1,4 @@
-const sql = require('mssql');
-const { pool, poolConnect } = require('../../db/db');
+const { pool, poolConnect, sql } = require('../../db/db'); // sql from Supabase adapter
 
 /**
  * WhatJobsService - Servicio para integración con WhatJobs
