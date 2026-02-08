@@ -21,8 +21,6 @@ router.get("/", addUserToRequest, requireAuth, onlyOwnData(), async (req, res) =
   console.log(`🔍 GET /api/connections - Usuario: ${req.user.email} (${req.user.role})`)
 
   try {
-    await pool
-    
     // Construir query con filtrado por usuario (super admin ve todo)
     let query = `
       SELECT 
@@ -76,8 +74,6 @@ router.get("/:id", addUserToRequest, requireAuth, onlyOwnData(), async (req, res
   console.log(`🔍 GET /api/connections/${id} - Obtener conexión específica from origin:`, origin)
 
   try {
-    await pool
-    
     console.log(`🔍 GET /api/connections/${id} - Usuario: ${req.user.email} (${req.user.role})`)
     
     // Construir query con filtrado por usuario (super admin ve todo)
