@@ -12,6 +12,7 @@
   "license": "ISC",
   "description": "",
   "dependencies": {
+    "@supabase/supabase-js": "^2.95.3",
     "axios": "^1.9.0",
     "bcryptjs": "^3.0.2",
     "cors": "^2.8.5",
@@ -24,6 +25,7 @@
     "mssql": "^11.0.1",
     "node-cron": "^4.1.0",
     "nodemailer": "^7.0.5",
+    "pg": "^8.18.0",
     "swagger-ui-express": "^5.0.1",
     "xml2js": "^0.6.2",
     "yamljs": "^0.3.0"

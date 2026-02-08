@@ -19,3 +19,7 @@ backend/create_*.js
 backend/force_*.js
 backend/optimized_*.js
 backend/reprocess_*.js
+
+# Archivos SQL grandes de migración
+migracion-azure.sql
+*.sql.bak
