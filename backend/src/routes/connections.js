@@ -1,12 +1,13 @@
 const express = require("express")
 const router = express.Router()
-const { pool, sql } = require("../db/db") // sql now comes from db.js (Supabase adapter compatible)
-const { createClient } = require('@supabase/supabase-js')
+const { pool } = require("../db/db")
 const axios = require("axios")
 const xml2js = require("xml2js")
+const sql = require("mssql")
 const { addUserToRequest, requireAuth, onlyOwnData, getUserIdForQuery, isSuperAdmin, addUserIdToRequest } = require('../middleware/authMiddleware')
 
-// Initialize Supabase client
+// Supabase client para queries nativas
+const { createClient } = require('@supabase/supabase-js')
 const supabase = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL,
   process.env.SUPABASE_SERVICE_ROLE_KEY
@@ -31,7 +32,7 @@ router.get("/", addUserToRequest, requireAuth, onlyOwnData(), async (req, res) =
     console.log(`🔍 Connections DEBUG: req.userId = ${req.userId}, req.user.role = ${req.user.role}`);
     console.log(`🔍 Connections DEBUG: isSuperAdmin(req) = ${isSuperAdmin(req)}`);
 
-    // 🆕 SUPABASE NATIVO: Query builder con filtrado condicional
+    // Construir query Supabase con filtrado por usuario
     let query = supabase
       .from('Connections')
       .select('*')
@@ -48,7 +49,7 @@ router.get("/", addUserToRequest, requireAuth, onlyOwnData(), async (req, res) =
     const { data: connections, error } = await query;
 
     if (error) {
-      console.error('❌ Supabase select error:', error);
+      console.error('❌ Error Supabase en GET connections:', error);
       throw new Error(error.message);
     }
 
@@ -80,7 +81,7 @@ router.get("/:id", addUserToRequest, requireAuth, onlyOwnData(), async (req, res
   try {
     console.log(`🔍 GET /api/connections/${id} - Usuario: ${req.user.email} (${req.user.role})`)
 
-    // 🆕 SUPABASE NATIVO: Query builder con filtrado condicional
+    // Construir query Supabase con filtrado por usuario
     let query = supabase
       .from('Connections')
       .select('*')
@@ -94,19 +95,19 @@ router.get("/:id", addUserToRequest, requireAuth, onlyOwnData(), async (req, res
       console.log(`🔑 Super admin: accediendo a conexión ${id} sin filtro`);
     }
 
-    const { data, error } = await query.single();
+    const { data: connection, error } = await query.single();
 
     if (error) {
       if (error.code === 'PGRST116') {
         // No rows returned
         return res.status(404).json({ error: "Conexión no encontrada" })
       }
-      console.error('❌ Supabase select error:', error);
+      console.error('❌ Error Supabase en GET connection by id:', error);
       throw new Error(error.message);
     }
 
-    console.log("✅ Conexión encontrada:", data)
-    res.json(data)
+    console.log("✅ Conexión encontrada:", connection)
+    res.json(connection)
   } catch (error) {
     console.error("❌ Error obteniendo conexión:", error)
     res.status(500).json({
@@ -185,11 +186,24 @@ router.post("/", addUserToRequest, requireAuth, onlyOwnData(), async (req, res) 
     const userId = req.userId;
     console.log(`🔐 Creando conexión para usuario ${userId} (${req.user.email})`)
 
-    // ClientId: usar userId como clientId (simplificación - tabla Clients no existe en Supabase)
-    const clientId = userId;
-    console.log(`🔐 Usando userId ${userId} como clientId`)
+    // Obtener clientId del usuario - cada usuario tiene su cliente asociado
+    const { data: clients, error: clientError } = await supabase
+      .from('Clients')
+      .select('Id')
+      .eq('UserId', userId)
+      .single();
 
-    // 🆕 SUPABASE NATIVO: Insertar usando query builder
+    let clientId;
+    if (clientError || !clients) {
+      // Fallback: usar clientId = 1 (cliente por defecto)
+      clientId = 1;
+      console.log(`⚠️ Usuario ${userId} sin cliente asociado, usando clientId por defecto = ${clientId}`);
+    } else {
+      clientId = clients.Id;
+      console.log(`🔐 Usuario ${userId} tiene clientId = ${clientId}`);
+    }
+
+    // Crear la nueva conexión usando Supabase nativo
     const insertData = {
       name,
       type,
@@ -211,8 +225,6 @@ router.post("/", addUserToRequest, requireAuth, onlyOwnData(), async (req, res) 
       CreatedAt: new Date().toISOString()
     };
 
-    console.log('🔧 Supabase INSERT data:', insertData);
-
     const { data: newConnection, error } = await supabase
       .from('Connections')
       .insert(insertData)
@@ -220,7 +232,7 @@ router.post("/", addUserToRequest, requireAuth, onlyOwnData(), async (req, res) 
       .single();
 
     if (error) {
-      console.error('❌ Supabase insert error:', error);
+      console.error('❌ Error Supabase en POST connection:', error);
       throw new Error(error.message);
     }
 
@@ -265,7 +277,7 @@ router.put("/:id", addUserToRequest, requireAuth, onlyOwnData(), async (req, res
   })
 
   try {
-    // 🆕 SUPABASE NATIVO: Verificar existencia y pertenencia
+    // Verificar que la conexión existe y pertenece al usuario (excepto super admin)
     let verifyQuery = supabase
       .from('Connections')
       .select('id, UserId')
@@ -283,7 +295,7 @@ router.put("/:id", addUserToRequest, requireAuth, onlyOwnData(), async (req, res
       return res.status(404).json({ error: "Conexión no encontrada" })
     }
 
-    // 🆕 SUPABASE NATIVO: Actualizar conexión
+    // Actualizar conexión con Supabase nativo
     const updateData = {
       name,
       type,
@@ -307,7 +319,7 @@ router.put("/:id", addUserToRequest, requireAuth, onlyOwnData(), async (req, res
       .single();
 
     if (updateError) {
-      console.error('❌ Supabase update error:', updateError);
+      console.error('❌ Error Supabase en PUT connection:', updateError);
       throw new Error(updateError.message);
     }
 
@@ -329,7 +341,7 @@ router.delete("/:id", addUserToRequest, requireAuth, onlyOwnData(), async (req, 
   console.log(`🔍 DELETE /api/connections/:id - Usuario: ${req.user.email} (${req.user.role}) - ID: ${id}`)
 
   try {
-    // 🆕 SUPABASE NATIVO: Verificar existencia y pertenencia
+    // Verificar que la conexión existe y pertenece al usuario (excepto super admin)
     let verifyQuery = supabase
       .from('Connections')
       .select('id, UserId')
@@ -347,24 +359,25 @@ router.delete("/:id", addUserToRequest, requireAuth, onlyOwnData(), async (req, 
       return res.status(404).json({ error: "Conexión no encontrada" })
     }
 
-    // 🆕 SUPABASE NATIVO: Eliminar mapeos de campos relacionados primero
-    const { error: deleteMappingsError } = await supabase
+    // Eliminar mapeos de campos relacionados primero
+    const { error: mappingsError } = await supabase
       .from('ClientFieldMappings')
       .delete()
       .eq('ConnectionId', id);
 
-    if (deleteMappingsError) {
-      console.warn('⚠️  Error eliminando mapeos (puede que no existan):', deleteMappingsError.message);
+    if (mappingsError) {
+      console.error('❌ Error eliminando mapeos:', mappingsError);
+      // Continuar con eliminación de conexión aunque falle mapeos
     }
 
-    // 🆕 SUPABASE NATIVO: Eliminar conexión
+    // Eliminar conexión usando Supabase nativo
     const { error: deleteError } = await supabase
       .from('Connections')
       .delete()
       .eq('id', id);
 
     if (deleteError) {
-      console.error('❌ Supabase delete error:', deleteError);
+      console.error('❌ Error Supabase en DELETE connection:', deleteError);
       throw new Error(deleteError.message);
     }
 
@@ -396,6 +409,8 @@ router.post("/:id/import", addUserIdToRequest, requireAuth, onlyOwnData('UserId'
   console.log(`🔍 POST /api/connections/:id/import - ID: ${id} from origin:`, origin)
 
   try {
+    await pool
+
     // ✅ PROTECCIÓN: Verificar que la conexión no esté ya importando
     const statusCheck = await pool
       .request()
