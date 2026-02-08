@@ -1411,21 +1411,26 @@ process.on('unhandledRejection', (reason, promise) => {
   console.error('Promise:', promise);
 });
 
-const server = app.listen(PORT, () => {
-  console.log(`✅ API running on http://localhost:${PORT}`);
-  console.log('📊 Available endpoints:');
-  console.log(`  - GET http://localhost:${PORT}/`);
-  console.log(`  - GET http://localhost:${PORT}/swagger`);
-  console.log(`  - GET http://localhost:${PORT}/api/connections`);
-  console.log('🚀 🚀 🚀 CLAUDE DEBUG: NEW VERSION WITH DEBUG LOGS LOADED! 🚀 🚀 🚀');
-});
+// Only listen on port if not in Vercel serverless environment
+if (process.env.VERCEL !== '1') {
+  const server = app.listen(PORT, () => {
+    console.log(`✅ API running on http://localhost:${PORT}`);
+    console.log('📊 Available endpoints:');
+    console.log(`  - GET http://localhost:${PORT}/`);
+    console.log(`  - GET http://localhost:${PORT}/swagger`);
+    console.log(`  - GET http://localhost:${PORT}/api/connections`);
+    console.log('🚀 Backend running in local mode');
+  });
 
-server.on('error', (err) => {
-  console.error('🚀 CLAUDE DEBUG: SERVER ERROR!', err);
-});
+  server.on('error', (err) => {
+    console.error('🚀 SERVER ERROR!', err);
+  });
+} else {
+  console.log('🚀 Backend running in Vercel serverless mode');
+}
 
-// ✅ MANTENER EL PROCESO VIVO
-console.log('🚀 CLAUDE DEBUG: Process should remain alive...');// Force restart
+// Export for Vercel serverless
+module.exports = app;
 
 // CORS fix applied
 
