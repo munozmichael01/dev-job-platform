@@ -45,57 +45,36 @@ function setCachedData(key, data) {
 const USE_INDEX_HINTS = process.env.USE_INDEX_HINTS === 'true';
 // require('./scheduler'); // Disabled for Vercel deployment (serverless functions don't support cron)
 
-// ✅ SETUP LOGGING TO FILE
+// ✅ SETUP LOGGING (Vercel-compatible - no file writes)
 const originalConsoleLog = console.log;
 const originalConsoleError = console.error;
 
 console.log = function(...args) {
   const timestamp = new Date().toISOString();
-  const message = args.map(arg => typeof arg === 'object' ? JSON.stringify(arg) : arg).join(' ');
-  const logEntry = `${timestamp} - ${message}\n`;
-  
-  // Write to file
-  try {
-    fs.appendFileSync(path.join(__dirname, 'debug.log'), logEntry);
-  } catch (err) {
-    originalConsoleLog('Failed to write to debug.log:', err);
-  }
-  
-  // ALWAYS show in console (CLAUDE DEBUG FIX)
-  originalConsoleLog(...args);
+  originalConsoleLog(`[${timestamp}]`, ...args);
 };
 
 console.error = function(...args) {
   const timestamp = new Date().toISOString();
-  const message = args.map(arg => typeof arg === 'object' ? JSON.stringify(arg) : arg).join(' ');
-  const logEntry = `${timestamp} - ERROR: ${message}\n`;
-  
-  // Write to file
-  try {
-    fs.appendFileSync(path.join(__dirname, 'debug.log'), logEntry);
-  } catch (err) {
-    originalConsoleLog('Failed to write error to debug.log:', err);
-  }
-  
-  // ALWAYS show in console (CLAUDE DEBUG FIX)
-  originalConsoleError(...args);
+  originalConsoleError(`[${timestamp}] ERROR:`, ...args);
 };
 
 const app = express();
-const { ensureTables } = require('./src/db/bootstrap');
-const { performanceTracker } = require('./src/services/performanceTracker');
+// Disabled for Vercel serverless - tables should already exist
+// const { ensureTables } = require('./src/db/bootstrap');
+// const { performanceTracker } = require('./src/services/performanceTracker');
 
-ensureTables().catch(err => console.error('ensureTables error', err));
+// ensureTables().catch(err => console.error('ensureTables error', err));
 
-// Iniciar tracking de performance automático
-setTimeout(() => {
-  try {
-    performanceTracker.start();
-    console.log('🚀 Sistema de tracking de performance iniciado');
-  } catch (error) {
-    console.error('❌ Error iniciando performance tracker:', error.message);
-  }
-}, 5000); // Esperar 5 segundos para que se complete la inicialización
+// Performance tracker disabled for Vercel serverless
+// setTimeout(() => {
+//   try {
+//     performanceTracker.start();
+//     console.log('🚀 Sistema de tracking de performance iniciado');
+//   } catch (error) {
+//     console.error('❌ Error iniciando performance tracker:', error.message);
+//   }
+// }, 5000);
 // CORS configuration (production-ready)
 const allowedOrigins = [
   'http://localhost:3000', 'http://127.0.0.1:3000', // Landing (Next.js)
