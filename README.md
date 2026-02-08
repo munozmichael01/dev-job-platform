@@ -99,4 +99,4 @@ npm run dev
 ## 7. Contacto y Soporte
 
 - Para dudas técnicas, revisa este README y la documentación Swagger.
-- Si necesitas ayuda adicional, contacta al responsable del proyecto o al equipo de desarrollo. 
+- Si necesitas ayuda adicional, contacta al responsable del proyecto o al equipo de desarrollo. # Deployment fix - Forcing clean deployment with correct Next.js settings
