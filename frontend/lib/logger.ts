@@ -187,17 +187,19 @@ class Logger {
     try {
       // In production, send logs to your logging service
       if (process.env.NODE_ENV === 'production') {
-        // TODO: Replace with your actual logging endpoint
-        const response = await fetch('/api/logs', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ logs: logsToSend }),
-        })
+        // DISABLED: No logging endpoint configured yet
+        // TODO: Implement /api/logs endpoint or use external logging service
+        // const response = await fetch('/api/logs', {
+        //   method: 'POST',
+        //   headers: { 'Content-Type': 'application/json' },
+        //   body: JSON.stringify({ logs: logsToSend }),
+        // })
+        // if (!response.ok) {
+        //   this.logBuffer = logsToSend.concat(this.logBuffer)
+        // }
 
-        if (!response.ok) {
-          // Re-add logs to buffer if send failed
-          this.logBuffer = logsToSend.concat(this.logBuffer)
-        }
+        // For now, just log to console in production
+        console.log('Logs to send:', logsToSend)
       }
     } catch (error) {
       // Re-add logs to buffer if send failed
