@@ -265,59 +265,52 @@ router.put("/:id", addUserToRequest, requireAuth, onlyOwnData(), async (req, res
   })
 
   try {
-    // Verificar que la conexión existe y pertenece al usuario (excepto super admin)
-    let existingQuery = "SELECT id, UserId FROM Connections WHERE id = @id";
-    const existingRequest = pool.request().input("id", sql.Int, id);
-    
+    // 🆕 SUPABASE NATIVO: Verificar existencia y pertenencia
+    let verifyQuery = supabase
+      .from('Connections')
+      .select('id, UserId')
+      .eq('id', id);
+
     if (!isSuperAdmin(req)) {
-      existingQuery += " AND UserId = @userId";
-      existingRequest.input("userId", sql.BigInt, req.userId);
+      verifyQuery = verifyQuery.eq('UserId', req.userId);
       console.log(`🔒 Verificando conexión ${id} para usuario ${req.userId}`);
     }
-    
-    const existingResult = await existingRequest.query(existingQuery);
 
-    if (existingResult.recordset.length === 0) {
+    const { data: existing, error: verifyError } = await verifyQuery.single();
+
+    if (verifyError || !existing) {
       console.log(`❌ Conexión no encontrada: ${id}`)
       return res.status(404).json({ error: "Conexión no encontrada" })
     }
 
-    // Actualizar conexión
-    const result = await pool
-      .request()
-      .input("id", sql.Int, id)
-      .input("name", sql.NVarChar(255), name)
-      .input("type", sql.NVarChar(50), type)
-      .input("url", sql.NVarChar(sql.MAX), url)
-      .input("frequency", sql.NVarChar(50), frequency)
-      .input("method", sql.NVarChar(10), method || null)
-      .input("headers", sql.NVarChar(sql.MAX), headers || null)
-      .input("body", sql.NVarChar(sql.MAX), body || null)
-      .input("sourceType", sql.NVarChar(500), sourceType || null)
-      .input("endpoint", sql.NVarChar(500), endpoint || null)
-      .input("payloadTemplate", sql.NVarChar(sql.MAX), payloadTemplate || null)
-      .input("feedUrl", sql.NVarChar(500), feedUrl || null)
-      .input("notes", sql.NVarChar(sql.MAX), notes || null)
-      .query(`
-        UPDATE Connections 
-        SET 
-          name = @name,
-          type = @type,
-          url = @url,
-          frequency = @frequency,
-          Method = @method,
-          Headers = @headers,
-          Body = @body,
-          SourceType = @sourceType,
-          Endpoint = @endpoint,
-          PayloadTemplate = @payloadTemplate,
-          FeedUrl = @feedUrl,
-          Notes = @notes
-        OUTPUT INSERTED.*
-        WHERE id = @id
-      `)
+    // 🆕 SUPABASE NATIVO: Actualizar conexión
+    const updateData = {
+      name,
+      type,
+      url,
+      frequency,
+      Method: method || null,
+      Headers: headers || null,
+      Body: body || null,
+      SourceType: sourceType || null,
+      Endpoint: endpoint || null,
+      PayloadTemplate: payloadTemplate || null,
+      FeedUrl: feedUrl || null,
+      Notes: notes || null
+    };
 
-    const updatedConnection = result.recordset[0]
+    const { data: updatedConnection, error: updateError } = await supabase
+      .from('Connections')
+      .update(updateData)
+      .eq('id', id)
+      .select()
+      .single();
+
+    if (updateError) {
+      console.error('❌ Supabase update error:', updateError);
+      throw new Error(updateError.message);
+    }
+
     console.log("✅ Conexión actualizada exitosamente:", updatedConnection)
 
     res.json(updatedConnection)
@@ -336,31 +329,44 @@ router.delete("/:id", addUserToRequest, requireAuth, onlyOwnData(), async (req, 
   console.log(`🔍 DELETE /api/connections/:id - Usuario: ${req.user.email} (${req.user.role}) - ID: ${id}`)
 
   try {
-    // Verificar que la conexión existe y pertenece al usuario (excepto super admin)
-    let existingQuery = "SELECT id, UserId FROM Connections WHERE id = @id";
-    const existingRequest = pool.request().input("id", sql.Int, id);
-    
+    // 🆕 SUPABASE NATIVO: Verificar existencia y pertenencia
+    let verifyQuery = supabase
+      .from('Connections')
+      .select('id, UserId')
+      .eq('id', id);
+
     if (!isSuperAdmin(req)) {
-      existingQuery += " AND UserId = @userId";
-      existingRequest.input("userId", sql.BigInt, req.userId);
+      verifyQuery = verifyQuery.eq('UserId', req.userId);
       console.log(`🔒 Verificando conexión ${id} para eliminación por usuario ${req.userId}`);
     }
-    
-    const existingResult = await existingRequest.query(existingQuery);
 
-    if (existingResult.recordset.length === 0) {
+    const { data: existing, error: verifyError } = await verifyQuery.single();
+
+    if (verifyError || !existing) {
       console.log(`❌ Conexión no encontrada: ${id}`)
       return res.status(404).json({ error: "Conexión no encontrada" })
     }
 
-    // Eliminar mapeos de campos relacionados primero
-    await pool
-      .request()
-      .input("connectionId", sql.Int, id)
-      .query("DELETE FROM ClientFieldMappings WHERE ConnectionId = @connectionId")
+    // 🆕 SUPABASE NATIVO: Eliminar mapeos de campos relacionados primero
+    const { error: deleteMappingsError } = await supabase
+      .from('ClientFieldMappings')
+      .delete()
+      .eq('ConnectionId', id);
 
-    // Eliminar conexión
-    await pool.request().input("id", sql.Int, id).query("DELETE FROM Connections WHERE id = @id")
+    if (deleteMappingsError) {
+      console.warn('⚠️  Error eliminando mapeos (puede que no existan):', deleteMappingsError.message);
+    }
+
+    // 🆕 SUPABASE NATIVO: Eliminar conexión
+    const { error: deleteError } = await supabase
+      .from('Connections')
+      .delete()
+      .eq('id', id);
+
+    if (deleteError) {
+      console.error('❌ Supabase delete error:', deleteError);
+      throw new Error(deleteError.message);
+    }
 
     console.log(`✅ Conexión eliminada exitosamente: ${id}`)
     res.json({ message: "Conexión eliminada exitosamente" })
