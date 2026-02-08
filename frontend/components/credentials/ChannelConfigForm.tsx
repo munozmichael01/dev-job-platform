@@ -10,19 +10,19 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Badge } from '@/components/ui/badge';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
-import { 
-import { API_URL } from '@/lib/config';
-  Save, 
-  X, 
-  AlertTriangle, 
-  CheckCircle, 
-  Eye, 
+import {
+  Save,
+  X,
+  AlertTriangle,
+  CheckCircle,
+  Eye,
   EyeOff,
   RefreshCw,
   HelpCircle,
   Plus,
   Trash2
 } from 'lucide-react';
+import { API_URL } from '@/lib/config';
 
 interface ChannelConfigFormProps {
   channelId: string;
