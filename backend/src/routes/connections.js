@@ -409,40 +409,33 @@ router.post("/:id/import", addUserIdToRequest, requireAuth, onlyOwnData('UserId'
   console.log(`🔍 POST /api/connections/:id/import - ID: ${id} from origin:`, origin)
 
   try {
-    await pool
-
     // ✅ PROTECCIÓN: Verificar que la conexión no esté ya importando
-    const statusCheck = await pool
-      .request()
-      .input("id", sql.Int, id)
-      .query("SELECT status FROM Connections WHERE id = @id")
+    const { data: statusCheck, error: statusError } = await supabase
+      .from('Connections')
+      .select('status')
+      .eq('id', id)
+      .single();
 
-    if (statusCheck.recordset.length > 0 && statusCheck.recordset[0].status === 'importing') {
+    if (!statusError && statusCheck && statusCheck.status === 'importing') {
       console.log(`⚠️ Importación ya en progreso para conexión ${id}`)
-      return res.status(409).json({ 
-        error: "Importación ya en progreso", 
-        message: "Esta conexión ya se está procesando. Espera a que termine." 
+      return res.status(409).json({
+        error: "Importación ya en progreso",
+        message: "Esta conexión ya se está procesando. Espera a que termine."
       })
     }
 
-    // Obtener la conexión
-    const connectionResult = await pool
-      .request()
-      .input("id", sql.Int, id)
-      .query(`
-        SELECT 
-          id, name, type, url, frequency, status, lastSync, importedOffers, errorCount, 
-          Method, Headers, Body, CreatedAt, UserId
-        FROM Connections 
-        WHERE id = @id
-      `)
+    // Obtener la conexión con Supabase
+    const { data: connection, error: connError } = await supabase
+      .from('Connections')
+      .select('*')
+      .eq('id', id)
+      .single();
 
-    if (connectionResult.recordset.length === 0) {
+    if (connError || !connection) {
       console.log(`❌ Conexión no encontrada: ${id}`)
       return res.status(404).json({ error: "Conexión no encontrada" })
     }
 
-    const connection = connectionResult.recordset[0]
     console.log("✅ Conexión encontrada para importación:", connection)
 
     // Usar minúsculas para acceder a los campos (CORRECCIÓN PRINCIPAL)
@@ -842,26 +835,18 @@ router.get("/:id/fields", addUserToRequest, requireAuth, async (req, res) => {
   console.log(`🔍 GET /api/connections/:id/fields - ID: ${id}`)
 
   try {
-    await pool
+    // Obtener la conexión con Supabase
+    const { data: connection, error: connError } = await supabase
+      .from('Connections')
+      .select('*')
+      .eq('id', id)
+      .single();
 
-    // Obtener la conexión
-    const connectionResult = await pool
-      .request()
-      .input("id", sql.Int, id)
-      .query(`
-        SELECT 
-          id, name, type, url, frequency, status, lastSync, importedOffers, errorCount, 
-          Method, Headers, Body, CreatedAt, UserId
-        FROM Connections 
-        WHERE id = @id
-      `)
-
-    if (connectionResult.recordset.length === 0) {
+    if (connError || !connection) {
       console.log(`❌ Conexión no encontrada: ${id}`)
       return res.status(404).json({ error: "Conexión no encontrada" })
     }
 
-    const connection = connectionResult.recordset[0]
     console.log("✅ Conexión encontrada para detección de campos:", connection)
 
     // Usar minúsculas para acceder a los campos (CORRECCIÓN PRINCIPAL)
@@ -892,18 +877,16 @@ router.get("/:id/fields", addUserToRequest, requireAuth, async (req, res) => {
         
         try {
           // Buscar si hay ofertas procesadas para esta conexión para obtener estructura real
-          const offersResult = await pool
-            .request()
-            .input("connectionId", sql.Int, connection.id)
-            .query(`
-              SELECT TOP 1 * FROM JobOffers 
-              WHERE ConnectionId = @connectionId 
-              ORDER BY CreatedAt DESC
-            `)
+          const { data: offers, error: offersError } = await supabase
+            .from('JobOffers')
+            .select('*')
+            .eq('ConnectionId', connection.id)
+            .order('CreatedAt', { ascending: false })
+            .limit(1);
 
-          if (offersResult.recordset.length > 0) {
+          if (!offersError && offers && offers.length > 0) {
             // Hay ofertas procesadas, detectar campos basado en los datos reales
-            const sampleOffer = offersResult.recordset[0]
+            const sampleOffer = offers[0]
             console.log("✅ Detectando campos basado en oferta procesada")
             
             const detectedFields = []
