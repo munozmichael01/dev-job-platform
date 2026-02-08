@@ -183,8 +183,6 @@ router.post("/", addUserToRequest, requireAuth, onlyOwnData(), async (req, res) 
       })
     }
 
-    await pool
-    
     // Usar UserId del usuario autenticado
     const userId = req.userId;
     console.log(`🔐 Creando conexión para usuario ${userId} (${req.user.email})`)
@@ -268,8 +266,6 @@ router.put("/:id", addUserToRequest, requireAuth, onlyOwnData(), async (req, res
   })
 
   try {
-    await pool
-    
     // Verificar que la conexión existe y pertenece al usuario (excepto super admin)
     let existingQuery = "SELECT id, UserId FROM Connections WHERE id = @id";
     const existingRequest = pool.request().input("id", sql.Int, id);
@@ -341,8 +337,6 @@ router.delete("/:id", addUserToRequest, requireAuth, onlyOwnData(), async (req, 
   console.log(`🔍 DELETE /api/connections/:id - Usuario: ${req.user.email} (${req.user.role}) - ID: ${id}`)
 
   try {
-    await pool
-
     // Verificar que la conexión existe y pertenece al usuario (excepto super admin)
     let existingQuery = "SELECT id, UserId FROM Connections WHERE id = @id";
     const existingRequest = pool.request().input("id", sql.Int, id);
@@ -397,8 +391,6 @@ router.post("/:id/import", addUserIdToRequest, requireAuth, onlyOwnData('UserId'
   console.log(`🔍 POST /api/connections/:id/import - ID: ${id} from origin:`, origin)
 
   try {
-    await pool
-
     // ✅ PROTECCIÓN: Verificar que la conexión no esté ya importando
     const statusCheck = await pool
       .request()
