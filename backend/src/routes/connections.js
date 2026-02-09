@@ -361,7 +361,7 @@ router.delete("/:id", addUserToRequest, requireAuth, onlyOwnData(), async (req, 
 
     // Eliminar mapeos de campos relacionados primero
     const { error: mappingsError } = await supabase
-      .from('ClientFieldMappings')
+      .from('FieldMappings')
       .delete()
       .eq('ConnectionId', id);
 
@@ -1159,7 +1159,7 @@ router.get("/:id/mappings", addUserToRequest, requireAuth, async (req, res) => {
 
     // Get mappings using Supabase
     const { data: mappings, error } = await supabase
-      .from('ClientFieldMappings')
+      .from('FieldMappings')
       .select('*')
       .eq('ConnectionId', id)
       .order('TargetField');
@@ -1212,7 +1212,7 @@ router.post("/:id/mappings", addUserToRequest, requireAuth, async (req, res) => 
     // Eliminar mapeos existentes usando Supabase
     console.log("🗑️ Eliminando mapeos existentes...")
     const { error: deleteError } = await supabase
-      .from('ClientFieldMappings')
+      .from('FieldMappings')
       .delete()
       .eq('ConnectionId', id);
 
@@ -1235,7 +1235,7 @@ router.post("/:id/mappings", addUserToRequest, requireAuth, async (req, res) => 
     console.log(`📤 Insertando ${mappingsToInsert.length} mapeos...`);
 
     const { data: inserted, error: insertError } = await supabase
-      .from('ClientFieldMappings')
+      .from('FieldMappings')
       .insert(mappingsToInsert)
       .select();
 
