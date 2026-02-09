@@ -1195,19 +1195,7 @@ router.post("/:id/mappings", addUserToRequest, requireAuth, async (req, res) => 
       return res.status(400).json({ error: "Los mapeos deben ser un array" })
     }
 
-    // Obtener ClientId de la conexión usando Supabase
-    const { data: connection, error: connError } = await supabase
-      .from('Connections')
-      .select('clientId')
-      .eq('id', id)
-      .single();
-
-    if (connError || !connection) {
-      throw new Error("ClientId no encontrado para esta conexión")
-    }
-
-    const clientId = connection.clientId;
-    console.log(`🔐 Usando ClientId = ${clientId} para conexión ${id}`)
+    console.log(`📋 Guardando mapeos para conexión ${id}`)
 
     // Eliminar mapeos existentes usando Supabase
     console.log("🗑️ Eliminando mapeos existentes...")
@@ -1221,15 +1209,14 @@ router.post("/:id/mappings", addUserToRequest, requireAuth, async (req, res) => 
       // Continuar de todas formas
     }
 
-    // Insertar nuevos mapeos usando Supabase
+    // Insertar nuevos mapeos usando Supabase (sin ClientId - no existe en tabla)
     console.log(`📋 Total de mapeos a procesar: ${mappings.length}`)
     const mappingsToInsert = mappings.map(mapping => ({
       ConnectionId: parseInt(id),
-      ClientId: clientId,
       SourceField: mapping.sourceField || mapping.SourceField,
       TargetField: mapping.targetField || mapping.TargetField,
       TransformationType: mapping.TransformationType || mapping.transformation || "STRING",
-      TransformationRule: mapping.TransformationRule || mapping.transformationRule || null
+      TransformationConfig: mapping.TransformationRule || mapping.transformationRule || mapping.TransformationConfig || null
     }));
 
     console.log(`📤 Insertando ${mappingsToInsert.length} mapeos...`);
