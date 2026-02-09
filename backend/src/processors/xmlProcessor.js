@@ -1,6 +1,6 @@
 const axios = require("axios")
 const xml2js = require("xml2js")
-const { pool, sql } = require("../db/db")
+const { pool, sql, supabase } = require("../db/db")
 const { updateOfferStatusByGoals } = require("../utils/statusUpdater")
 
 class XMLProcessor {
@@ -648,97 +648,58 @@ class XMLProcessor {
       console.log("🐛 DEBUG - Saving offer with ExternalId:", offer.ExternalId)
       console.log("🐛 DEBUG - ConnectionId:", offer.ConnectionId, "this.connection.id:", this.connection.id)
       console.log("🐛 DEBUG - UserId:", this.connection.UserId, this.connection.userId)
-      
-      await pool
-        .request()
-        .input("ExternalId", sql.NVarChar(255), String(offer.ExternalId === undefined ? '' : offer.ExternalId).substring(0, 255))
-        .input("Title", sql.NVarChar(255), (offer.Title || "").substring(0, 255))
-        .input("JobTitle", sql.NVarChar(255), (offer.JobTitle || offer.Title || "").substring(0, 255))
-        .input("Description", sql.NVarChar(sql.MAX), offer.Description || "")
-        .input("CompanyName", sql.NVarChar(255), (offer.CompanyName || "").substring(0, 255))
-        .input("Sector", sql.NVarChar(255), (offer.Sector || "").substring(0, 255))
-        .input("Address", sql.NVarChar(255), (offer.Address || "").substring(0, 255))
-        .input("Country", sql.NVarChar(100), (offer.Country || "").substring(0, 100))
-        .input("CountryId", sql.Int, this.safeNumber(offer.CountryId))
-        .input("Region", sql.NVarChar(100), (offer.Region || "").substring(0, 100))
-        .input("RegionId", sql.Int, this.safeNumber(offer.RegionId))
-        .input("City", sql.NVarChar(100), (offer.City || "").substring(0, 100))
-        .input("CityId", sql.Int, this.safeNumber(offer.CityId))
-        .input("Postcode", sql.NVarChar(20), (offer.Postcode || "").substring(0, 20))
-        .input("Latitude", sql.Decimal(9, 6), this.safeDecimal(offer.Latitude, null))
-        .input("Longitude", sql.Decimal(9, 6), this.safeDecimal(offer.Longitude, null))
-        .input("Vacancies", sql.Int, this.safeNumber(offer.Vacancies, 1))
-        .input("SalaryMin", sql.Decimal(10, 2), this.safeDecimal(offer.SalaryMin, 0))
-        .input("SalaryMax", sql.Decimal(10, 2), this.safeDecimal(offer.SalaryMax, 0))
-        .input("JobType", sql.NVarChar(100), (offer.JobType || "").substring(0, 100))
-        .input("ExternalUrl", sql.NVarChar(500), (offer.ExternalUrl || "").substring(0, 500))
-        .input("ApplicationUrl", sql.NVarChar(500), (offer.ApplicationUrl || "").substring(0, 500))
-        .input("Budget", sql.Decimal(10, 2), this.safeDecimal(offer.Budget, 10))
-        .input("BudgetSpent", sql.Decimal(10, 2), this.safeDecimal(offer.BudgetSpent, 0))
-        .input("ApplicationsGoal", sql.Int, this.safeNumber(offer.ApplicationsGoal, 50))
-        .input("ApplicationsReceived", sql.Int, this.safeNumber(offer.ApplicationsReceived, 0))
-        .input("StatusId", sql.Int, this.safeNumber(offer.StatusId, 1))
-        .input("ConnectionId", sql.Int, this.safeNumber(offer.ConnectionId || this.connection.id))
-        .input("UserId", sql.BigInt, this.safeNumber(this.connection.UserId || this.connection.userId))
-        .input("Source", sql.NVarChar(10), (offer.Source || "XML").substring(0, 10))
-        .input("PublicationDate", sql.DateTime, offer.PublicationDate || new Date())
-        .input("CreatedAt", sql.DateTime, offer.CreatedAt || new Date())
-        .query(`
-          MERGE INTO JobOffers WITH (HOLDLOCK) AS Target
-          USING (SELECT @ExternalId AS ExternalId, @ConnectionId AS ConnectionId) AS Source
-          ON Target.ExternalId = Source.ExternalId AND Target.ConnectionId = Source.ConnectionId
-          WHEN MATCHED THEN
-            UPDATE SET 
-              Title = @Title,
-              JobTitle = @JobTitle,
-              Description = @Description,
-              CompanyName = @CompanyName,
-              Sector = @Sector,
-              Address = @Address,
-              Country = @Country,
-              CountryId = @CountryId,
-              Region = @Region,
-              RegionId = @RegionId,
-              City = @City,
-              CityId = @CityId,
-              Postcode = @Postcode,
-              Latitude = @Latitude,
-              Longitude = @Longitude,
-              Vacancies = @Vacancies,
-              SalaryMin = @SalaryMin,
-              SalaryMax = @SalaryMax,
-              JobType = @JobType,
-              ExternalUrl = @ExternalUrl,
-              ApplicationUrl = @ApplicationUrl,
-              Budget = @Budget,
-              BudgetSpent = @BudgetSpent,
-              ApplicationsGoal = @ApplicationsGoal,
-              ApplicationsReceived = @ApplicationsReceived,
-              StatusId = CASE 
-                WHEN Target.StatusId = 2 THEN 2  -- Mantener pausadas manuales
-                WHEN Target.StatusId = 5 THEN 5  -- Mantener archivadas manuales
-                ELSE 1  -- Activar las demás (recibidas en XML)
-              END,
-              UserId = @UserId,
-              Source = @Source,
-              PublicationDate = @PublicationDate,
-              UpdatedAt = GETDATE()
-          WHEN NOT MATCHED THEN
-            INSERT (
-              ExternalId, Title, JobTitle, Description, CompanyName, Sector, Address,
-              Country, CountryId, Region, RegionId, City, CityId, Postcode,
-              Latitude, Longitude, Vacancies, SalaryMin, SalaryMax, JobType,
-              ExternalUrl, ApplicationUrl, Budget, BudgetSpent, ApplicationsGoal,
-              ApplicationsReceived, StatusId, ConnectionId, UserId, Source, PublicationDate, CreatedAt
-            )
-            VALUES (
-              @ExternalId, @Title, @JobTitle, @Description, @CompanyName, @Sector, @Address,
-              @Country, @CountryId, @Region, @RegionId, @City, @CityId, @Postcode,
-              @Latitude, @Longitude, @Vacancies, @SalaryMin, @SalaryMax, @JobType,
-              @ExternalUrl, @ApplicationUrl, @Budget, @BudgetSpent, @ApplicationsGoal,
-              @ApplicationsReceived, @StatusId, @ConnectionId, @UserId, @Source, @PublicationDate, @CreatedAt
-            );
-        `)
+
+      // Prepare data for upsert (Supabase native)
+      const offerData = {
+        ExternalId: String(offer.ExternalId === undefined ? '' : offer.ExternalId).substring(0, 255),
+        Title: (offer.Title || "").substring(0, 255),
+        JobTitle: (offer.JobTitle || offer.Title || "").substring(0, 255),
+        Description: offer.Description || "",
+        CompanyName: (offer.CompanyName || "").substring(0, 255),
+        Sector: (offer.Sector || "").substring(0, 255),
+        Address: (offer.Address || "").substring(0, 255),
+        Country: (offer.Country || "").substring(0, 100),
+        CountryId: this.safeNumber(offer.CountryId),
+        Region: (offer.Region || "").substring(0, 100),
+        RegionId: this.safeNumber(offer.RegionId),
+        City: (offer.City || "").substring(0, 100),
+        CityId: this.safeNumber(offer.CityId),
+        Postcode: (offer.Postcode || "").substring(0, 20),
+        Latitude: this.safeDecimal(offer.Latitude, null),
+        Longitude: this.safeDecimal(offer.Longitude, null),
+        Vacancies: this.safeNumber(offer.Vacancies, 1),
+        SalaryMin: this.safeDecimal(offer.SalaryMin, 0),
+        SalaryMax: this.safeDecimal(offer.SalaryMax, 0),
+        JobType: (offer.JobType || "").substring(0, 100),
+        ExternalUrl: (offer.ExternalUrl || "").substring(0, 500),
+        ApplicationUrl: (offer.ApplicationUrl || "").substring(0, 500),
+        Budget: this.safeDecimal(offer.Budget, 10),
+        BudgetSpent: this.safeDecimal(offer.BudgetSpent, 0),
+        ApplicationsGoal: this.safeNumber(offer.ApplicationsGoal, 50),
+        ApplicationsReceived: this.safeNumber(offer.ApplicationsReceived, 0),
+        StatusId: this.safeNumber(offer.StatusId, 1),
+        ConnectionId: this.safeNumber(offer.ConnectionId || this.connection.id),
+        UserId: this.safeNumber(this.connection.UserId || this.connection.userId),
+        Source: (offer.Source || "XML").substring(0, 10),
+        PublicationDate: offer.PublicationDate || new Date().toISOString(),
+        CreatedAt: offer.CreatedAt || new Date().toISOString(),
+        UpdatedAt: new Date().toISOString()
+      };
+
+      // Use Supabase upsert (handles both INSERT and UPDATE)
+      const { data, error } = await supabase
+        .from('JobOffers')
+        .upsert(offerData, {
+          onConflict: 'ExternalId,ConnectionId',  // Unique constraint
+          returning: 'minimal'  // Don't return data for performance
+        });
+
+      if (error) {
+        console.error('❌ Supabase upsert error:', error);
+        throw new Error(error.message);
+      }
+
+      console.log(`✅ Offer saved: ${offerData.ExternalId}`);
     } catch (error) {
       throw new Error(`Error saving offer: ${error.message}`)
     }

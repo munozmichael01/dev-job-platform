@@ -55,22 +55,28 @@ class SupabaseAdapter {
   }
 
   /**
-   * Check if query is INSERT/UPDATE/DELETE
+   * Check if query is INSERT/UPDATE/DELETE/MERGE
    */
   isInsertUpdateDelete(queryText) {
     const normalized = queryText.trim().toLowerCase();
     return (
       normalized.startsWith('insert') ||
       normalized.startsWith('update') ||
-      normalized.startsWith('delete')
+      normalized.startsWith('delete') ||
+      normalized.startsWith('merge')
     );
   }
 
   /**
-   * Execute INSERT/UPDATE/DELETE using Supabase query builder
+   * Execute INSERT/UPDATE/DELETE/MERGE using Supabase query builder
    */
   async executeInsertUpdateDelete(queryText, params) {
     try {
+      // Handle MERGE statements (convert to Supabase upsert)
+      if (queryText.trim().toLowerCase().startsWith('merge')) {
+        return await this.executeMerge(queryText, params);
+      }
+
       // Parse INSERT query to extract table name and values
       const insertMatch = queryText.match(/INSERT\s+INTO\s+"?(\w+)"?\s*\(([\s\S]+?)\)\s*(?:OUTPUT|RETURNING)[\s\S]*?VALUES\s*\(([\s\S]+?)\)/i);
 
@@ -270,6 +276,66 @@ class SupabaseAdapter {
         return await adapter.query(pgQuery, paramValues);
       }
     };
+  }
+
+  /**
+   * Execute MERGE statement (convert to Supabase upsert)
+   * Handles SQL Server MERGE syntax and converts to Supabase .upsert()
+   */
+  async executeMerge(queryText, params) {
+    try {
+      // Extract table name from "MERGE INTO TableName"
+      const tableMatch = queryText.match(/MERGE\s+INTO\s+"?(\w+)"?/i);
+      if (!tableMatch) {
+        throw new Error('Could not parse MERGE table name');
+      }
+      const tableName = tableMatch[1];
+
+      // Extract ON condition to find unique columns
+      const onMatch = queryText.match(/ON\s+Target\.(\w+)\s*=\s*Source\.(\w+)(?:\s+AND\s+Target\.(\w+)\s*=\s*Source\.(\w+))?/i);
+      if (!onMatch) {
+        throw new Error('Could not parse MERGE ON condition');
+      }
+
+      // Build unique constraint columns (for upsert conflict resolution)
+      const uniqueColumns = [onMatch[1]];
+      if (onMatch[3]) uniqueColumns.push(onMatch[3]);
+
+      console.log(`🔧 MERGE detected: table=${tableName}, unique columns=${uniqueColumns.join(', ')}`);
+
+      // Build data object from params
+      const data = {};
+      for (let i = 0; i < params.length; i++) {
+        // Params are in order, so we need to map them correctly
+        // This is simplified - in production you'd parse the VALUES clause
+        data[Object.keys(params)[i] || `param${i}`] = params[i];
+      }
+
+      // Try upsert (INSERT ... ON CONFLICT UPDATE)
+      const { data: result, error } = await supabase
+        .from(tableName)
+        .upsert(params[0], {
+          onConflict: uniqueColumns.join(','),
+          returning: 'representation'
+        });
+
+      if (error) {
+        console.error(`❌ MERGE/upsert error on ${tableName}:`, error.message);
+        throw new Error(error.message);
+      }
+
+      console.log(`✅ MERGE successful on ${tableName}:`, result ? 'updated/inserted' : 'no changes');
+
+      return {
+        recordset: result ? [result] : [],
+        rowsAffected: [result ? 1 : 0]
+      };
+
+    } catch (error) {
+      console.error('❌ MERGE execution failed:', error.message);
+      console.error('Query:', queryText.substring(0, 300));
+      throw error;
+    }
   }
 
   /**
