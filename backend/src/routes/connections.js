@@ -1155,70 +1155,24 @@ router.get("/:id/mappings", addUserToRequest, requireAuth, async (req, res) => {
   console.log(`🔍 GET /api/connections/:id/mappings - ID: ${id}`)
 
   try {
-    await pool
-    // Query SQL directo para debugging
-    const query = `
-      SELECT 
-        ConnectionId,
-        SourceField,
-        TargetField,
-        TransformationType,
-        TransformationRule
-      FROM ClientFieldMappings 
-      WHERE ConnectionId = @connectionId
-      ORDER BY TargetField
-    `
-    
-    console.log(`🔍 SQL Query ejecutado:`, query)
-    console.log(`🔍 Parámetros: connectionId = ${id}`)
-    
-    // 🔍 VERIFICACIÓN DIRECTA EN BD: Contar registros totales
-    const countResult = await pool
-      .request()
-      .input("connectionId", sql.Int, id)
-      .query(`SELECT COUNT(*) as total FROM ClientFieldMappings WHERE ConnectionId = @connectionId`)
-    
-    console.log(`🔍 VERIFICACIÓN BD: Total de registros en ClientFieldMappings para connectionId ${id}: ${countResult.recordset[0].total}`)
-    
-    // 🔍 VERIFICACIÓN DIRECTA EN BD: Ver todos los registros sin filtros
-    const allRecordsResult = await pool
-      .request()
-      .input("connectionId", sql.Int, id)
-      .query(`SELECT * FROM ClientFieldMappings WHERE ConnectionId = @connectionId`)
-    
-    console.log(`🔍 VERIFICACIÓN BD: Todos los registros encontrados:`, JSON.stringify(allRecordsResult.recordset, null, 2))
-    
-    const result = await pool
-      .request()
-      .input("connectionId", sql.Int, id)
-      .query(query)
+    console.log(`🔍 Obteniendo mapeos para connectionId = ${id}`)
 
-    console.log(`🚀 CLAUDE DEBUG: Found ${result.recordset.length} mappings in ClientFieldMappings`)
-    console.log(`🚀 CLAUDE DEBUG: All mappings:`, JSON.stringify(result.recordset, null, 2))
-    
-    // Verificar campos específicos que se están perdiendo
-    const urlMapping = result.recordset.find(m => m.TargetField === 'url')
-    const salaryMaxMapping = result.recordset.find(m => m.TargetField === 'salary_max')
-    
-    console.log(`🔍 Verificación de campos problemáticos:`)
-    if (urlMapping) {
-      console.log(`✅ Campo 'url' encontrado:`, urlMapping)
-    } else {
-      console.log(`❌ Campo 'url' NO encontrado`)
+    // Get mappings using Supabase
+    const { data: mappings, error } = await supabase
+      .from('ClientFieldMappings')
+      .select('*')
+      .eq('ConnectionId', id)
+      .order('TargetField');
+
+    if (error) {
+      console.error('❌ Error Supabase en GET mappings:', error);
+      throw new Error(error.message);
     }
-    
-    if (salaryMaxMapping) {
-      console.log(`✅ Campo 'salary_max' encontrado:`, salaryMaxMapping)
-    } else {
-      console.log(`❌ Campo 'salary_max' NO encontrado`)
-    }
-    
-    // Mostrar todos los TargetField para debugging
-    const allTargetFields = result.recordset.map(m => m.TargetField).sort()
-    console.log(`📋 Todos los TargetField encontrados:`, allTargetFields)
-    console.log(`📊 Total de mapeos: ${result.recordset.length}`)
-    
-    res.json(result.recordset)
+
+    console.log(`✅ Found ${mappings?.length || 0} mappings`)
+    console.log(`📊 Mappings:`, mappings)
+
+    res.json(mappings || [])
   } catch (error) {
     console.error("❌ Error obteniendo mapeos:", error)
     res.status(500).json({
@@ -1241,86 +1195,61 @@ router.post("/:id/mappings", addUserToRequest, requireAuth, async (req, res) => 
       return res.status(400).json({ error: "Los mapeos deben ser un array" })
     }
 
-    await pool
+    // Obtener ClientId de la conexión usando Supabase
+    const { data: connection, error: connError } = await supabase
+      .from('Connections')
+      .select('clientId')
+      .eq('id', id)
+      .single();
 
-    // Obtener ClientId de la conexión
-    const connectionQuery = await pool
-      .request()
-      .input("connectionId", sql.Int, id)
-      .query("SELECT clientId FROM Connections WHERE id = @connectionId")
-    
-    const clientId = connectionQuery.recordset[0]?.clientId
-    if (!clientId) {
+    if (connError || !connection) {
       throw new Error("ClientId no encontrado para esta conexión")
     }
-    
+
+    const clientId = connection.clientId;
     console.log(`🔐 Usando ClientId = ${clientId} para conexión ${id}`)
 
-    // Primero verificar registros existentes
-    const existingResult = await pool
-      .request()
-      .input("connectionId", sql.Int, id)
-      .query("SELECT COUNT(*) as count FROM ClientFieldMappings WHERE ConnectionId = @connectionId")
-    
-    const existingCount = existingResult.recordset[0].count
-    console.log(`🔍 Mapeos existentes para conexión ${id}: ${existingCount}`)
-    
-    // Eliminar todos los mapeos existentes para esta conexión
+    // Eliminar mapeos existentes usando Supabase
     console.log("🗑️ Eliminando mapeos existentes...")
-    const deleteResult = await pool
-      .request()
-      .input("connectionId", sql.Int, id)
-      .query("DELETE FROM ClientFieldMappings WHERE ConnectionId = @connectionId")
-    
-    console.log(`🗑️ Registros eliminados: ${deleteResult.rowsAffected[0] || 0}`)
+    const { error: deleteError } = await supabase
+      .from('ClientFieldMappings')
+      .delete()
+      .eq('ConnectionId', id);
 
-    // Usar la tabla ClientFieldMappings que existe
-    console.log(`📋 Total de mapeos a procesar: ${mappings.length}`)
-    let savedCount = 0
-    
-    for (const mapping of mappings) {
-      const sourceField = mapping.sourceField || mapping.SourceField
-      const targetField = mapping.targetField || mapping.TargetField
-      const transformationType = mapping.TransformationType || mapping.transformation || "STRING"
-      const transformationRule = mapping.TransformationRule || mapping.transformationRule || null
-      
-      console.log(`🔄 [${savedCount + 1}/${mappings.length}] Guardando mapeo:`, { 
-        sourceField, 
-        targetField, 
-        transformationType, 
-        transformationRule, 
-        clientId 
-      })
-      
-      try {
-        const result = await pool
-          .request()
-          .input("ConnectionId", sql.Int, id)
-          .input("ClientId", sql.Int, clientId)
-          .input("SourceField", sql.NVarChar(255), sourceField)
-          .input("TargetField", sql.NVarChar(255), targetField)
-          .input("TransformationType", sql.NVarChar(50), transformationType)
-          .input("TransformationRule", sql.NVarChar(sql.MAX), transformationRule)
-          .query(`
-            INSERT INTO ClientFieldMappings (ConnectionId, ClientId, SourceField, TargetField, TransformationType, TransformationRule)
-            VALUES (@ConnectionId, @ClientId, @SourceField, @TargetField, @TransformationType, @TransformationRule)
-          `)
-        
-        console.log("✅ Mapeo guardado en BD:", result.rowsAffected)
-        savedCount++
-      } catch (dbError) {
-        console.error("❌ Error guardando mapeo individual:", dbError)
-        console.error("❌ Stack:", dbError.stack)
-        // Continuar con los demás mapeos
-      }
+    if (deleteError) {
+      console.error('⚠️ Error eliminando mapeos existentes:', deleteError);
+      // Continuar de todas formas
     }
 
-    console.log(`✅ Resumen: ${savedCount}/${mappings.length} mapeos guardados exitosamente`)
+    // Insertar nuevos mapeos usando Supabase
+    console.log(`📋 Total de mapeos a procesar: ${mappings.length}`)
+    const mappingsToInsert = mappings.map(mapping => ({
+      ConnectionId: parseInt(id),
+      ClientId: clientId,
+      SourceField: mapping.sourceField || mapping.SourceField,
+      TargetField: mapping.targetField || mapping.TargetField,
+      TransformationType: mapping.TransformationType || mapping.transformation || "STRING",
+      TransformationRule: mapping.TransformationRule || mapping.transformationRule || null
+    }));
+
+    console.log(`📤 Insertando ${mappingsToInsert.length} mapeos...`);
+
+    const { data: inserted, error: insertError } = await supabase
+      .from('ClientFieldMappings')
+      .insert(mappingsToInsert)
+      .select();
+
+    if (insertError) {
+      console.error('❌ Error insertando mapeos:', insertError);
+      throw new Error(insertError.message);
+    }
+
+    console.log(`✅ ${inserted?.length || 0} mapeos guardados exitosamente`)
 
     res.json({
       success: true,
       message: "Mapeos guardados exitosamente",
-      count: savedCount,
+      count: inserted?.length || 0,
       total: mappings.length,
     })
   } catch (error) {
