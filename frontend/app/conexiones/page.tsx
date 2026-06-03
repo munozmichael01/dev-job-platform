@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, useEffect, useRef, useCallback } from "react"
+import { useState, useEffect, useRef } from "react"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
@@ -65,18 +65,28 @@ export default function ConexionesPage() {
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [creating, setCreating] = useState(false)
-  // ── Import queue state (display) ──────────────────────────────────────────
-  const [importQueue, setImportQueue]     = useState<number[]>([])
+  // ── Import queue — display state (React, for rendering) ───────────────────
+  const [importQueue,    setImportQueue]    = useState<number[]>([])
   const [activeImportId, setActiveImportId] = useState<number | null>(null)
   const [importProgress, setImportProgress] = useState<Record<number, { processed: number; total: number }>>({})
-  const [importStatus, setImportStatus]   = useState<Record<number, 'idle'|'queued'|'importing'|'complete'|'error'>>({})
+  const [importStatus,   setImportStatus]   = useState<Record<number, 'idle'|'queued'|'importing'|'complete'|'error'>>({})
 
-  // Refs for queue processor — avoids stale closures
-  const importQueueRef   = useRef<number[]>([])
-  const activeImportRef  = useRef<number | null>(null)
-  const isProcessingRef  = useRef(false)
+  // ── Import queue — mutable refs (avoid stale closures in async loops) ──────
+  // Rule: the processor reads/writes these refs. React state is for display only.
+  const queueRef      = useRef<number[]>([])        // source of truth for queue
+  const activeRef     = useRef<number | null>(null)  // currently running id
+  const processingRef = useRef(false)                // processor lock
 
-  // Legacy compat — keeps disabled state in sync with queue status
+  // ── "Latest API" ref — always points to the current api object ─────────────
+  // Solves: processQueue is created once but api may be re-created by useApi().
+  const apiRef          = useRef(api)
+  const toastRef        = useRef(toast)
+  const fetchConnRef    = useRef<() => Promise<void>>(async () => {})
+  // These refs are kept current on every render (no deps needed):
+  useEffect(() => { apiRef.current = api })
+  useEffect(() => { toastRef.current = toast })
+
+  // Legacy compat derived value — used only for button disabled state
   const importing: Record<number, boolean> = {
     ...(activeImportId !== null ? { [activeImportId]: true } : {}),
     ...Object.fromEntries(importQueue.map(id => [id, false])),
@@ -133,6 +143,7 @@ export default function ConexionesPage() {
   }
 
   // ✅ FETCH CONEXIONES DESDE TU BACKEND REAL
+  // fetchConnRef always points here — safe to call from async processor
   const fetchConexiones = async () => {
     try {
       setLoading(true)
@@ -157,6 +168,9 @@ export default function ConexionesPage() {
     }
   }
 
+  // Keep fetchConnRef current on every render
+  useEffect(() => { fetchConnRef.current = fetchConexiones })
+
   useEffect(() => {
     fetchUserInfo()
     fetchConexiones()
@@ -166,7 +180,7 @@ export default function ConexionesPage() {
   // When connections load, check ALL XML connections for pending records and
   // add them to the queue in priority order. Handles: page refresh, deploy.
   useEffect(() => {
-    if (conexiones.length === 0 || isProcessingRef.current) return
+    if (conexiones.length === 0 || processingRef.current) return
     const xmlConns = conexiones.filter(c => (c.type || c.Type || '').toUpperCase() === 'XML')
     if (xmlConns.length === 0) return
 
@@ -184,7 +198,7 @@ export default function ConexionesPage() {
 
       const toQueue = results
         .filter(r => r.pending > 0)
-        .filter(r => !importQueueRef.current.includes(r.id) && activeImportRef.current !== r.id)
+        .filter(r => !queueRef.current.includes(r.id) && activeRef.current !== r.id)
         .sort((a, b) => {
           const tA = a.lastSync ? new Date(a.lastSync).getTime() : 0
           const tB = b.lastSync ? new Date(b.lastSync).getTime() : 0
@@ -195,8 +209,8 @@ export default function ConexionesPage() {
 
       if (toQueue.length === 0) return
 
-      importQueueRef.current = [...importQueueRef.current, ...toQueue]
-      setImportQueue([...importQueueRef.current])
+      queueRef.current = [...queueRef.current, ...toQueue]
+      setImportQueue([...queueRef.current])
       setImportStatus(prev => {
         const next = { ...prev }
         toQueue.forEach(id => { next[id] = 'queued' })
@@ -208,7 +222,8 @@ export default function ConexionesPage() {
         description: 'Reanudando automáticamente. Si sales, se reanuda al volver.',
       })
 
-      processImportQueue()
+      // Call via ref — always uses the latest processQueueFn
+      if (!processingRef.current) processQueueRef.current()
     }
 
     const timer = setTimeout(buildAndStartQueue, 1200)
@@ -493,94 +508,108 @@ export default function ConexionesPage() {
   }
 
   // ── Core batch loop for one connection ────────────────────────────────────
-  const runBatchLoop = async (connectionId: number) => {
-    let batchCount = 0
-    const MAX_BATCHES = 120 // 120 × 200 = 24k offers
-    let totalProcessed = 0
-    let grandTotal = 0
+  // ── processQueue: defined in a ref updated every render ──────────────────
+  // This pattern ensures the processor always uses the latest api/toast/fetch,
+  // while the processor lock (processingRef) prevents duplicate runs.
+  //
+  // Why ref-based?
+  //   - useCallback(fn, []) would freeze api/toast/fetchConexiones at mount time.
+  //   - The loop is async and spans many renders; stale closures cause silent bugs.
+  //   - Solution: store the function in a ref, re-assign it every render.
+  //     The processor always calls processQueueRef.current(), getting latest state.
 
-    while (batchCount < MAX_BATCHES) {
-      batchCount++
-      const result = await api.importConnection(connectionId)
-      console.log(`📦 [${connectionId}] Batch ${batchCount}:`, result?.phase, result?.result)
+  const processQueueRef = useRef<() => Promise<void>>(async () => {})
 
-      const batchImported  = result.result?.imported  ?? result.imported  ?? 0
-      const batchTotal     = result.result?.total     ?? result.total     ?? grandTotal
-      const batchProcessed = result.result?.processed ?? result.processed ?? (totalProcessed + batchImported)
-      const hasMore        = result.hasMore ?? result.result?.hasMore ?? false
+  // Re-assigned every render so inner calls always have fresh api/toast/fetch
+  const processQueueFn = async (): Promise<void> => {
+    if (processingRef.current) return
+    processingRef.current = true
 
-      totalProcessed = batchProcessed || (totalProcessed + batchImported)
-      if (batchTotal > grandTotal) grandTotal = batchTotal
+    while (queueRef.current.length > 0) {
+      const connectionId = queueRef.current[0]
+      queueRef.current = queueRef.current.slice(1)
+      setImportQueue([...queueRef.current])
 
-      setImportProgress(prev => ({
-        ...prev,
-        [connectionId]: { processed: totalProcessed, total: grandTotal || totalProcessed }
-      }))
-      setConexiones(prev => prev.map(c =>
-        c.id === connectionId ? { ...c, status: 'importing', importedOffers: totalProcessed } : c
-      ))
-
-      if (!hasMore) break
-      await new Promise(r => setTimeout(r, 300))
-    }
-    return totalProcessed
-  }
-
-  // ── Sequential queue processor ─────────────────────────────────────────────
-  const processImportQueue = useCallback(async () => {
-    if (isProcessingRef.current) return
-    isProcessingRef.current = true
-
-    while (importQueueRef.current.length > 0) {
-      const connectionId = importQueueRef.current[0]
-      importQueueRef.current = importQueueRef.current.slice(1)
-      setImportQueue([...importQueueRef.current])
-
-      activeImportRef.current = connectionId
+      activeRef.current = connectionId
       setActiveImportId(connectionId)
       setImportStatus(prev => ({ ...prev, [connectionId]: 'importing' }))
       setImportProgress(prev => ({ ...prev, [connectionId]: { processed: 0, total: 0 } }))
 
       try {
-        const total = await runBatchLoop(connectionId)
+        // ── Batch loop — uses apiRef.current (always fresh) ──────────────────
+        let batchCount = 0
+        let totalProcessed = 0
+        let grandTotal = 0
+        const MAX_BATCHES = 120
+
+        while (batchCount < MAX_BATCHES) {
+          batchCount++
+          // apiRef.current is updated every render — no stale closure here
+          const result = await apiRef.current.importConnection(connectionId)
+          console.log(`📦 [conn ${connectionId}] batch ${batchCount} phase=${result?.phase}`)
+
+          const batchImported  = result.result?.imported  ?? result.imported  ?? 0
+          const batchTotal     = result.result?.total     ?? result.total     ?? grandTotal
+          const batchProcessed = result.result?.processed ?? result.processed ?? (totalProcessed + batchImported)
+          const hasMore        = result.hasMore ?? result.result?.hasMore ?? false
+
+          totalProcessed = batchProcessed || (totalProcessed + batchImported)
+          if (batchTotal > grandTotal) grandTotal = batchTotal
+
+          // State setters are stable — safe to call from any render's closure
+          setImportProgress(prev => ({
+            ...prev,
+            [connectionId]: { processed: totalProcessed, total: grandTotal || totalProcessed }
+          }))
+          setConexiones(prev => prev.map(c =>
+            c.id === connectionId ? { ...c, status: 'importing', importedOffers: totalProcessed } : c
+          ))
+
+          if (!hasMore) break
+          await new Promise(r => setTimeout(r, 300))
+        }
+
         setImportStatus(prev => ({ ...prev, [connectionId]: 'complete' }))
-        toast({
-          title: "Importación completada",
-          description: `${total.toLocaleString()} ofertas importadas correctamente`,
+        toastRef.current({
+          title: 'Importación completada',
+          description: `${totalProcessed.toLocaleString()} ofertas importadas correctamente`,
         })
+
       } catch (err) {
-        console.error(`❌ Import failed for connection ${connectionId}:`, err)
+        console.error(`❌ Import failed connection ${connectionId}:`, err)
         setImportStatus(prev => ({ ...prev, [connectionId]: 'error' }))
-        toast({
-          title: `Error en conexión ${connectionId}`,
-          description: err instanceof Error ? err.message : "Error desconocido",
-          variant: "destructive",
+        toastRef.current({
+          title: `Error importando conexión ${connectionId}`,
+          description: err instanceof Error ? err.message : 'Error desconocido',
+          variant: 'destructive',
         })
-        // Continue with next in queue
+        // ← continue with the next connection in the queue
       }
 
-      activeImportRef.current = null
+      activeRef.current = null
       setActiveImportId(null)
-      await fetchConexiones() // refresh after each connection
+
+      // fetchConnRef.current is always the latest fetchConexiones
+      await fetchConnRef.current()
     }
 
-    isProcessingRef.current = false
-  }, []) // stable — reads from refs, not state
+    processingRef.current = false
+  }
 
-  // ── Public: enqueue a connection import ────────────────────────────────────
+  // Assign to ref every render
+  processQueueRef.current = processQueueFn
+
+  // ── handleSync: enqueue or start immediately ───────────────────────────────
   const handleSync = (connectionId: number) => {
-    // Skip if already active or queued
-    if (importQueueRef.current.includes(connectionId)) return
-    if (activeImportRef.current === connectionId) return
+    if (queueRef.current.includes(connectionId)) return  // already queued
+    if (activeRef.current === connectionId) return        // already active
 
-    // Reset error state if re-syncing a failed connection
+    queueRef.current = [...queueRef.current, connectionId]
+    setImportQueue([...queueRef.current])
     setImportStatus(prev => ({ ...prev, [connectionId]: 'queued' }))
 
-    importQueueRef.current = [...importQueueRef.current, connectionId]
-    setImportQueue([...importQueueRef.current])
-
-    if (!isProcessingRef.current) {
-      processImportQueue()
+    if (!processingRef.current) {
+      processQueueRef.current()  // calls the latest version of processQueueFn
     }
   }
 
