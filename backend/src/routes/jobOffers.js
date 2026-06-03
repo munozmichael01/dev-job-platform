@@ -55,7 +55,7 @@ function formatLocation(city, region) {
 
 function mapOffer(row) {
   return {
-    id: row.Id,
+    id: row.OfferId,
     ExternalId: row.ExternalId,
     title: row.Title,
     company: row.CompanyName,
@@ -77,12 +77,10 @@ function mapOffer(row) {
     campaigns: null,
     segments: null,
     totalBudget: row.Budget || 10,
-    budgetSpent: row.BudgetSpent || 0,
+    budgetSpent: 0,           // BudgetSpent column absent from current schema
     targetApplications: row.ApplicationsGoal || 50,
-    applicationsReceived: row.ApplicationsReceived || 0,
-    performance: row.Budget > 0
-      ? `€${Math.round(row.BudgetSpent || 0)}/${Math.round(row.Budget || 0)}, ${row.ApplicationsReceived || 0}/${row.ApplicationsGoal || 0} inscr.`
-      : 'Sin datos'
+    applicationsReceived: 0,  // ApplicationsReceived column absent from current schema
+    performance: 'Sin datos'
   };
 }
 
@@ -324,7 +322,7 @@ router.get('/job-offers', addUserToRequest, requireAuth, async (req, res) => {
     if (!isSuperAdmin(req)) {
       const { count: userTotal, error: countErr } = await supabase
         .from('JobOffers')
-        .select('Id', { count: 'exact', head: true })
+        .select('OfferId', { count: 'exact', head: true })
         .eq('UserId', req.userId);
 
       if (!countErr && (userTotal || 0) === 0) {
@@ -338,7 +336,10 @@ router.get('/job-offers', addUserToRequest, requireAuth, async (req, res) => {
     }
 
     // ── Build base query ───────────────────────────────────────────────────────
-    const SELECT_FIELDS = 'Id, ExternalId, Title, CompanyName, Sector, City, Region, SalaryMin, SalaryMax, JobType, PublicationDate, CreatedAt, StatusId, Budget, BudgetSpent, ApplicationsGoal, ApplicationsReceived, Vacancies';
+    // NOTE: JobOffers PK is OfferId (not Id). BudgetSpent and ApplicationsReceived columns
+// do not exist in current Supabase schema. UserId is UUID type (mismatch with Users.Id BIGINT).
+// These are pre-existing schema issues to be resolved by Codex before data import.
+const SELECT_FIELDS = 'OfferId, ExternalId, Title, CompanyName, Sector, City, Region, SalaryMin, SalaryMax, JobType, PublicationDate, CreatedAt, StatusId, Budget, ApplicationsGoal, Vacancies, Description';
 
     function buildFilters(q) {
       if (!isSuperAdmin(req)) q = q.eq('UserId', req.userId);
@@ -383,9 +384,9 @@ router.get('/job-offers', addUserToRequest, requireAuth, async (req, res) => {
     }
 
     // ── Count query ────────────────────────────────────────────────────────────
-    let countQ = buildFilters(supabase.from('JobOffers').select('Id', { count: 'exact', head: true }));
-    if (promocionIds?.in?.length)    countQ = countQ.in('Id', promocionIds.in);
-    if (promocionIds?.notIn?.length) countQ = countQ.not('Id', 'in', `(${promocionIds.notIn.join(',')})`);
+    let countQ = buildFilters(supabase.from('JobOffers').select('OfferId', { count: 'exact', head: true }));
+    if (promocionIds?.in?.length)    countQ = countQ.in('OfferId', promocionIds.in);
+    if (promocionIds?.notIn?.length) countQ = countQ.not('OfferId', 'in', `(${promocionIds.notIn.join(',')})`);
     if (promocionIds?.in?.length === 0 && cleanPromocion) {
       return res.json(emptyState(validatedPage, validatedLimit, {
         search: cleanSearch, status: cleanStatus || 'all',
@@ -405,10 +406,10 @@ router.get('/job-offers', addUserToRequest, requireAuth, async (req, res) => {
 
     let dataQ = buildFilters(supabase.from('JobOffers').select(SELECT_FIELDS));
 
-    if (promocionIds?.in?.length)    dataQ = dataQ.in('Id', promocionIds.in);
-    if (promocionIds?.notIn?.length) dataQ = dataQ.not('Id', 'in', `(${promocionIds.notIn.join(',')})`);
+    if (promocionIds?.in?.length)    dataQ = dataQ.in('OfferId', promocionIds.in);
+    if (promocionIds?.notIn?.length) dataQ = dataQ.not('OfferId', 'in', `(${promocionIds.notIn.join(',')})`);
 
-    dataQ = dataQ.order(validSortBy, { ascending }).order('Id', { ascending: false });
+    dataQ = dataQ.order(validSortBy, { ascending }).order('OfferId', { ascending: false });
 
     if (usingKeyset && lastCreatedAt && lastId) {
       const parsedDate = new Date(decodeURIComponent(lastCreatedAt));
@@ -428,8 +429,10 @@ router.get('/job-offers', addUserToRequest, requireAuth, async (req, res) => {
 
     // ── Stats (parallel count queries) ────────────────────────────────────────
     const statsBase = () => {
-      const q = supabase.from('JobOffers').select('Id', { count: 'exact', head: true });
-      return isSuperAdmin(req) ? q : q.eq('UserId', req.userId);
+      // UserId in JobOffers is UUID — filtering by integer userId fails silently (count=null).
+      // Stats per non-superadmin user are unreliable until schema UserId type is fixed.
+      const q = supabase.from('JobOffers').select('OfferId', { count: 'exact', head: true });
+      return isSuperAdmin(req) ? q : q.eq('UserId', String(req.userId));
     };
 
     const [statTotal, statActive, statPending, statPaused] = await Promise.all([
@@ -452,7 +455,7 @@ router.get('/job-offers', addUserToRequest, requireAuth, async (req, res) => {
     const hasMore = usingKeyset ? offers.length === validatedLimit : offset + offers.length < total;
     const lastOffer = offers.length > 0 ? offers[offers.length - 1] : null;
     const nextCursor = hasMore && lastOffer
-      ? { lastCreatedAt: lastOffer.CreatedAt, lastId: lastOffer.id }
+      ? { lastCreatedAt: lastOffer.CreatedAt, lastId: lastOffer.id }  // id = mapped from OfferId in mapOffer()
       : null;
 
     console.log(`✅ Encontradas ${offers.length} ofertas (${total} total)`);
@@ -499,7 +502,7 @@ router.put('/job-offers/:id/status', addUserToRequest, requireAuth, async (req, 
       return res.status(400).json({ success: false, error: 'Estado inválido. Use: 1=activa, 2=pausada, 3=archivada' });
     }
 
-    let checkQ = supabase.from('JobOffers').select('Id, Title, StatusId').eq('Id', offerId);
+    let checkQ = supabase.from('JobOffers').select('OfferId, Title, StatusId').eq('OfferId', offerId);
     if (!isSuperAdmin(req)) checkQ = checkQ.eq('UserId', req.userId);
 
     const { data: found, error: checkErr } = await checkQ.limit(1);
@@ -512,7 +515,7 @@ router.put('/job-offers/:id/status', addUserToRequest, requireAuth, async (req, 
     const { error: updateErr } = await supabase
       .from('JobOffers')
       .update({ StatusId: newStatus, UpdatedAt: new Date().toISOString() })
-      .eq('Id', offerId);
+      .eq('OfferId', offerId);
 
     if (updateErr) throw updateErr;
 
@@ -540,9 +543,12 @@ router.post('/job-offers', async (req, res) => {
       Country, CountryId, Region, RegionId, City, CityId, Postcode,
       Latitude, Longitude, Vacancies, SalaryMin, SalaryMax, JobType,
       ExternalUrl, ApplicationUrl, Budget, ApplicationsGoal, PublicationDate,
-      UserId = 1
+      UserId
     } = req.body;
 
+    // NOTE: JobOffers.UserId is UUID type in current schema — integer UserId will fail.
+    // This endpoint is blocked until the schema is corrected by Codex.
+    // Accepting the insert as-is so the error surfaces clearly rather than being swallowed.
     const { error } = await supabase.from('JobOffers').insert({
       ExternalId, Title, JobTitle, Description, CompanyName, Sector, Address,
       Country, CountryId, Region, RegionId, City, CityId, Postcode,
