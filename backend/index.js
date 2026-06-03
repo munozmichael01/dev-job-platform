@@ -82,9 +82,14 @@ const allowedOrigins = [
   'http://localhost:3004', 'http://127.0.0.1:3004',
   'http://localhost:3006', 'http://127.0.0.1:3006',
   'http://localhost:3007', 'http://127.0.0.1:3007',
+  'https://dev-job-platform.vercel.app',
+  'https://dev-job-platform-frontend.vercel.app',
+  'https://dev-job-platform-landing.vercel.app',
+  'https://job-platform-frontend.vercel.app',
+  'https://job-platform-landing.vercel.app',
   // Add prod domains via env: CORS_ORIGIN=https://app.example.com,https://landing.example.com
   ...(process.env.CORS_ORIGIN ? process.env.CORS_ORIGIN.split(',') : [])
-];
+].map(origin => origin.trim()).filter(Boolean);
 
 const corsOptions = {
   origin: allowedOrigins,
@@ -192,7 +197,7 @@ app.get('/job-offers/locations',
   require('./src/middleware/authMiddleware').requireAuth,
   async (req, res) => {
   const origin = req.headers.origin;
-  const allowedOrigins = ['http://localhost:3007', 'http://127.0.0.1:3007', 'http://localhost:3004', 'http://127.0.0.1:3004', 'http://localhost:3006', 'http://127.0.0.1:3006'];
+  // Reuse global allowedOrigins
   
   if (allowedOrigins.includes(origin)) {
     res.setHeader('Access-Control-Allow-Origin', origin);
@@ -335,7 +340,7 @@ app.get('/job-offers/sectors',
   require('./src/middleware/authMiddleware').requireAuth,
   async (req, res) => {
   const origin = req.headers.origin;
-  const allowedOrigins = ['http://localhost:3007', 'http://127.0.0.1:3007', 'http://localhost:3004', 'http://127.0.0.1:3004', 'http://localhost:3006', 'http://127.0.0.1:3006'];
+  // Reuse global allowedOrigins
   
   if (allowedOrigins.includes(origin)) {
     res.setHeader('Access-Control-Allow-Origin', origin);
@@ -471,7 +476,7 @@ app.get('/job-offers/external-ids',
   require('./src/middleware/authMiddleware').requireAuth,
   async (req, res) => {
   const origin = req.headers.origin;
-  const allowedOrigins = ['http://localhost:3007', 'http://127.0.0.1:3007', 'http://localhost:3004', 'http://127.0.0.1:3004', 'http://localhost:3006', 'http://127.0.0.1:3006'];
+  // Reuse global allowedOrigins
   
   if (allowedOrigins.includes(origin)) {
     res.setHeader('Access-Control-Allow-Origin', origin);
@@ -609,7 +614,7 @@ app.get('/job-offers',
   
   // CORS Headers
   const origin = req.headers.origin;
-  const allowedOrigins = ['http://localhost:3007', 'http://127.0.0.1:3007', 'http://localhost:3004', 'http://127.0.0.1:3004', 'http://localhost:3006', 'http://127.0.0.1:3006'];
+  // Reuse global allowedOrigins
   
   if (allowedOrigins.includes(origin)) {
     res.setHeader('Access-Control-Allow-Origin', origin);
@@ -1284,7 +1289,7 @@ app.put('/job-offers/:id/status',
   console.log(`🔄 PUT /job-offers/:id/status - ID: ${req.params.id} from origin:`, origin);
   
   // CORS Headers
-  const allowedOrigins = ['http://localhost:3007', 'http://127.0.0.1:3007', 'http://localhost:3004', 'http://127.0.0.1:3004', 'http://localhost:3006', 'http://127.0.0.1:3006'];
+  // Reuse global allowedOrigins
   if (allowedOrigins.includes(origin)) {
     res.setHeader('Access-Control-Allow-Origin', origin);
   }
@@ -1480,7 +1485,7 @@ module.exports = app;
 // GET /job-offers/job-types - Tipos de contrato (JobType) de ofertas ACTIVAS
 app.get('/job-offers/job-types', async (req, res) => {
   const origin = req.headers.origin;
-  const allowedOrigins = ['http://localhost:3007', 'http://127.0.0.1:3007', 'http://localhost:3004', 'http://127.0.0.1:3004', 'http://localhost:3006', 'http://127.0.0.1:3006'];
+  // Reuse global allowedOrigins
   if (allowedOrigins.includes(origin)) res.setHeader('Access-Control-Allow-Origin', origin);
   res.setHeader('Access-Control-Allow-Credentials', 'true');
 
@@ -1508,7 +1513,7 @@ app.get('/job-offers/companies',
   require('./src/middleware/authMiddleware').requireAuth,
   async (req, res) => {
   const origin = req.headers.origin;
-  const allowedOrigins = ['http://localhost:3007','http://127.0.0.1:3007','http://localhost:3004','http://127.0.0.1:3004','http://localhost:3006','http://127.0.0.1:3006'];
+  // Reuse global allowedOrigins
   if (allowedOrigins.includes(origin)) res.setHeader('Access-Control-Allow-Origin', origin);
   res.setHeader('Access-Control-Allow-Credentials', 'true');
 
@@ -1635,7 +1640,7 @@ app.get('/api/clients', async (req, res) => {
   
   // CORS Headers
   const origin = req.headers.origin;
-  const allowedOrigins = ['http://localhost:3006', 'http://127.0.0.1:3006', 'http://localhost:3000', 'http://127.0.0.1:3000'];
+  // Reuse global allowedOrigins
   
   if (allowedOrigins.includes(origin)) {
     res.setHeader('Access-Control-Allow-Origin', origin);
