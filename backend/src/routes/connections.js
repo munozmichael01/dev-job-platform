@@ -466,9 +466,45 @@ router.post("/:id/import", addUserIdToRequest, requireAuth, onlyOwnData('UserId'
           })
         }
         
-        const XMLProcessor = require("../processors/xmlProcessor")
-        processor = new XMLProcessor(connection)
-        console.log("🚀 CLAUDE DEBUG: XML PROCESSOR CREATED, ABOUT TO CALL process()")
+        // Use clean XMLImporter (new schema: RawJobRecords + JobOffers with Status string, BIGINT UserId)
+        // XMLProcessor legacy is left in place but no longer called for XML feeds.
+        const XMLImporter = require("../processors/xmlImporter")
+        const feedUrl = connectionUrl
+        const importer = new XMLImporter({
+          userId:       connection.UserId || connection.userId,
+          connectionId: parseInt(id),
+          feedUrl:      feedUrl,
+          sourceSystem: `conn-${id}`,
+        })
+
+        // XMLImporter.run() returns stats; map to legacy result shape for UI contract
+        await supabase.from('Connections').update({ status: 'importing' }).eq('id', id)
+
+        let importerStats
+        try {
+          importerStats = await importer.run()
+        } catch (importErr) {
+          await supabase.from('Connections').update({ status: 'error' }).eq('id', id).catch(() => {})
+          throw importErr
+        }
+
+        const importedCount = (importerStats.inserted || 0) + (importerStats.updated || 0)
+        const errorCount    = importerStats.failed || 0
+
+        await supabase.from('Connections').update({
+          status:         'active',
+          lastSync:       new Date().toISOString(),
+          importedOffers: importedCount,
+          errorCount:     errorCount,
+        }).eq('id', id)
+
+        return res.json({
+          success: true,
+          message: `Importación completada: ${importedCount} ofertas, ${errorCount} errores`,
+          result:  { imported: importedCount, errors: errorCount },
+          stats:   importerStats,
+        })
+
       } else if (connectionType.toLowerCase() === "api") {
         const APIProcessor = require("../processors/apiProcessor")
         processor = new APIProcessor(connection)
@@ -576,38 +612,28 @@ router.post("/:id/upload", async (req, res) => {
   console.log(`🔍 POST /api/connections/:id/upload - ID: ${id} from origin:`, origin)
 
   try {
-    await pool
+    // Fetch connection via Supabase — no pool.request
+    const { data: connRows, error: connErr } = await supabase
+      .from('Connections')
+      .select('id, name, type, url, status, UserId')
+      .eq('id', id)
+      .limit(1)
 
-    // Obtener la conexión
-    const connectionResult = await pool
-      .request()
-      .input("id", sql.Int, id)
-      .query(`
-        SELECT 
-          id, name, type, url, frequency, status, lastSync, importedOffers, errorCount, 
-          Method, Headers, Body, CreatedAt, UserId
-        FROM Connections 
-        WHERE id = @id
-      `)
-
-    if (connectionResult.recordset.length === 0) {
-      console.log(`❌ Conexión no encontrada: ${id}`)
+    if (connErr) throw connErr
+    if (!connRows || connRows.length === 0) {
       return res.status(404).json({ error: "Conexión no encontrada" })
     }
 
-    const connection = connectionResult.recordset[0]
-    console.log("✅ Conexión encontrada para upload:", connection)
+    const connection = connRows[0]
+    const connectionType = (connection.type || '').toLowerCase()
 
-    // Verificar que sea conexión manual
-    const connectionType = connection.type || connection.Type
-    if (connectionType.toLowerCase() !== "manual") {
+    if (connectionType !== 'manual') {
       return res.status(400).json({
         error: "Endpoint solo válido para conexiones manuales",
-        connectionType: connectionType
+        connectionType: connection.type
       })
     }
 
-    // Verificar que se haya enviado un archivo
     if (!req.files || !req.files.file) {
       return res.status(400).json({
         error: "No se proporcionó archivo",
@@ -616,137 +642,79 @@ router.post("/:id/upload", async (req, res) => {
     }
 
     const uploadedFile = req.files.file
-    console.log("📁 Archivo recibido:", {
-      name: uploadedFile.name,
-      size: uploadedFile.size,
-      mimetype: uploadedFile.mimetype
-    })
-
-    // Validar tipo de archivo
-    const allowedTypes = ['.xml', '.csv', '.json']
     const fileExt = require('path').extname(uploadedFile.name).toLowerCase()
-    
+    const allowedTypes = ['.xml', '.csv', '.json']
+
     if (!allowedTypes.includes(fileExt)) {
       return res.status(400).json({
         error: "Tipo de archivo no soportado",
-        allowedTypes: allowedTypes,
+        allowedTypes,
         receivedType: fileExt
       })
     }
 
-    // Procesar archivo real
-    console.log("🔄 Procesando archivo manual...")
-    
-    // Actualizar estado a 'importing'
-    await pool
-      .request()
-      .input("id", sql.Int, id)
-      .input("status", sql.NVarChar(50), "importing")
-      .query("UPDATE Connections SET status = @status WHERE id = @id")
+    // XML file upload: migration to XMLImporter from file not yet implemented.
+    // Returning 501 to signal a clear "not ready" instead of a silent 500.
+    // TODO: build XMLImporter.runFromBuffer(xmlString, {userId, connectionId}) for file uploads.
+    if (fileExt === '.xml') {
+      console.log(`⚠️ XML file upload for connection ${id} — not yet migrated to clean importer (501)`)
+      return res.status(501).json({
+        success: false,
+        error: "Importación de archivo XML manual no disponible en esta versión",
+        message: "Use el feed URL automático de la conexión (POST /api/connections/:id/import), o suba un archivo CSV.",
+        plannedFix: "XMLImporter.runFromBuffer() — pendiente de implementar"
+      })
+    }
 
-    // Determinar el tipo de archivo y procesarlo
+    console.log(`🔄 Processing ${fileExt} file upload for connection ${id}`)
+    await supabase.from('Connections').update({ status: 'importing' }).eq('id', id)
+
     let result = { imported: 0, errors: 0, failedOffers: [] }
-    
-    try {
-      console.log(`🔄 Processing ${fileExt} file: ${uploadedFile.name}`)
-      
-      // Crear directorio temporal si no existe
-      const tempDir = require('path').join(__dirname, '../../temp')
-      if (!require('fs').existsSync(tempDir)) {
-        require('fs').mkdirSync(tempDir, { recursive: true })
-        console.log(`📁 Created temp directory: ${tempDir}`)
-      }
 
-      // Guardar archivo temporalmente
+    try {
+      const tempDir = require('path').join(__dirname, '../../temp')
+      if (!require('fs').existsSync(tempDir)) require('fs').mkdirSync(tempDir, { recursive: true })
       const tempFilePath = require('path').join(tempDir, `${Date.now()}_${uploadedFile.name}`)
       await uploadedFile.mv(tempFilePath)
-      console.log(`💾 File saved to: ${tempFilePath}`)
 
       if (fileExt === '.csv') {
-        console.log("🔄 Using CSVProcessor for file processing...")
         const CSVProcessor = require("../processors/csvProcessor")
         const processor = new CSVProcessor(connection, tempFilePath)
         result = await processor.process()
-        console.log(`✅ CSV processing completed: ${result.imported} imported, ${result.errors} errors`)
-      } else if (fileExt === '.xml') {
-        console.log("🔄 Using XMLFileProcessor for file processing...")
-        const XMLFileProcessor = require("../processors/xmlFileProcessor")
-        const processor = new XMLFileProcessor(connection, tempFilePath)
-        result = await processor.process()
-        console.log(`✅ XML processing completed: ${result.imported} imported, ${result.errors} errors`)
       } else if (fileExt === '.json') {
-        // Para JSON, podríamos crear un JSONProcessor o usar lógica similar
         console.log("⚠️ JSON file processing not yet implemented")
-        result = { imported: 15, errors: 1, failedOffers: [] }
+        result = { imported: 0, errors: 0, failedOffers: [] }
       }
 
-      // Limpiar archivo temporal
-      if (require('fs').existsSync(tempFilePath)) {
-        require('fs').unlinkSync(tempFilePath)
-        console.log(`🗑️ Temporary file cleaned: ${tempFilePath}`)
-      }
+      if (require('fs').existsSync(tempFilePath)) require('fs').unlinkSync(tempFilePath)
 
     } catch (processingError) {
-      console.error("❌ Error processing file:", processingError)
-      console.error("❌ Error stack:", processingError.stack)
+      console.error("❌ Error processing file:", processingError.message)
       result = { imported: 0, errors: 1, failedOffers: [{ reason: processingError.message }] }
     }
 
-    const processed = result.imported
-    const errors = result.errors
+    const processed = result.imported || 0
+    const errors    = result.errors || 0
 
-    // Actualizar estadísticas
-    await pool
-      .request()
-      .input("id", sql.Int, id)
-      .input("status", sql.NVarChar(50), "active")
-      .input("lastSync", sql.DateTime, new Date())
-      .input("importedOffers", sql.Int, processed)
-      .input("errorCount", sql.Int, errors)
-      .query(`
-        UPDATE Connections 
-        SET 
-          status = @status,
-          lastSync = @lastSync,
-          importedOffers = @importedOffers,
-          errorCount = @errorCount
-        WHERE id = @id
-      `)
-
-    console.log(`✅ Archivo procesado: ${processed} ofertas, ${errors} errores`)
+    await supabase.from('Connections').update({
+      status:         'active',
+      lastSync:       new Date().toISOString(),
+      importedOffers: processed,
+      errorCount:     errors,
+    }).eq('id', id)
 
     res.json({
       success: true,
       message: "Archivo procesado exitosamente",
-      processed: processed,
-      errors: errors,
+      processed,
+      errors,
       filename: uploadedFile.name,
-      debug: {
-        fileSize: uploadedFile.size,
-        fileType: fileExt,
-        resultDetails: result,
-        errorSample: result.failedOffers ? result.failedOffers.slice(0, 3) : []
-      }
     })
 
   } catch (error) {
-    console.error("❌ Error en upload:", error)
-
-    // Actualizar estado a 'error'
-    try {
-      await pool
-        .request()
-        .input("id", sql.Int, id)
-        .input("status", sql.NVarChar(50), "error")
-        .query("UPDATE Connections SET status = @status WHERE id = @id")
-    } catch (updateError) {
-      console.error("❌ Error actualizando estado:", updateError)
-    }
-
-    res.status(500).json({
-      error: "Error procesando archivo",
-      details: error.message,
-    })
+    console.error("❌ Error en upload:", error.message)
+    await supabase.from('Connections').update({ status: 'error' }).eq('id', id).catch(() => {})
+    res.status(500).json({ error: "Error procesando archivo", details: error.message })
   }
 })
 
@@ -1085,59 +1053,26 @@ router.get("/:id/mapping", addUserToRequest, requireAuth, async (req, res) => {
   console.log(`🔍 GET /api/connections/:id/mapping - ID: ${id}`)
 
   try {
-    await pool
-    let result
-    try {
-      result = await pool
-        .request()
-        .input("connectionId", sql.Int, id)
-        .query(`
-          SELECT 
-            ConnectionId,
-            SourceField,
-            TargetField,
-            TransformationType,
-            TransformationRule
-          FROM ClientFieldMappings 
-          WHERE ConnectionId = @connectionId
-          ORDER BY TargetField
-        `)
-      
-      console.log(`🔍 GET mapping result: Found ${result.recordset.length} mappings for connection ${id}`)
-      console.log(`🔍 All mappings from /mapping:`, JSON.stringify(result.recordset, null, 2))
-      
-      // Verificar campos específicos que se están perdiendo
-      const urlMapping = result.recordset.find(m => m.TargetField === 'url')
-      const salaryMaxMapping = result.recordset.find(m => m.TargetField === 'salary_max')
-      
-      console.log(`🔍 Verificación de campos problemáticos en /mapping:`)
-      if (urlMapping) {
-        console.log(`✅ Campo 'url' encontrado en /mapping:`, urlMapping)
-      } else {
-        console.log(`❌ Campo 'url' NO encontrado en /mapping`)
-      }
-      
-      if (salaryMaxMapping) {
-        console.log(`✅ Campo 'salary_max' encontrado en /mapping:`, salaryMaxMapping)
-      } else {
-        console.log(`❌ Campo 'salary_max' NO encontrado en /mapping`)
-      }
-      
-      // Mostrar todos los TargetField para debugging
-      const allTargetFields = result.recordset.map(m => m.TargetField).sort()
-      console.log(`📋 Todos los TargetField en /mapping:`, allTargetFields)
-      console.log(`📊 Total de mapeos en /mapping: ${result.recordset.length}`)
-    } catch (dbError) {
-      // Si la tabla no existe, devolver array vacío
-      if (dbError.message.includes('Invalid object name')) {
-        console.log("⚠️ Tabla ClientFieldMappings no existe, devolviendo array vacío")
-        return res.json([])
-      }
-      throw dbError
-    }
+    // Reads from FieldMappings (new schema) via Supabase — no pool.request
+    const { data, error } = await supabase
+      .from('FieldMappings')
+      .select('ConnectionId, SourceField, SourcePath, TargetField, TransformationType, TransformationConfig')
+      .eq('ConnectionId', id)
+      .order('TargetField')
 
-    console.log(`✅ Encontrados ${result.recordset.length} mapeos`)
-    res.json(result.recordset)
+    if (error) throw error
+
+    // Normalise to UI-expected shape: { ConnectionId, SourceField, TargetField, TransformationType, TransformationRule }
+    const rows = (data || []).map(row => ({
+      ConnectionId:      row.ConnectionId,
+      SourceField:       row.SourceField || row.SourcePath,
+      TargetField:       row.TargetField,
+      TransformationType: row.TransformationType,
+      TransformationRule: row.TransformationRule || row.TransformationConfig || null
+    }))
+
+    console.log(`✅ GET /mapping: found ${rows.length} mappings for connection ${id}`)
+    res.json(rows)
   } catch (error) {
     console.error("❌ Error obteniendo mapeos:", error)
     res.status(500).json({
