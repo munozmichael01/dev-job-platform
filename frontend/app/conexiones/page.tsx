@@ -66,6 +66,8 @@ export default function ConexionesPage() {
   const [error, setError] = useState<string | null>(null)
   const [creating, setCreating] = useState(false)
   const [importing, setImporting] = useState<Record<number, boolean>>({})
+  const [importProgress, setImportProgress] = useState<Record<number, { processed: number; total: number }>>({})
+  const stopImport = useState<Record<number, boolean>>({})[0]
 
   const [newConnection, setNewConnection] = useState({
     name: "",
@@ -431,46 +433,77 @@ export default function ConexionesPage() {
     }
   }
 
-  // ✅ SINCRONIZAR OFERTAS (SOLO XML/API)
+  // ✅ SINCRONIZAR OFERTAS — loop automático hasta hasMore=false
   const handleSync = async (connectionId: number) => {
+    if (importing[connectionId]) return
+
+    setImporting((prev) => ({ ...prev, [connectionId]: true }))
+    setImportProgress((prev) => ({ ...prev, [connectionId]: { processed: 0, total: 0 } }))
+
+    let totalProcessed = 0
+    let grandTotal     = 0
+    let batchCount     = 0
+    const MAX_BATCHES  = 100 // safety cap — 100 × 200 = 20 000 offers max
+
     try {
-      setImporting((prev) => ({ ...prev, [connectionId]: true }))
-      console.log(`🔄 Importando ofertas para conexión ${connectionId}...`)
+      console.log(`🔄 Iniciando importación automática para conexión ${connectionId}`)
 
-      // Para conexiones XML/API, usar importación normal
-      const result = await api.importConnection(connectionId)
-      console.log("✅ Importación completada:", result)
+      while (batchCount < MAX_BATCHES) {
+        batchCount++
+        const result = await api.importConnection(connectionId)
 
-      // Actualización optimista inmediata del estado local
-      setConexiones(prev => prev.map(conn => 
-        conn.id === connectionId 
-          ? {
-              ...conn,
-              status: "active",
-              lastSync: new Date().toISOString(),
-              importedOffers: (conn.importedOffers || 0) + (result.result?.imported || result.imported || 0),
-              errorCount: result.errors || 0
-            }
-          : conn
-      ))
+        console.log(`📦 Batch ${batchCount}:`, result)
+
+        // Normalise field names — backend uses result.result.* or top-level
+        const batchImported = result.result?.imported ?? result.imported ?? 0
+        const batchTotal    = result.result?.total    ?? result.total    ?? grandTotal
+        const batchProcessed = result.result?.processed ?? result.processed ?? (totalProcessed + batchImported)
+        const hasMore       = result.hasMore ?? result.result?.hasMore ?? false
+        const remaining     = result.remaining ?? result.result?.remaining ?? 0
+
+        totalProcessed = batchProcessed || (totalProcessed + batchImported)
+        if (batchTotal > grandTotal) grandTotal = batchTotal
+
+        // Update live progress indicator
+        setImportProgress((prev) => ({
+          ...prev,
+          [connectionId]: { processed: totalProcessed, total: grandTotal || totalProcessed }
+        }))
+
+        // Optimistic local state update
+        setConexiones(prev => prev.map(conn =>
+          conn.id === connectionId
+            ? { ...conn, status: "importing", importedOffers: totalProcessed }
+            : conn
+        ))
+
+        if (!hasMore) {
+          // Import complete
+          console.log(`✅ Importación completada: ${totalProcessed} ofertas`)
+          break
+        }
+
+        // Small delay between batches to avoid hammering the backend
+        await new Promise(resolve => setTimeout(resolve, 300))
+      }
 
       toast({
         title: "Sincronización exitosa",
-        description: result.message || `Se importaron ${result.result?.imported || result.imported || 0} ofertas correctamente`,
+        description: `${totalProcessed.toLocaleString()} ofertas importadas correctamente`,
       })
 
-      // Refrescar lista desde servidor para confirmar
-      await fetchConexiones()
     } catch (err) {
-      console.error("❌ Error en sincronización:", err)
-      const errorMessage = err instanceof Error ? err.message : "Error desconocido"
+      console.error("❌ Error en importación:", err)
       toast({
         title: "Error en sincronización",
-        description: errorMessage,
+        description: err instanceof Error ? err.message : "Error desconocido",
         variant: "destructive",
       })
     } finally {
       setImporting((prev) => ({ ...prev, [connectionId]: false }))
+      setImportProgress((prev) => ({ ...prev, [connectionId]: { processed: totalProcessed, total: grandTotal } }))
+      // Refresh from server to confirm final state
+      await fetchConexiones()
     }
   }
 
@@ -1058,20 +1091,28 @@ export default function ConexionesPage() {
                             </Button>
                           </>
                         ) : (
-                          // Para conexiones XML/API: botón normal de sync con loading
-                          <Button
-                            variant="outline"
-                            size="sm"
-                            onClick={() => handleSync(conexion.id)}
-                            disabled={getConnectionStatus(conexion) === "error" || importing[conexion.id]}
-                            title={importing[conexion.id] ? "Sincronizando..." : "Sincronizar ofertas"}
-                          >
-                            {importing[conexion.id] ? (
-                              <RefreshCw className="h-4 w-4 animate-spin" />
-                            ) : (
-                              <RefreshCw className="h-4 w-4" />
+                          // Para conexiones XML/API: sync con progreso automático
+                          <div className="flex flex-col items-start gap-0.5">
+                            <Button
+                              variant="outline"
+                              size="sm"
+                              onClick={() => handleSync(conexion.id)}
+                              disabled={getConnectionStatus(conexion) === "error" || importing[conexion.id]}
+                              title={importing[conexion.id] ? "Importando..." : "Sincronizar ofertas"}
+                            >
+                              <RefreshCw className={`h-4 w-4 ${importing[conexion.id] ? "animate-spin" : ""}`} />
+                              <span className="ml-1 text-xs">
+                                {importing[conexion.id] ? "Importando…" : "Sync"}
+                              </span>
+                            </Button>
+                            {importing[conexion.id] && importProgress[conexion.id]?.total > 0 && (
+                              <span className="text-xs text-muted-foreground whitespace-nowrap">
+                                {importProgress[conexion.id].processed.toLocaleString()}
+                                {" / "}
+                                {importProgress[conexion.id].total.toLocaleString()}
+                              </span>
                             )}
-                          </Button>
+                          </div>
                         )}
                         <Button variant="outline" size="sm" asChild>
                           <Link href={`/conexiones/${conexion.id}/mapeo`}>

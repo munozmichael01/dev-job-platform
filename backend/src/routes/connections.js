@@ -12,6 +12,9 @@ const supabase = createClient(
   process.env.SUPABASE_SERVICE_ROLE_KEY
 )
 
+// Note: batched import uses frontend polling loop — no self-chaining needed.
+// See POST /:id/import handler for the two-phase approach.
+
 
 
 // GET /api/connections - Listar todas las conexiones (con filtrado por usuario)
@@ -531,15 +534,20 @@ router.post("/:id/import", addUserIdToRequest, requireAuth, onlyOwnData('UserId'
             }).eq('id', id)
 
             return res.json({
-              success:     true,
-              message:     `Feed descargado: ${bufferResult.buffered} ofertas en cola. Llama de nuevo para procesar.`,
-              phase:       'buffer',
+              success:   true,
+              message:   `Preparando importación: ${bufferResult.pendingCount} ofertas en cola`,
+              phase:     'buffer',
+              hasMore:   bufferResult.pendingCount > 0,
+              remaining: bufferResult.pendingCount,
+              processed: 0,
+              total:     bufferResult.pendingCount,
               result: {
-                imported:   0,
-                errors:     bufferResult.warnings.length,
-                hasMore:    bufferResult.pendingCount > 0,
-                nextOffset: 0,
-                pending:    bufferResult.pendingCount,
+                imported:  0,
+                errors:    bufferResult.warnings.length,
+                hasMore:   bufferResult.pendingCount > 0,
+                remaining: bufferResult.pendingCount,
+                processed: 0,
+                total:     bufferResult.pendingCount,
               },
               stats: bufferResult,
             })
@@ -598,21 +606,35 @@ router.post("/:id/import", addUserIdToRequest, requireAuth, onlyOwnData('UserId'
               })
 
             } else {
-              // More batches needed
+              // More batches needed — include cumulative totals for progress display
+              const { count: processedSoFar } = await supabase
+                .from('RawJobRecords')
+                .select('Id', { count: 'exact', head: true })
+                .eq('ConnectionId', connId)
+                .eq('ProcessingStatus', 'processed')
+              const totalBuffered = (processedSoFar || 0) + batchResult.remaining
+              const processedTotal = processedSoFar || 0
+
               await supabase.from('Connections').update({
-                lastSync: new Date().toISOString(),
+                lastSync:       new Date().toISOString(),
+                importedOffers: processedTotal,
               }).eq('id', id)
 
               return res.json({
-                success:  true,
-                message:  `Lote procesado: ${batchResult.processed} ofertas. Quedan ${batchResult.remaining}.`,
-                phase:    'process',
+                success:   true,
+                message:   `Procesando: ${processedTotal} de ${totalBuffered} ofertas`,
+                phase:     'process',
+                hasMore:   true,
+                remaining: batchResult.remaining,
+                processed: processedTotal,
+                total:     totalBuffered,
                 result: {
-                  imported:   batchResult.processed,
-                  errors:     batchResult.failed,
-                  hasMore:    true,
-                  nextOffset: batchResult.remaining,
-                  remaining:  batchResult.remaining,
+                  imported:  batchResult.processed,
+                  errors:    batchResult.failed,
+                  hasMore:   true,
+                  remaining: batchResult.remaining,
+                  processed: processedTotal,
+                  total:     totalBuffered,
                 },
                 stats: batchResult,
               })
