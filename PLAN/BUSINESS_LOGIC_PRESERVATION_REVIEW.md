@@ -30,7 +30,7 @@ Un concepto puede conservarse aunque el schema y los registros no.
 | `FieldMappings` | Mapping versionado de fuente a modelo canónico | ✅ Sí | ⚠️ Sí, pero con columnas nuevas | ❌ No — 3 filas apuntan a ConnectionId=2099 inexistente (huérfanas) | ALTER TABLE para añadir SourcePath, Version, Required, DefaultValue. DELETE filas huérfanas | Riesgo bajo: solo 3 filas de testing |
 | `JobOffers` | Oferta de empleo canónica interna | ✅ Sí | ❌ No — schema incompatible | ❌ No — 0 filas | DROP + CREATE con PK=Id BIGINT, UserId BIGINT FK, sin columnas legacy SQL Server | DROP seguro confirmado (COUNT=0). Recrear sin UUID mismatch |
 | `Segments` | Segmentación dinámica/estática de ofertas | ✅ Sí | ❌ No — schema desfasado | ⚠️ Archivar — 17 filas pero OfferCount=0 (sin ofertas reales) | BACKUP en Segments_bak → DROP → CREATE limpio. Filtros pueden re-crearse cuando haya ofertas | Pérdida de contexto si alguien creó segmentos con intención; archivarlos mitiga esto |
-| `Campaigns` | Agrupación de distribución de ofertas por segmento/canal | ✅ Sí | ❌ No — Channels es JSON crudo, sin FK formales | ⚠️ Archivar — 15 filas pero sin ofertas reales asociadas | BACKUP en Campaigns_bak → DROP → CREATE limpio con FK a Segments y CampaignChannels | Cascada sobre CampaignChannels (0 filas) — sin riesgo de pérdida real |
+| `Campaigns` | Agrupación de distribución de múltiples segmentos en múltiples canales | ✅ Sí | ❌ No — Channels es JSON crudo, SegmentId es FK única (pero el modelo canónico es multi-segmento) | ⚠️ Archivar — 15 filas pero sin ofertas reales asociadas | BACKUP en Campaigns_bak → DROP → CREATE limpio sin SegmentId, con CampaignSegments y CampaignChannels como relaciones formales | Cascada sobre CampaignChannels y CampaignSegments (0 filas) — sin riesgo de pérdida real |
 | `CampaignChannels` | Relación formal campaña ↔ canal | ✅ Sí | ❌ No — sin FK a DistributionChannels | ❌ No — 0 filas | DROP → CREATE con FK (CampaignId, ChannelId) correctas | Sin datos: riesgo cero |
 | `UserChannelCredentials` | Credenciales por usuario/canal | ✅ Sí | ❌ No — sin FK a canales, naming inconsistente | ❌ No — 0 filas | DROP → CREATE como ChannelCredentials con FK a DistributionChannels | Sin datos: riesgo cero |
 | `Clients` | Entidad de cliente/tenant (legacy) | ⚠️ Parcial — absorbe en Organizations/Users | ⚠️ Mantener temporalmente | ⚠️ Auditar | No tocar por ahora. Future: migrar a OrganizationId en Users | Connections.clientId referencia esta tabla; romper requiere actualizar 89 filas |
@@ -62,9 +62,9 @@ Los 17 segmentos tienen `OfferCount=0`. Sin ofertas reales, un segmento no segme
 
 ### Campaigns — ¿por qué archivar y recrear?
 
-Las 15 campañas usan `Channels` como JSON string crudo (`["jooble"]`), no como FK a una tabla de canales. Sin ofertas reales, estas campañas tampoco distribuyeron nada efectivamente. El concepto (`Campaign` = agrupación de distribución segmento → canal) sí tiene valor.
+Las 15 campañas usan `Channels` como JSON string crudo (`["jooble"]`), no como FK a una tabla de canales. El campo `SegmentId` es una FK única, pero el concepto de negocio es multi-segmento. Sin ofertas reales, estas campañas tampoco distribuyeron nada efectivamente. El concepto (`Campaign` = agrupación de distribución de múltiples segmentos en múltiples canales) sí tiene valor.
 
-**Decisión:** archivar las 15 campañas en `Campaigns_bak`, DROP y recrear `Campaigns` con `CampaignChannels` como tabla de relación formal. El esquema de presupuesto, fechas y estado se conserva y mejora.
+**Decisión (2026-06-03):** archivar las 15 campañas en `Campaigns_bak`, DROP y recrear `Campaigns` **sin** `SegmentId`, con `CampaignSegments` (M:N) como única forma de asociar segmentos, y `CampaignChannels` (M:N) como única forma de asociar canales. El esquema de presupuesto, fechas y estado se conserva y mejora. Los 15 registros archivados pueden portarse opcionalmente convirtiendo su `SegmentId` a una fila en `CampaignSegments`.
 
 ### FieldMappings — ¿por qué limpiar datos pero conservar tabla?
 
@@ -90,7 +90,9 @@ DROP seguro            JobOffers (0 filas, schema incompatible → CREATE limpio
 y recrear:             CampaignChannels (0 filas → CREATE con FK)
                        UserChannelCredentials (0 filas → ChannelCredentials)
 
-CREAR nuevo:           DistributionChannels (catálogo + seed 7 canales)
+CREAR nuevo:           CampaignSegments (M:N, canónico — multi-segmento por campaña)
+                       CampaignChannels (M:N, reemplaza Channels JSON crudo)
+                       DistributionChannels (catálogo + seed 7 canales)
                        RawJobRecords
                        DistributionRuns
                        DistributionItems

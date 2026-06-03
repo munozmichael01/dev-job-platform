@@ -154,13 +154,16 @@ campaigns.js — REESCRITURA PARCIAL (adaptar contratos y lógica de negocio)
     - Devolver Channels como array de objetos {id, code, name} no como strings
 
   L88-258 (POST /) →
-    - Eliminar campos: Channels (JSON), DistributionType, BidStrategy, ManualBid,
-                       Priority, AutoOptimization, MaxCPA, TargetApplications de Campaigns
-    - Campaigns nuevo solo tiene: Name, Description, SegmentId, BudgetTotal, BudgetCurrency,
-                                   StartDate, EndDate, Status, UserId, CreatedByUserId
-    - Los campos de distribución van a CampaignChannels (Budget, BidStrategy, Config)
-    - CampaignSegments → usar Campaigns.SegmentId (un segmento por campaña) o añadir tabla
+    - Campaigns nuevo tiene: Name, Description, BudgetTotal, BudgetCurrency,
+                              StartDate, EndDate, Status, UserId, CreatedByUserId
+    - NO SegmentId en Campaigns — los segmentos van en CampaignSegments (M:N)
+    - Campos de distribución movidos: DistributionType, BidStrategy, ManualBid,
+      Priority, AutoOptimization, MaxCPA → CampaignChannels.Config JSONB
     - Channels JSON → insertar rows en CampaignChannels con FK a DistributionChannels
+    - CampaignSegments → CONSERVAR la lógica de inserción múltiple (ya existe en el código)
+      Solo migrar de pool.request() a Supabase nativo
+    - Budget en JSON response → devolver tanto "Budget" como alias de "BudgetTotal"
+      para no romper frontend durante la transición
 
   L261-320 (PUT /:id) →
     - Mismos campos removidos que en POST
@@ -178,7 +181,7 @@ campaigns.js — REESCRITURA PARCIAL (adaptar contratos y lógica de negocio)
       → SELECT CredentialsEncrypted FROM ChannelCredentials WHERE UserId=X AND ChannelId=(SELECT Id FROM DistributionChannels WHERE Code='jooble')
 ```
 
-**Decisión pendiente para Codex:** ¿Un segmento por campaña (Campaigns.SegmentId FK directa) o múltiples (necesitaría añadir CampaignSegments al nuevo schema)? `campaigns.js` actual soporta múltiples. El nuevo schema solo define uno.
+**Decisión tomada (2026-06-03):** Multi-segmento por campaña es el modelo canónico. `CampaignSegments` está en el nuevo schema. `Campaigns` no tiene `SegmentId`. La lógica de inserción múltiple de `campaigns.js` se conserva — solo migrar a Supabase nativo.
 
 ---
 
@@ -304,21 +307,32 @@ connections.js:
 
 ---
 
-## 8. Tabla oculta descubierta: `CampaignSegments`
+## 8. `CampaignSegments` — decisión tomada (2026-06-03)
 
-`campaigns.js` y `segments.js` usan una tabla `CampaignSegments` que **no aparece en ningún schema SQL** del repo (solo en `bootstrap.js` en comentarios) y **no fue auditada en Supabase**.
+`campaigns.js` y `segments.js` usan `CampaignSegments`. Auditada en Supabase: **puede no existir aún** (solo en `bootstrap.js` en comentarios). La decisión de dominio está tomada:
+
+**Decisión:** `CampaignSegments` ES parte del nuevo schema limpio. Multi-segmento por campaña es el modelo canónico.
 
 ```
-Columnas esperadas por el código:
-  CampaignId, SegmentId, BudgetAllocation, Weight, CreatedAt, UpdatedAt
-
-Uso:
-  - Permite que una campaña tenga múltiples segmentos
-  - campaigns.js la usa en: CREATE, GET, activate, repopulate-channels
-  - segments.js la usa en: detail (para listar campañas de un segmento)
+Tabla nueva en proposed-clean-domain-schema.sql:
+  CampaignSegments (
+    Id SERIAL PK,
+    CampaignId → Campaigns.Id CASCADE,
+    SegmentId  → Segments.Id  CASCADE,
+    BudgetAllocation DECIMAL(5,2) DEFAULT 100.0,  -- % del presupuesto
+    Weight DECIMAL(5,2) DEFAULT 1.0,
+    CreatedAt, UpdatedAt,
+    UNIQUE (CampaignId, SegmentId)
+  )
 ```
 
-**Pregunta crítica para Codex:** ¿El nuevo modelo soporta una campaña con múltiples segmentos, o se simplifica a uno? Esto impacta si `CampaignSegments` se añade al SQL propuesto o si se rediseña como `Campaigns.SegmentIds[]` (array) o como FK simple.
+**Impacto en código:** el código actual que usa `CampaignSegments` es **compatible** con el nuevo schema. Los cambios necesarios son solo de migración a Supabase nativo (eliminar `pool.request()`), no de lógica de negocio.
+
+**Verificar en Supabase antes de ejecutar:**
+```sql
+SELECT COUNT(*) FROM "CampaignSegments";
+```
+Si la tabla no existe, el CREATE en el SQL propuesto la crea desde cero. Si existe, el DROP CASCADE en Campaigns la eliminará primero.
 
 ---
 
@@ -356,33 +370,59 @@ Ventana de migración (schema + código juntos)
 
 ---
 
-## 10. ¿Se necesita una fase intermedia de compatibilidad?
+## 10. Fase intermedia de compatibilidad — shims aprobados
 
-**Para la mayoría de los módulos: no.**
+**Decisión (2026-06-03):** durante la transición, el backend devuelve shims para no romper el frontend inmediatamente.
 
-Los módulos ya migrados o por migrar (auth, jobOffers) no necesitan shim. El schema nuevo es lo suficientemente diferente que un shim haría el código más complejo, no más simple.
-
-**Excepción: `Channels` en Campaigns.**
-
-El frontend actual espera `campaign.Channels` como array de strings `["jooble", "talent"]`. Con el nuevo schema, los canales vienen de `CampaignChannels` como array de objetos `[{id:1, code:"jooble", name:"Jooble"}]`. Aquí sí puede ser útil un shim temporal en el GET response:
+### Shim 1: `Channels` como array de strings
 
 ```javascript
-// Shim temporal en GET /api/campaigns
-const channelsForFrontend = campaign.campaignChannels?.map(cc => cc.channel?.Code) || [];
-res.json({ ...campaign, Channels: channelsForFrontend });  // mantener contrato frontend
+// GET /api/campaigns — en el response builder
+const channelCodes = campaignChannels.map(cc => cc.distributionChannel?.Code || cc.channelCode);
+res.json({
+  ...campaign,
+  Channels: channelCodes,          // ["jooble", "talent"] — shim para frontend
+  campaignChannels: campaignChannels // nuevo campo con FK completo para futuro
+});
 ```
 
-Esto permite que el frontend siga funcionando sin cambios mientras se adapta gradualmente.
+### Shim 2: `Budget` como alias de `BudgetTotal`
+
+```javascript
+// GET /api/campaigns — en el response builder
+res.json({
+  ...campaign,
+  Budget: campaign.BudgetTotal,    // alias shim para frontend
+  BudgetTotal: campaign.BudgetTotal // campo canónico
+});
+```
+
+### Shim 3: `segments` derivado de CampaignSegments
+
+```javascript
+// GET /api/campaigns — en el response builder
+// Hoy: segments vienen de CampaignSegments JOIN Segments
+// El campo "segment" (singular) que el frontend usa como display name:
+const segmentNames = campaignSegments.map(cs => cs.segment?.Name).join(', ');
+res.json({
+  ...campaign,
+  segment: segmentNames,           // shim: nombre legible de segmentos
+  segments: campaignSegments       // nuevo campo estructurado
+});
+```
+
+Estos shims se eliminan cuando el frontend sea actualizado para leer los campos nuevos. Se documentan aquí para que no queden como "magia" en el código.
 
 ---
 
 ## 11. Riesgos y decisiones pendientes
 
-| Riesgo | Probabilidad | Impacto | Qué hacer |
-|---|---|---|---|
-| `CampaignSegments` no existe en Supabase (no auditada) | Media | Alto | Verificar en Supabase SQL Editor antes de ejecutar schema |
-| Frontend depende de `Channels` como string array | Alta | Medio | Shim temporal en GET /api/campaigns |
-| Multi-segmento por campaña sin `CampaignSegments` | Alta | Medio | Decidir: un segmento o tabla CampaignSegments en nuevo schema |
-| `Budget` → `BudgetTotal` renaming rompe frontend | Media | Medio | Mantener `Budget` como alias o parchear frontend |
-| `UserChannelCredentials.EncryptedCredentials` → `ChannelCredentials.CredentialsEncrypted` | Alta | Alto | Actualizar activate endpoint ANTES de schema change |
-| `StatusId` → `Status` en queries de estimación | Alta | Medio | Actualizar segments.js y campaignDistributionService.js antes |
+| Riesgo | Probabilidad | Impacto | Estado | Qué hacer |
+|---|---|---|---|---|
+| `CampaignSegments` no existe en Supabase | Media | Bajo | ✅ Resuelto — CREATE en schema nuevo la crea si no existe | Verificar COUNT antes de ejecutar |
+| Frontend depende de `Channels` como string array | Alta | Medio | ✅ Resuelto — shim aprobado en Sección 10 | Implementar shim en GET /api/campaigns |
+| Multi-segmento sin `CampaignSegments` | Alta | Medio | ✅ Resuelto — CampaignSegments está en schema nuevo | Lógica de código se conserva |
+| `Budget` → `BudgetTotal` rompe frontend | Alta | Medio | ✅ Resuelto — shim aprobado en Sección 10 | Implementar alias Budget=BudgetTotal en response |
+| `UserChannelCredentials.EncryptedCredentials` → `ChannelCredentials.CredentialsEncrypted` | Alta | Alto | ⚠️ Pendiente | Actualizar activate endpoint ANTES del schema change |
+| `StatusId` → `Status` en queries de estimación | Alta | Medio | ⚠️ Pendiente | Actualizar segments.js y campaignDistributionService.js |
+| `Campaigns.SegmentId` esperado por algún código no auditado | Baja | Medio | ⚠️ Verificar | Búsqueda global: `grep -r "SegmentId" backend/src/` |

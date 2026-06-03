@@ -14,6 +14,14 @@
 --   - Connections are KEPT intact (real data)
 --   - Archive tables (_bak) created FIRST as safety net
 --
+-- 2026-06-03 — Domain decision incorporated:
+--   - Campaigns support MULTIPLE segments via CampaignSegments join table
+--   - Campaigns.SegmentId removed (multi-segment model is the canonical one)
+--   - CampaignChannels is the formal campaign-channel relation (no JobOfferId here)
+--   - Per-offer/per-channel expansion happens only in DistributionItems at run time
+--   - DistributionRuns tracks the execution; DistributionItems tracks per-offer results
+--   - Transition shims: backend may return Channels:[] and Budget alias for frontend compat
+--
 -- Author: Claude Code (2026-06-03)
 -- Reviewed by: Codex
 -- =============================================================================
@@ -293,25 +301,35 @@ CREATE TABLE IF NOT EXISTS "SegmentJobOffers" (
 
 
 -- =============================================================================
--- PHASE 7: REPLACE Campaigns + CampaignChannels
+-- PHASE 7: REPLACE Campaigns + CampaignSegments + CampaignChannels
 -- =============================================================================
--- Business concept: grouping of distribution from a segment across channels
--- Archive action: Campaigns_bak already created in Phase 0
--- Reason: Channels=JSON string, no FK to actual channel catalog,
---         campaigns without real offers have no distribution history
+-- Business concepts:
+--   Campaign:         groups distribution of multiple segments across channels
+--   CampaignSegments: formal M:N join — one campaign can have MANY segments
+--   CampaignChannels: formal M:N join — one campaign can target MANY channels
+--
+-- Domain decisions (2026-06-03):
+--   - Campaigns.SegmentId REMOVED — multi-segment is the canonical model
+--   - CampaignSegments is the only way to associate segments to a campaign
+--   - CampaignChannels does NOT contain JobOfferId or per-offer budget splits
+--     (that happens at distribution time in DistributionItems)
+--   - Per-offer/channel expansion: DistributionRun → DistributionItems
+--
+-- Archive actions: Campaigns_bak already created in Phase 0
 
 DROP TABLE IF EXISTS "CampaignChannels";   -- 0 rows, safe
 DROP TABLE IF EXISTS "Campaigns" CASCADE;  -- Campaigns_bak already created
+-- Note: old CampaignSegments (if it exists in Supabase) also dropped by CASCADE
 
--- DistributionChannels catalog MUST exist before Campaigns (FK dependency)
+-- DistributionChannels catalog MUST exist before CampaignChannels (FK dependency)
 CREATE TABLE IF NOT EXISTS "DistributionChannels" (
   "Id"                  SERIAL PRIMARY KEY,
-  "Code"                VARCHAR(50) NOT NULL UNIQUE,
+  "Code"                VARCHAR(50) NOT NULL UNIQUE,   -- 'jooble', 'talent', etc.
   "Name"                VARCHAR(100) NOT NULL,
-  "Type"                VARCHAR(50),                 -- 'xml-feed', 'api', 'scraper'
+  "Type"                VARCHAR(50),                   -- 'xml-feed', 'api', 'scraper'
   "Country"             VARCHAR(10),
   "IsActive"            BOOLEAN NOT NULL DEFAULT true,
-  "RequirementsSchema"  JSONB,
+  "RequirementsSchema"  JSONB,                         -- validation rules per channel
   "CreatedAt"           TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
   "UpdatedAt"           TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
@@ -327,36 +345,62 @@ INSERT INTO "DistributionChannels" ("Code", "Name", "Type", "Country") VALUES
   ('indeed',    'Indeed',     'xml-feed', NULL)
 ON CONFLICT ("Code") DO NOTHING;
 
+-- Campaigns: no SegmentId FK — segments are in CampaignSegments below
 CREATE TABLE "Campaigns" (
   "Id"              SERIAL PRIMARY KEY,
   "UserId"          BIGINT NOT NULL REFERENCES "Users"("Id") ON DELETE CASCADE,
-  "SegmentId"       INTEGER REFERENCES "Segments"("Id") ON DELETE SET NULL,
+  -- NOTE: no SegmentId column — use CampaignSegments for the M:N relationship
   "Name"            VARCHAR(255) NOT NULL,
   "Description"     TEXT,
   "Objective"       VARCHAR(255),
   "BudgetTotal"     DECIMAL(10,2),
+  -- Transition shim: backend may return this as "Budget" in JSON responses
+  -- for frontend compatibility during migration. Field name in DB is BudgetTotal.
   "BudgetCurrency"  VARCHAR(10) DEFAULT 'EUR',
   "StartDate"       TIMESTAMP,
   "EndDate"         TIMESTAMP,
   "Status"          VARCHAR(50) NOT NULL DEFAULT 'draft',
-  -- 'draft', 'active', 'paused', 'completed', 'archived'
+  -- Valid values: 'draft', 'active', 'paused', 'completed', 'archived'
   "CreatedByUserId" BIGINT REFERENCES "Users"("Id"),
   "CreatedAt"       TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
   "UpdatedAt"       TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 
-CREATE INDEX idx_camp_userid   ON "Campaigns"("UserId");
-CREATE INDEX idx_camp_segid    ON "Campaigns"("SegmentId");
-CREATE INDEX idx_camp_status   ON "Campaigns"("Status");
+CREATE INDEX idx_camp_userid  ON "Campaigns"("UserId");
+CREATE INDEX idx_camp_status  ON "Campaigns"("Status");
 
+-- CampaignSegments: formal M:N join table — one campaign, many segments
+-- This is the CANONICAL relationship. Not a legacy table.
+CREATE TABLE "CampaignSegments" (
+  "Id"               SERIAL PRIMARY KEY,
+  "CampaignId"       INTEGER NOT NULL REFERENCES "Campaigns"("Id") ON DELETE CASCADE,
+  "SegmentId"        INTEGER NOT NULL REFERENCES "Segments"("Id") ON DELETE CASCADE,
+  "BudgetAllocation" DECIMAL(5,2) DEFAULT 100.0,
+  -- Percentage of campaign budget allocated to this segment (0.0–100.0)
+  -- If 2 segments: 50.0 each. If 3: 33.33 each. Sum across segments should = 100.
+  "Weight"           DECIMAL(5,2) DEFAULT 1.0,
+  "CreatedAt"        TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  "UpdatedAt"        TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  UNIQUE ("CampaignId", "SegmentId")
+);
+
+CREATE INDEX idx_campseg_campaign ON "CampaignSegments"("CampaignId");
+CREATE INDEX idx_campseg_segment  ON "CampaignSegments"("SegmentId");
+
+-- CampaignChannels: formal M:N join — which channels a campaign targets
+-- Does NOT contain JobOfferId or per-offer budget splits.
+-- Per-offer expansion happens at distribution time in DistributionItems.
 CREATE TABLE "CampaignChannels" (
   "Id"          SERIAL PRIMARY KEY,
   "CampaignId"  INTEGER NOT NULL REFERENCES "Campaigns"("Id") ON DELETE CASCADE,
   "ChannelId"   INTEGER NOT NULL REFERENCES "DistributionChannels"("Id"),
   "Budget"      DECIMAL(10,2),
+  -- Channel-level budget allocation (sum across channels = Campaigns.BudgetTotal)
   "BidStrategy" VARCHAR(50),
   "Status"      VARCHAR(50) NOT NULL DEFAULT 'active',
   "Config"      JSONB,
+  -- Config stores channel-specific settings: maxCPA, manualBid, priority, autoOptimization
+  -- Example: {"maxCPA": 9.99, "manualBid": null, "priority": "medium", "autoOptimization": true}
   "CreatedAt"   TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
   "UpdatedAt"   TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
   UNIQUE ("CampaignId", "ChannelId")
@@ -365,12 +409,28 @@ CREATE TABLE "CampaignChannels" (
 CREATE INDEX idx_cc_campaign ON "CampaignChannels"("CampaignId");
 CREATE INDEX idx_cc_channel  ON "CampaignChannels"("ChannelId");
 
--- OPTIONAL: if archived campaigns are worth porting, uncomment:
+-- Transition shim note:
+-- Backend GET /api/campaigns response may include:
+--   "Channels": ["jooble", "talent"]        (derived from CampaignChannels JOIN DistributionChannels)
+--   "Budget": <value>                        (alias for BudgetTotal)
+--   "segments": [{segmentId, name, ...}]    (derived from CampaignSegments JOIN Segments)
+-- This preserves frontend contract while schema is updated.
+
+-- OPTIONAL: port archived campaigns, then recreate CampaignSegments rows
+-- Uncomment only after confirming archived campaigns have value:
 -- INSERT INTO "Campaigns" ("UserId","Name","Description","BudgetTotal","StartDate","EndDate","Status","CreatedAt","UpdatedAt")
 -- SELECT b."UserId", b."Name", b."Description", b."Budget", b."StartDate", b."EndDate",
 --        b."Status", b."CreatedAt", b."UpdatedAt"
 -- FROM "Campaigns_bak" b
 -- WHERE b."UserId" IN (SELECT "Id" FROM "Users");
+--
+-- Then recreate CampaignSegments from Campaigns_bak.SegmentId (single segment per old campaign):
+-- INSERT INTO "CampaignSegments" ("CampaignId", "SegmentId")
+-- SELECT c."Id", b."SegmentId"
+-- FROM "Campaigns" c
+-- JOIN "Campaigns_bak" b ON b."Name" = c."Name" AND b."UserId" = c."UserId"
+-- WHERE b."SegmentId" IS NOT NULL
+-- ON CONFLICT DO NOTHING;
 
 
 -- =============================================================================
@@ -399,44 +459,68 @@ CREATE INDEX idx_chcred_userid ON "ChannelCredentials"("UserId");
 -- =============================================================================
 -- PHASE 9: CREATE Distribution runtime tables (new)
 -- =============================================================================
--- Business concept: execution record of each distribution run + per-offer results
+-- Business concepts:
+--   DistributionRun:  one execution of a campaign on a specific channel
+--                     Triggered by: campaign activation, scheduled re-sync, manual push
+--   DistributionItem: result for ONE offer within ONE run
+--                     This is where per-offer/per-channel expansion happens —
+--                     NOT in CampaignChannels (which is just the campaign-level config)
+--
+-- Separation of concerns:
+--   CampaignChannels  → "this campaign targets these channels" (config, M:N)
+--   DistributionRuns  → "this campaign ran against this channel at this time" (execution)
+--   DistributionItems → "this offer was sent to this channel with this result" (per-offer audit)
 
 CREATE TABLE IF NOT EXISTS "DistributionRuns" (
-  "Id"            BIGSERIAL PRIMARY KEY,
-  "UserId"        BIGINT NOT NULL REFERENCES "Users"("Id"),
-  "CampaignId"    INTEGER NOT NULL REFERENCES "Campaigns"("Id"),
-  "ChannelId"     INTEGER NOT NULL REFERENCES "DistributionChannels"("Id"),
-  "Status"        VARCHAR(50) NOT NULL DEFAULT 'pending',
+  "Id"              BIGSERIAL PRIMARY KEY,
+  "UserId"          BIGINT NOT NULL REFERENCES "Users"("Id"),
+  "CampaignId"      INTEGER NOT NULL REFERENCES "Campaigns"("Id"),
+  "CampaignChannelId" INTEGER REFERENCES "CampaignChannels"("Id"),
+  -- Link back to the specific campaign-channel config that triggered this run
+  "ChannelId"       INTEGER NOT NULL REFERENCES "DistributionChannels"("Id"),
+  -- Denormalized for fast queries without joining through CampaignChannels
+  "Status"          VARCHAR(50) NOT NULL DEFAULT 'pending',
   -- 'pending', 'running', 'completed', 'failed', 'partial'
-  "StartedAt"     TIMESTAMP,
-  "FinishedAt"    TIMESTAMP,
-  "OffersTotal"   INTEGER DEFAULT 0,
-  "OffersOk"      INTEGER DEFAULT 0,
-  "OffersFailed"  INTEGER DEFAULT 0,
-  "ErrorMessage"  TEXT,
-  "CreatedAt"     TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+  "TriggerType"     VARCHAR(50) DEFAULT 'manual',
+  -- 'manual', 'scheduled', 'activation', 'resync'
+  "StartedAt"       TIMESTAMP,
+  "FinishedAt"      TIMESTAMP,
+  "OffersTotal"     INTEGER DEFAULT 0,
+  "OffersOk"        INTEGER DEFAULT 0,
+  "OffersFailed"    INTEGER DEFAULT 0,
+  "ErrorMessage"    TEXT,
+  "CreatedAt"       TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 
 CREATE INDEX idx_distrun_campaign ON "DistributionRuns"("CampaignId");
 CREATE INDEX idx_distrun_channel  ON "DistributionRuns"("ChannelId");
 CREATE INDEX idx_distrun_status   ON "DistributionRuns"("Status");
+CREATE INDEX idx_distrun_campchan ON "DistributionRuns"("CampaignChannelId");
 
 CREATE TABLE IF NOT EXISTS "DistributionItems" (
   "Id"                  BIGSERIAL PRIMARY KEY,
   "DistributionRunId"   BIGINT NOT NULL REFERENCES "DistributionRuns"("Id") ON DELETE CASCADE,
   "JobOfferId"          BIGINT NOT NULL REFERENCES "JobOffers"("Id"),
   "ChannelId"           INTEGER NOT NULL REFERENCES "DistributionChannels"("Id"),
-  "ExternalChannelId"   VARCHAR(255),   -- ID assigned by the channel after publish
+  -- Denormalized from DistributionRun for direct queries
+  "ExternalChannelId"   VARCHAR(255),
+  -- ID assigned by the external channel after publishing (e.g. Jooble's campaign ID)
   "Status"              VARCHAR(50) NOT NULL DEFAULT 'pending',
-  "Payload"             JSONB,
-  "Response"            JSONB,
+  -- 'pending', 'published', 'failed', 'removed', 'expired'
+  "AllocatedBudget"     DECIMAL(10,2),
+  "AllocatedTarget"     INTEGER,
+  -- Per-offer budget and target allocation computed at distribution time
+  -- These are NOT stored in CampaignChannels — they are computed here per run
+  "Payload"             JSONB,           -- what was sent to the channel
+  "Response"            JSONB,           -- what the channel replied
   "ErrorMessage"        TEXT,
   "CreatedAt"           TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
   "UpdatedAt"           TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 
-CREATE INDEX idx_distitem_run   ON "DistributionItems"("DistributionRunId");
-CREATE INDEX idx_distitem_offer ON "DistributionItems"("JobOfferId");
+CREATE INDEX idx_distitem_run    ON "DistributionItems"("DistributionRunId");
+CREATE INDEX idx_distitem_offer  ON "DistributionItems"("JobOfferId");
+CREATE INDEX idx_distitem_status ON "DistributionItems"("Status");
 
 
 -- =============================================================================
@@ -508,12 +592,13 @@ UNION SELECT 'Campaigns_bak', COUNT(*) FROM "Campaigns_bak";
 -- Expected: 15, 89, 17, 15
 
 -- 2. New clean tables are empty (ready for real data)
-SELECT 'JobOffers' t, COUNT(*) n FROM "JobOffers"
+SELECT 'JobOffers' t,       COUNT(*) n FROM "JobOffers"
 UNION SELECT 'Segments',         COUNT(*) FROM "Segments"
 UNION SELECT 'Campaigns',        COUNT(*) FROM "Campaigns"
+UNION SELECT 'CampaignSegments', COUNT(*) FROM "CampaignSegments"
 UNION SELECT 'CampaignChannels', COUNT(*) FROM "CampaignChannels"
 UNION SELECT 'RawJobRecords',    COUNT(*) FROM "RawJobRecords";
--- Expected: 0, 0, 0, 0, 0
+-- Expected: 0, 0, 0, 0, 0, 0
 
 -- 3. Distribution catalog seeded
 SELECT COUNT(*) FROM "DistributionChannels";  -- Expected: 7
@@ -548,8 +633,11 @@ FieldMappings: Orphaned rows cleaned. Restore from FieldMappings_bak if needed.
 Segments:   DROP TABLE "Segments" CASCADE;
             ALTER TABLE "Segments_bak" RENAME TO "Segments";
 
-Campaigns:  DROP TABLE "CampaignChannels"; DROP TABLE "Campaigns" CASCADE;
+Campaigns:  DROP TABLE "CampaignChannels"; DROP TABLE "CampaignSegments";
+            DROP TABLE "Campaigns" CASCADE;
             ALTER TABLE "Campaigns_bak" RENAME TO "Campaigns";
+            -- Note: old CampaignSegments data (if any existed) is not restored by this rollback.
+            -- Check Campaigns_bak.SegmentId if individual segment references are needed.
 
 JobOffers:  No data to restore (was empty). Drop the new table if needed.
 
