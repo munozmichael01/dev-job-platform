@@ -87,16 +87,16 @@ router.get('/user/:id', async (req, res) => {
     const user = users[0];
 
     const [campaignsRes, credentialsRes] = await Promise.all([
-      supabase.from('Campaigns').select('ActualSpend, ActualApplications').eq('UserId', id),
-      supabase.from('UserChannelCredentials').select('Id').eq('UserId', id).eq('IsActive', 1)
+      supabase.from('Campaigns').select('Id, BudgetTotal').eq('UserId', id),
+      supabase.from('ChannelCredentials').select('Id').eq('UserId', id).eq('IsActive', true)
     ]);
 
     const campaigns = campaignsRes.data || [];
     const stats = {
       campaignsCount: campaigns.length,
       channelsConfigured: (credentialsRes.data || []).length,
-      totalSpent: campaigns.reduce((sum, c) => sum + (parseFloat(c.ActualSpend) || 0), 0),
-      totalApplications: campaigns.reduce((sum, c) => sum + (c.ActualApplications || 0), 0)
+      totalSpent: 0,
+      totalApplications: 0
     };
 
     res.json({
@@ -416,10 +416,10 @@ router.delete('/user/:id', async (req, res) => {
     console.log(`🏢 Eliminados ${clientCount ?? 0} clientes del usuario ${id}`);
 
     try {
-      const { count: credCount } = await supabase.from('UserChannelCredentials').delete({ count: 'exact' }).eq('UserId', id);
+      const { count: credCount } = await supabase.from('ChannelCredentials').delete({ count: 'exact' }).eq('UserId', id);
       console.log(`🔑 Eliminadas ${credCount ?? 0} credenciales del usuario ${id}`);
     } catch {
-      console.log(`⚠️ UserChannelCredentials no encontrado para usuario ${id}`);
+      console.log(`⚠️ ChannelCredentials no encontrado para usuario ${id}`);
     }
 
     const { error } = await supabase.from('Users').delete().eq('Id', id);

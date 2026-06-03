@@ -1,5 +1,5 @@
 // API base
-const API_URL = 'http://localhost:3002';
+const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3002';
 
 // Import fetchWithAuth from AuthContext
 // Esta función será inyectada desde el componente que use estas funciones

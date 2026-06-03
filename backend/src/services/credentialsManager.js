@@ -102,29 +102,35 @@ class CredentialsManager {
    */
   async getUserChannelCredentials(userId, channelId) {
     try {
-      const { pool, poolPromise } = require('../db/db');
-      await poolPromise;
-      const result = await pool.request()
-        .input('userId', userId)
-        .input('channelId', channelId)
-        .query(`
-          SELECT EncryptedCredentials, ConfigurationData 
-          FROM UserChannelCredentials 
-          WHERE UserId = @userId AND ChannelId = @channelId AND IsActive = 1
-        `);
-
-      if (result.recordset.length === 0) {
+      const { supabase } = require('../db/db');
+      const baseCode = String(channelId || '').split('-')[0];
+      const { data: channel, error: channelError } = await supabase
+        .from('DistributionChannels')
+        .select('Id, Code')
+        .eq('Code', baseCode)
+        .single();
+      if (channelError) {
         return null;
       }
 
-      const row = result.recordset[0];
-      const credentials = this.decryptCredentials(row.EncryptedCredentials);
+      const { data: row, error } = await supabase
+        .from('ChannelCredentials')
+        .select('CredentialsEncrypted, ConfigurationData')
+        .eq('UserId', userId)
+        .eq('ChannelId', channel.Id)
+        .eq('IsActive', true)
+        .maybeSingle();
+      if (error) throw error;
+      if (!row) return null;
+
+      const credentials = this.decryptCredentials(row.CredentialsEncrypted);
       
       // Agregar configuración si existe
       if (row.ConfigurationData) {
         try {
-          const config = JSON.parse(row.ConfigurationData);
-          credentials._config = config;
+          credentials._config = typeof row.ConfigurationData === 'string'
+            ? JSON.parse(row.ConfigurationData)
+            : row.ConfigurationData;
         } catch (e) {
           console.warn('Error parseando configuración:', e);
         }
@@ -144,33 +150,35 @@ class CredentialsManager {
    */
   async getAllUserCredentials(userId) {
     try {
-      const { pool, poolPromise } = require('../db/db');
-      await poolPromise;
-      const result = await pool.request()
-        .input('userId', userId)
-        .query(`
-          SELECT ChannelId, EncryptedCredentials, ConfigurationData 
-          FROM UserChannelCredentials 
-          WHERE UserId = @userId AND IsActive = 1 AND IsValidated = 1
-        `);
+      const { supabase } = require('../db/db');
+      const { data: rows, error } = await supabase
+        .from('ChannelCredentials')
+        .select('CredentialsEncrypted, ConfigurationData, DistributionChannels(Code)')
+        .eq('UserId', userId)
+        .eq('IsActive', true)
+        .eq('IsValidated', true);
+      if (error) throw error;
 
       const credentials = {};
       
-      for (const row of result.recordset) {
+      for (const row of rows || []) {
+        const channelCode = row.DistributionChannels?.Code;
+        if (!channelCode) continue;
         try {
-          credentials[row.ChannelId] = this.decryptCredentials(row.EncryptedCredentials);
+          credentials[channelCode] = this.decryptCredentials(row.CredentialsEncrypted);
           
           // Agregar configuración si existe
           if (row.ConfigurationData) {
             try {
-              const config = JSON.parse(row.ConfigurationData);
-              credentials[row.ChannelId]._config = config;
+              credentials[channelCode]._config = typeof row.ConfigurationData === 'string'
+                ? JSON.parse(row.ConfigurationData)
+                : row.ConfigurationData;
             } catch (e) {
-              console.warn('Error parseando configuración para', row.ChannelId, e);
+              console.warn('Error parseando configuración para', channelCode, e);
             }
           }
         } catch (error) {
-          console.error(`Error desencriptando credenciales para canal ${row.ChannelId}:`, error);
+          console.error(`Error desencriptando credenciales para canal ${channelCode}:`, error);
         }
       }
 
