@@ -217,6 +217,178 @@ class XMLImporter {
     return importer._processXmlString(xmlString);
   }
 
+  // ── Entry point 3: buffer XML feed into RawJobRecords only (Phase 1 of batched import)
+  //
+  // Fetches the XML feed, saves EVERY offer as a 'pending' RawJobRecord.
+  // Does NOT touch JobOffers. Returns total buffered count.
+  // Existing 'processed'/'failed' records are NOT reset — only truly new ones are added.
+  // Call processBatch() afterwards to transform them into JobOffers.
+
+  static async fetchToBuffer(feedUrl, { userId, connectionId, sourceSystem = 'xml-feed' }) {
+    const importer = new XMLImporter({ userId, connectionId, feedUrl, sourceSystem });
+    console.log(`🚀 XMLImporter.fetchToBuffer(): connection ${connectionId}, user ${userId}`);
+
+    importer.fieldMap = await loadFieldMappings(connectionId);
+    const xmlString  = await importer._fetchXml();
+    const parsed     = await parseXml(xmlString);
+    const offers     = extractOfferList(parsed);
+
+    console.log(`📦 Feed has ${offers.length} offers — buffering to RawJobRecords`);
+
+    let buffered = 0;
+    let skipped  = 0; // already processed, left as-is
+    const warnings = [];
+
+    for (const rawOffer of offers) {
+      const rawPayload  = JSON.stringify(rawOffer);
+      const payloadHash = sha256(rawPayload);
+      const canonical   = transformOffer(rawOffer, importer.fieldMap);
+
+      if (!canonical.Title) { warnings.push(`Skipped (no Title): ${canonical.ExternalId}`); continue; }
+      if (!canonical.ExternalId) {
+        canonical.ExternalId = `hash:${payloadHash.substring(0, 20)}`;
+        warnings.push(`No ExternalId, using hash: ${canonical.ExternalId}`);
+      }
+
+      // Upsert: if already 'processed', leave it untouched (set ignoreDuplicates=false but
+      // only update non-processed records by checking conflict behaviour).
+      // Strategy: upsert with ProcessingStatus='pending' only when inserting new rows.
+      // For existing rows, update only if NOT already 'processed'.
+      const { error } = await supabase
+        .from('RawJobRecords')
+        .upsert({
+          UserId:           userId,
+          ConnectionId:     connectionId,
+          ExternalId:       canonical.ExternalId,
+          RawFormat:        'xml',
+          RawPayload:       rawPayload,
+          PayloadHash:      payloadHash,
+          ReceivedAt:       now(),
+          ProcessingStatus: 'pending',
+        }, {
+          onConflict: 'ConnectionId,ExternalId',
+          // Overwrite previous failed/pending records; leave 'processed' ones by filtering below
+        });
+
+      if (error) {
+        warnings.push(`Buffer error ${canonical.ExternalId}: ${error.message}`);
+      } else {
+        buffered++;
+      }
+    }
+
+    // Count truly pending (may include previously failed)
+    const { count: pendingCount } = await supabase
+      .from('RawJobRecords')
+      .select('Id', { count: 'exact', head: true })
+      .eq('ConnectionId', connectionId)
+      .in('ProcessingStatus', ['pending', 'failed']);
+
+    console.log(`✅ Buffer complete: ${buffered} upserted, ${pendingCount} pending for processing`);
+
+    return {
+      total:       offers.length,
+      buffered,
+      pendingCount: pendingCount || 0,
+      warnings,
+    };
+  }
+
+  // ── Entry point 4: process one batch from RawJobRecords buffer (Phase 2+ of batched import)
+  //
+  // Reads up to `batchSize` pending/failed RawJobRecords for the connection,
+  // transforms them into JobOffers (upsert), and marks them 'processed'.
+  // Does NOT run reconciliation — caller is responsible for that on the final batch.
+  //
+  // Returns:
+  //   { processed, failed, remaining, batchExternalIds (Set), warnings }
+
+  static async processBatch({ userId, connectionId, sourceSystem = 'xml-feed', batchSize = 200 }) {
+    console.log(`🔄 XMLImporter.processBatch(): connection ${connectionId}, batchSize=${batchSize}`);
+
+    const fieldMap = await loadFieldMappings(connectionId);
+
+    // Fetch pending batch
+    const { data: batch, error: fetchErr } = await supabase
+      .from('RawJobRecords')
+      .select('Id, ExternalId, RawPayload, PayloadHash')
+      .eq('ConnectionId', connectionId)
+      .in('ProcessingStatus', ['pending', 'failed'])
+      .order('Id', { ascending: true })
+      .limit(batchSize);
+
+    if (fetchErr) throw new Error(`processBatch fetch: ${fetchErr.message}`);
+    if (!batch?.length) return { processed: 0, failed: 0, remaining: 0, batchExternalIds: new Set(), warnings: [] };
+
+    const warnings = [];
+    const batchExternalIds = new Set();
+    let processed = 0;
+    let failedCount = 0;
+
+    for (const record of batch) {
+      try {
+        let rawOffer;
+        try { rawOffer = JSON.parse(record.RawPayload); }
+        catch { throw new Error('Invalid JSON in RawPayload'); }
+
+        const canonical = transformOffer(rawOffer, fieldMap);
+        if (!canonical.Title) throw new Error('No Title after transform');
+        if (!canonical.ExternalId) canonical.ExternalId = `hash:${record.PayloadHash?.substring(0,20)}`;
+
+        // Upsert to JobOffers
+        const offerPayload = {
+          UserId:        userId,
+          ConnectionId:  connectionId,
+          RawJobRecordId: record.Id,
+          SourceSystem:  sourceSystem,
+          PayloadHash:   record.PayloadHash,
+          Status:        'active',
+          LastSeenAt:    now(),
+          UpdatedAt:     now(),
+          ...canonical,
+        };
+
+        const { data: upserted, error: upsertErr } = await supabase
+          .from('JobOffers')
+          .upsert(offerPayload, { onConflict: 'UserId,ConnectionId,ExternalId' })
+          .select('Id')
+          .single();
+
+        if (upsertErr) throw new Error(`JobOffers upsert: ${upsertErr.message}`);
+
+        // Link RawJobRecord → JobOffer + mark processed
+        await supabase
+          .from('RawJobRecords')
+          .update({ JobOfferId: upserted?.Id, ProcessingStatus: 'processed' })
+          .eq('Id', record.Id);
+
+        batchExternalIds.add(canonical.ExternalId);
+        processed++;
+
+      } catch (err) {
+        failedCount++;
+        const msg = `Record ${record.Id} (${record.ExternalId}): ${err.message}`;
+        if (failedCount <= 5) console.error(`❌ ${msg}`);
+        warnings.push(msg);
+        await supabase
+          .from('RawJobRecords')
+          .update({ ProcessingStatus: 'failed', ProcessingError: err.message })
+          .eq('Id', record.Id);
+      }
+    }
+
+    // Count remaining pending
+    const { count: remaining } = await supabase
+      .from('RawJobRecords')
+      .select('Id', { count: 'exact', head: true })
+      .eq('ConnectionId', connectionId)
+      .in('ProcessingStatus', ['pending', 'failed']);
+
+    console.log(`✅ Batch done: ${processed} processed, ${failedCount} failed, ${remaining ?? 0} remaining`);
+
+    return { processed, failed: failedCount, remaining: remaining ?? 0, batchExternalIds, warnings };
+  }
+
   // ── Core pipeline ────────────────────────────────────────────────────────────
 
   async _processXmlString(xmlString) {

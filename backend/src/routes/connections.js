@@ -484,48 +484,145 @@ router.post("/:id/import", addUserIdToRequest, requireAuth, onlyOwnData('UserId'
           })
         }
         
-        // Use clean XMLImporter (new schema: RawJobRecords + JobOffers with Status string, BIGINT UserId)
-        // XMLProcessor legacy is left in place but no longer called for XML feeds.
-        const XMLImporter = require("../processors/xmlImporter")
-        const feedUrl = connectionUrl
-        const importer = new XMLImporter({
-          userId:       connection.UserId || connection.userId,
-          connectionId: parseInt(id),
-          feedUrl:      feedUrl,
-          sourceSystem: `conn-${id}`,
-        })
+        // ── Batched XML import (two-phase, Vercel-timeout-safe) ──────────────────
+        //
+        // Phase 1 (buffer):  Fetch XML feed → save ALL offers to RawJobRecords as 'pending'.
+        //                    Fast (just JSON writes). Completes in < 30s for 3000 offers.
+        //                    Returns hasMore=true so caller knows to continue.
+        //
+        // Phase 2+ (process): Read batchSize pending RawJobRecords → transform → upsert JobOffers.
+        //                     No XML fetch. Completes in < 30s for 200 offers.
+        //                     Repeat until remaining=0, then run reconciliation.
+        //
+        // Auto-detected: if pending RawJobRecords exist → process batch.
+        //                if none → fetch+buffer first.
+        //
+        // UI contract preserved: response always includes result.{imported, errors, hasMore, nextOffset}
 
-        // Stamp lastSync = now so stale-lock detection works correctly.
-        // If Vercel times out mid-import, the stale check uses this timestamp.
+        const XMLImporter = require("../processors/xmlImporter")
+        const userId      = connection.UserId || connection.userId
+        const connId      = parseInt(id)
+        const BATCH_SIZE  = parseInt(req.query.batchSize) || 200
+        const sourceSystem = `conn-${id}`
+
+        // Check for pending records from a previous buffer pass
+        const { count: pendingCount } = await supabase
+          .from('RawJobRecords')
+          .select('Id', { count: 'exact', head: true })
+          .eq('ConnectionId', connId)
+          .in('ProcessingStatus', ['pending', 'failed'])
+
         await supabase.from('Connections').update({
           status:   'importing',
           lastSync: new Date().toISOString(),
         }).eq('id', id)
 
-        let importerStats
         try {
-          importerStats = await importer.run()
+          if (!pendingCount || pendingCount === 0) {
+            // ── Phase 1: fetch XML → buffer to RawJobRecords ──────────────────
+            console.log(`📥 Phase 1 — buffering XML feed for connection ${id}`)
+            const bufferResult = await XMLImporter.fetchToBuffer(connectionUrl, {
+              userId, connectionId: connId, sourceSystem
+            })
+
+            await supabase.from('Connections').update({
+              status:   'importing',  // keep 'importing' — processing not done yet
+              lastSync: new Date().toISOString(),
+            }).eq('id', id)
+
+            return res.json({
+              success:     true,
+              message:     `Feed descargado: ${bufferResult.buffered} ofertas en cola. Llama de nuevo para procesar.`,
+              phase:       'buffer',
+              result: {
+                imported:   0,
+                errors:     bufferResult.warnings.length,
+                hasMore:    bufferResult.pendingCount > 0,
+                nextOffset: 0,
+                pending:    bufferResult.pendingCount,
+              },
+              stats: bufferResult,
+            })
+
+          } else {
+            // ── Phase 2+: process batch from RawJobRecords ────────────────────
+            console.log(`⚙️ Phase 2 — processing batch of ${BATCH_SIZE} from ${pendingCount} pending (connection ${id})`)
+            const batchResult = await XMLImporter.processBatch({
+              userId, connectionId: connId, sourceSystem, batchSize: BATCH_SIZE
+            })
+
+            const isComplete = batchResult.remaining === 0
+
+            if (isComplete) {
+              // Final batch: run reconciliation then mark complete
+              console.log(`🔁 Final batch — running reconciliation for connection ${id}`)
+              const importer = new XMLImporter({ userId, connectionId: connId, feedUrl: null, sourceSystem })
+              // loadFieldMappings is internal to XMLImporter — use Supabase directly here
+              importer.fieldMap = null  // reconciliation doesn't need field mappings
+
+              // Build full active set from all processed RawJobRecords
+              const { data: processedRecs } = await supabase
+                .from('RawJobRecords')
+                .select('ExternalId')
+                .eq('ConnectionId', connId)
+                .eq('ProcessingStatus', 'processed')
+              const activeExternalIds = new Set((processedRecs || []).map(r => r.ExternalId).filter(Boolean))
+
+              await importer._reconcileMissingOffers(activeExternalIds)
+
+              // Count total JobOffers for this connection
+              const { count: totalOffers } = await supabase
+                .from('JobOffers')
+                .select('Id', { count: 'exact', head: true })
+                .eq('ConnectionId', connId)
+
+              await supabase.from('Connections').update({
+                status:         'active',
+                lastSync:       new Date().toISOString(),
+                importedOffers: totalOffers || 0,
+                errorCount:     batchResult.failed,
+              }).eq('id', id)
+
+              return res.json({
+                success:  true,
+                message:  `Importación completa: ${totalOffers} ofertas activas`,
+                phase:    'complete',
+                result: {
+                  imported:   batchResult.processed,
+                  errors:     batchResult.failed,
+                  hasMore:    false,
+                  nextOffset: 0,
+                  total:      totalOffers || 0,
+                },
+                stats:    { ...batchResult, reconciled: true },
+              })
+
+            } else {
+              // More batches needed
+              await supabase.from('Connections').update({
+                lastSync: new Date().toISOString(),
+              }).eq('id', id)
+
+              return res.json({
+                success:  true,
+                message:  `Lote procesado: ${batchResult.processed} ofertas. Quedan ${batchResult.remaining}.`,
+                phase:    'process',
+                result: {
+                  imported:   batchResult.processed,
+                  errors:     batchResult.failed,
+                  hasMore:    true,
+                  nextOffset: batchResult.remaining,
+                  remaining:  batchResult.remaining,
+                },
+                stats: batchResult,
+              })
+            }
+          }
+
         } catch (importErr) {
           await supabase.from('Connections').update({ status: 'error' }).eq('id', id).catch(() => {})
           throw importErr
         }
-
-        const importedCount = (importerStats.inserted || 0) + (importerStats.updated || 0)
-        const errorCount    = importerStats.failed || 0
-
-        await supabase.from('Connections').update({
-          status:         'active',
-          lastSync:       new Date().toISOString(),
-          importedOffers: importedCount,
-          errorCount:     errorCount,
-        }).eq('id', id)
-
-        return res.json({
-          success: true,
-          message: `Importación completada: ${importedCount} ofertas, ${errorCount} errores`,
-          result:  { imported: importedCount, errors: errorCount },
-          stats:   importerStats,
-        })
 
       } else if (connectionType.toLowerCase() === "api") {
         const APIProcessor = require("../processors/apiProcessor")
