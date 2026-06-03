@@ -408,19 +408,37 @@ router.post("/:id/import", addUserIdToRequest, requireAuth, onlyOwnData('UserId'
   console.log(`🔍 POST /api/connections/:id/import - ID: ${id} from origin:`, origin)
 
   try {
-    // ✅ PROTECCIÓN: Verificar que la conexión no esté ya importando
+    // Guard: reject concurrent imports, but allow retry if the lock is stale.
+    // A lock is stale when:
+    //   - status = 'importing' AND
+    //   - lastSync is null (never completed) or lastSync is older than IMPORT_LOCK_TTL_MS
+    // Scenario: Vercel serverless timeout mid-import leaves status stuck at 'importing'.
+    const IMPORT_LOCK_TTL_MS = 10 * 60 * 1000; // 10 minutes
+
     const { data: statusCheck, error: statusError } = await supabase
       .from('Connections')
-      .select('status')
+      .select('status, lastSync')
       .eq('id', id)
       .single();
 
     if (!statusError && statusCheck && statusCheck.status === 'importing') {
-      console.log(`⚠️ Importación ya en progreso para conexión ${id}`)
-      return res.status(409).json({
-        error: "Importación ya en progreso",
-        message: "Esta conexión ya se está procesando. Espera a que termine."
-      })
+      const lastSyncDate = statusCheck.lastSync ? new Date(statusCheck.lastSync) : null;
+      const ageMs = lastSyncDate ? Date.now() - lastSyncDate.getTime() : Infinity;
+      const isStale = ageMs > IMPORT_LOCK_TTL_MS;
+
+      if (!isStale) {
+        console.log(`⚠️ Importación ya en progreso para conexión ${id} (lock activo, ${Math.round(ageMs/1000)}s ago)`)
+        return res.status(409).json({
+          success: false,
+          error: "Importación ya en progreso",
+          message: "Esta conexión ya se está procesando. Espera a que termine o reintenta en 10 minutos.",
+          lockAgeSeconds: Math.round(ageMs / 1000)
+        })
+      }
+
+      // Stale lock: auto-reset and allow retry
+      console.log(`⚠️ Lock de importación caducado para conexión ${id} (${Math.round(ageMs/60000)} min) — reseteando a error`)
+      await supabase.from('Connections').update({ status: 'error' }).eq('id', id)
     }
 
     // Obtener la conexión con Supabase
@@ -477,8 +495,12 @@ router.post("/:id/import", addUserIdToRequest, requireAuth, onlyOwnData('UserId'
           sourceSystem: `conn-${id}`,
         })
 
-        // XMLImporter.run() returns stats; map to legacy result shape for UI contract
-        await supabase.from('Connections').update({ status: 'importing' }).eq('id', id)
+        // Stamp lastSync = now so stale-lock detection works correctly.
+        // If Vercel times out mid-import, the stale check uses this timestamp.
+        await supabase.from('Connections').update({
+          status:   'importing',
+          lastSync: new Date().toISOString(),
+        }).eq('id', id)
 
         let importerStats
         try {
