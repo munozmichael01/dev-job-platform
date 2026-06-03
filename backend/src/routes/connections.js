@@ -1,9 +1,8 @@
 const express = require("express")
 const router = express.Router()
-const { pool } = require("../db/db")
+const { pool, sql } = require("../db/db")
 const axios = require("axios")
 const xml2js = require("xml2js")
-const sql = require("mssql")
 const { addUserToRequest, requireAuth, onlyOwnData, getUserIdForQuery, isSuperAdmin, addUserIdToRequest } = require('../middleware/authMiddleware')
 
 // Supabase client para queries nativas
