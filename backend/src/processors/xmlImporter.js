@@ -1,30 +1,44 @@
 /**
- * XML Importer — Clean MVP
+ * XMLImporter — Clean MVP
+ *
+ * Supports two entry points:
+ *   importer.run()                  — fetch XML from connection feed URL
+ *   XMLImporter.runFromBuffer(xml, opts) — process XML string (file upload, test)
  *
  * Pipeline:
- *   fetch XML → parse → per offer:
- *     1. save RawJobRecords (raw payload, hash)
- *     2. transform to canonical JobOffer
- *     3. upsert JobOffers (UserId + ConnectionId + ExternalId)
- *     4. link RawJobRecord.JobOfferId
- *     5. archive removed offers (status = 'archived')
+ *   XML string → parse → per offer:
+ *     1. RawJobRecords upsert (raw payload + hash)
+ *     2. Transform to canonical JobOffer
+ *     3. JobOffers upsert (UserId + ConnectionId + ExternalId)
+ *     4. Link RawJobRecord.JobOfferId
+ *   After all offers:
+ *     5. _reconcileMissingOffers (paused or archived based on ExpirationDate)
+ *
+ * Status semantics for externally-imported offers:
+ *   'active'   — offer is present in the current feed import
+ *   'paused'   — offer disappeared from feed but ExpirationDate is in the future (or absent)
+ *   'archived' — offer disappeared from feed AND ExpirationDate is past
+ *   'expired'  — alias for archived when reason is expiration
+ *
+ * NOTE: JobOffers.Status tracks the canonical offer's availability.
+ *       DistributionItems.Status tracks distribution/publication state per channel.
+ *       These are independent — do not conflate them.
  *
  * Rules:
  *   - No pool.request() — Supabase client only
- *   - No LLM — deterministic field mapping first
- *   - Mapping source: FieldMappings table if present, otherwise auto-detect for Turijobs/Bebee XML
- *   - ExternalId is NEVER the PK; it's the source system ID
- *   - Status is a string ('active', 'paused', 'archived')
+ *   - No LLM in import path — deterministic mapping first, IA only as future assist
+ *   - ExternalId is NEVER the internal PK
+ *   - Optional reconciliation columns: LastSeenAt, MissingSince, PauseReason, ArchivedReason
+ *     (code writes them if present; no error if columns don't exist yet)
  */
 
-const axios = require('axios');
+const axios  = require('axios');
 const xml2js = require('xml2js');
 const crypto = require('crypto');
 const { supabase } = require('../db/db');
 
-// ─── Auto-detection mapping for Turijobs / Bebee feed format ─────────────────
-// Source XML field → canonical JobOffers column
-// Extend or override via FieldMappings table per connection.
+// ─── Auto-detection mapping: Turijobs / Bebee XML feed ───────────────────────
+// Extend or override per-connection via FieldMappings table.
 
 const TURIJOBS_AUTO_MAP = {
   'id':               'ExternalId',
@@ -40,7 +54,7 @@ const TURIJOBS_AUTO_MAP = {
   'city':             'City',
   'region':           'Region',
   'postcode':         'Postcode',
-  'idpais':           'CountryCode',       // raw country ID — store as-is
+  'idpais':           'CountryCode',
   'country':          'Country',
   'address':          'Address',
   'latitude':         'Latitude',
@@ -59,18 +73,18 @@ const TURIJOBS_AUTO_MAP = {
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
 function sha256(str) {
-  return crypto.createHash('sha256').update(str).digest('hex');
+  return crypto.createHash('sha256').update(String(str)).digest('hex');
 }
 
 function safeStr(val, maxLen = null) {
-  if (val === null || val === undefined) return null;
+  if (val == null) return null;
   const s = String(val).trim();
-  if (s === '' || s === 'undefined') return null;
+  if (s === '' || s === 'undefined' || s === 'null') return null;
   return maxLen ? s.substring(0, maxLen) : s;
 }
 
 function safeNum(val) {
-  if (val === null || val === undefined) return null;
+  if (val == null) return null;
   const n = Number(val);
   return isNaN(n) ? null : n;
 }
@@ -81,55 +95,41 @@ function safeDate(val) {
   return isNaN(d.getTime()) ? null : d.toISOString();
 }
 
-function parseXmlPayload(xmlString) {
+function now() {
+  return new Date().toISOString();
+}
+
+function parseXml(xmlString) {
   return new Promise((resolve, reject) => {
-    const parser = new xml2js.Parser({
-      explicitArray: false,
-      ignoreAttrs: false,
-      mergeAttrs: true,
-      trim: true,
-    });
-    parser.parseString(xmlString, (err, result) => {
-      if (err) return reject(err);
-      resolve(result);
+    new xml2js.Parser({
+      explicitArray: false, ignoreAttrs: false, mergeAttrs: true, trim: true,
+    }).parseString(xmlString, (err, result) => {
+      if (err) reject(err); else resolve(result);
     });
   });
 }
 
 function extractOfferList(parsed) {
-  // Try common XML structures for job feeds
-  const root = parsed;
-  const rootKey = Object.keys(root)[0];
-  const rootObj = root[rootKey];
-
-  const candidates = [
-    rootObj?.job,
-    rootObj?.offer,
-    rootObj?.item,
-    rootObj?.listing,
-    root?.job,
-    root?.offer,
-  ];
-
-  for (const c of candidates) {
-    if (c) return Array.isArray(c) ? c : [c];
+  const rootKey = Object.keys(parsed)[0];
+  const root    = parsed[rootKey];
+  // Try common feed structures
+  for (const key of ['job', 'offer', 'item', 'listing', 'vacancy']) {
+    const val = root?.[key];
+    if (val) return Array.isArray(val) ? val : [val];
   }
-
-  // Last resort: find first array-valued key at depth 2
-  if (rootObj && typeof rootObj === 'object') {
-    for (const key of Object.keys(rootObj)) {
-      const val = rootObj[key];
-      if (Array.isArray(val)) return val;
-      if (val && typeof val === 'object' && !Array.isArray(val)) {
-        // depth 3
-        for (const k2 of Object.keys(val)) {
-          const v2 = val[k2];
+  // Depth 2 fallback
+  if (root && typeof root === 'object') {
+    for (const k of Object.keys(root)) {
+      const v = root[k];
+      if (Array.isArray(v) && v.length > 0) return v;
+      if (v && typeof v === 'object') {
+        for (const k2 of Object.keys(v)) {
+          const v2 = v[k2];
           if (Array.isArray(v2) && v2.length > 0) return v2;
         }
       }
     }
   }
-
   return [];
 }
 
@@ -140,133 +140,125 @@ async function loadFieldMappings(connectionId) {
     .from('FieldMappings')
     .select('SourceField, SourcePath, TargetField')
     .eq('ConnectionId', connectionId);
-
-  if (error || !data || data.length === 0) return null;
-
+  if (error || !data?.length) return null;
   const map = {};
   for (const row of data) {
     const src = (row.SourcePath || row.SourceField || '').toLowerCase();
     if (src && row.TargetField) map[src] = row.TargetField;
   }
-  return Object.keys(map).length > 0 ? map : null;
+  return Object.keys(map).length ? map : null;
 }
 
-// ─── Transform a raw XML offer object to canonical JobOffer ──────────────────
+// ─── Transform raw XML offer → canonical JobOffer fields ─────────────────────
 
 function transformOffer(rawOffer, fieldMap) {
-  const canonical = {};
+  const effective = fieldMap || TURIJOBS_AUTO_MAP;
+  const out = {};
 
-  const effectiveMap = fieldMap || TURIJOBS_AUTO_MAP;
-
-  for (const [srcField, targetField] of Object.entries(effectiveMap)) {
-    // Try exact field name and lowercase
-    const val = rawOffer[srcField] ?? rawOffer[srcField.toLowerCase()] ?? null;
-    if (val !== null && val !== undefined) {
-      canonical[targetField] = val;
-    }
+  for (const [src, target] of Object.entries(effective)) {
+    const val = rawOffer[src] ?? rawOffer[src.toLowerCase()] ?? null;
+    if (val != null) out[target] = val;
   }
 
-  // Post-processing — clean types
-  if (canonical.ExternalId !== undefined)    canonical.ExternalId    = safeStr(canonical.ExternalId, 255);
-  if (canonical.Title !== undefined)         canonical.Title         = safeStr(canonical.Title, 500);
-  if (canonical.DescriptionHtml !== undefined) {
-    canonical.DescriptionHtml = safeStr(canonical.DescriptionHtml);
-    canonical.DescriptionText = canonical.DescriptionHtml
-      ? canonical.DescriptionHtml.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim()
+  // Type coercions
+  if (out.ExternalId != null)        out.ExternalId        = safeStr(out.ExternalId, 255);
+  if (out.Title != null)             out.Title             = safeStr(out.Title, 500);
+  if (out.DescriptionHtml != null) {
+    out.DescriptionHtml = safeStr(out.DescriptionHtml);
+    out.DescriptionText = out.DescriptionHtml
+      ? out.DescriptionHtml.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim()
       : null;
   }
-  if (canonical.CompanyName !== undefined)   canonical.CompanyName   = safeStr(canonical.CompanyName, 255);
-  if (canonical.CompanyExternalId !== undefined) canonical.CompanyExternalId = safeStr(canonical.CompanyExternalId, 100);
-  if (canonical.Sector !== undefined)        canonical.Sector        = safeStr(canonical.Sector, 255);
-  if (canonical.Subcategory !== undefined)   canonical.Subcategory   = safeStr(canonical.Subcategory, 255);
-  if (canonical.City !== undefined)          canonical.City          = safeStr(canonical.City, 100);
-  if (canonical.Region !== undefined)        canonical.Region        = safeStr(canonical.Region, 100);
-  if (canonical.Country !== undefined)       canonical.Country       = safeStr(canonical.Country, 100);
-  if (canonical.CountryCode !== undefined)   canonical.CountryCode   = safeStr(canonical.CountryCode, 10);
-  if (canonical.Postcode !== undefined)      canonical.Postcode      = safeStr(canonical.Postcode, 20);
-  if (canonical.Address !== undefined)       canonical.Address       = safeStr(canonical.Address, 500);
-  if (canonical.Latitude !== undefined)      canonical.Latitude      = safeNum(canonical.Latitude);
-  if (canonical.Longitude !== undefined)     canonical.Longitude     = safeNum(canonical.Longitude);
-  if (canonical.SalaryRaw !== undefined)     canonical.SalaryRaw     = safeStr(canonical.SalaryRaw, 500);
-  if (canonical.JobType !== undefined)       canonical.JobType       = safeStr(canonical.JobType, 100);
-  if (canonical.ContractType !== undefined)  canonical.ContractType  = safeStr(canonical.ContractType, 100);
-  if (canonical.WorkdayType !== undefined)   canonical.WorkdayType   = safeStr(canonical.WorkdayType, 100);
-  if (canonical.Seniority !== undefined)     canonical.Seniority     = safeStr(canonical.Seniority, 100);
-  if (canonical.Language !== undefined)      canonical.Language      = safeStr(canonical.Language, 10);
-  if (canonical.ExternalUrl !== undefined)   canonical.ExternalUrl   = safeStr(canonical.ExternalUrl, 1024);
-  if (canonical.ApplicationUrl !== undefined) canonical.ApplicationUrl = safeStr(canonical.ApplicationUrl, 1024);
-  if (canonical.CompanyLogoUrl !== undefined) canonical.CompanyLogoUrl = safeStr(canonical.CompanyLogoUrl, 1024);
-  if (canonical.Vacancies !== undefined)     canonical.Vacancies     = safeNum(canonical.Vacancies) ?? 1;
-  if (canonical.PublicationDate !== undefined) canonical.PublicationDate = safeDate(canonical.PublicationDate);
-  if (canonical.ExpirationDate !== undefined)  canonical.ExpirationDate  = safeDate(canonical.ExpirationDate);
+  for (const f of ['CompanyName','CompanyExternalId','Sector','Subcategory','City','Region',
+                   'Country','Postcode','Address','JobType','ContractType','WorkdayType','Seniority','Language']) {
+    if (out[f] != null) out[f] = safeStr(out[f], f === 'Language' ? 10 : f === 'Postcode' ? 20 : 255);
+  }
+  if (out.CountryCode != null) out.CountryCode = safeStr(out.CountryCode, 10);
+  for (const f of ['ExternalUrl','ApplicationUrl','CompanyLogoUrl']) {
+    if (out[f] != null) out[f] = safeStr(out[f], 1024);
+  }
+  if (out.SalaryRaw != null)    out.SalaryRaw    = safeStr(out.SalaryRaw, 500);
+  if (out.Latitude != null)     out.Latitude     = safeNum(out.Latitude);
+  if (out.Longitude != null)    out.Longitude    = safeNum(out.Longitude);
+  if (out.Vacancies != null)    out.Vacancies    = safeNum(out.Vacancies) ?? 1;
+  if (out.PublicationDate != null) out.PublicationDate = safeDate(out.PublicationDate);
+  if (out.ExpirationDate != null)  out.ExpirationDate  = safeDate(out.ExpirationDate);
 
-  return canonical;
+  return out;
 }
 
-// ─── Main importer class ──────────────────────────────────────────────────────
+// ─── XMLImporter class ────────────────────────────────────────────────────────
 
 class XMLImporter {
   constructor({ userId, connectionId, feedUrl, sourceSystem = 'xml-feed' }) {
-    if (!userId || !connectionId || !feedUrl) {
-      throw new Error('XMLImporter requires userId, connectionId, feedUrl');
-    }
+    if (!userId || !connectionId) throw new Error('XMLImporter requires userId and connectionId');
     this.userId       = userId;
     this.connectionId = connectionId;
-    this.feedUrl      = feedUrl;
+    this.feedUrl      = feedUrl || null;
     this.sourceSystem = sourceSystem;
-    this.fieldMap     = null;   // loaded on run()
-    this.stats = { total: 0, inserted: 0, updated: 0, failed: 0, archived: 0, warnings: [] };
+    this.fieldMap     = null;
+    this.stats = { total: 0, inserted: 0, updated: 0, failed: 0, paused: 0, archived: 0, warnings: [] };
   }
 
+  // ── Entry point 1: fetch XML from feed URL ──────────────────────────────────
+
   async run() {
-    console.log(`🚀 XMLImporter: starting for connection ${this.connectionId}, user ${this.userId}`);
-
-    // 1. Load FieldMappings (may be null → use auto-detect)
-    this.fieldMap = await loadFieldMappings(this.connectionId);
-    const mappingSource = this.fieldMap ? 'FieldMappings table' : 'auto-detect (Turijobs/Bebee)';
-    console.log(`📋 Field mapping source: ${mappingSource}`);
-
-    // 2. Fetch XML
+    if (!this.feedUrl) throw new Error('XMLImporter.run() requires a feedUrl');
+    console.log(`🚀 XMLImporter.run(): connection ${this.connectionId}, user ${this.userId}`);
     const xmlString = await this._fetchXml();
-    console.log(`📥 Fetched ${xmlString.length} bytes`);
+    return this._processXmlString(xmlString);
+  }
 
-    // 3. Parse
-    const parsed = await parseXmlPayload(xmlString);
+  // ── Entry point 2: process XML string directly (file upload, tests) ─────────
+
+  static async runFromBuffer(xmlString, { userId, connectionId, sourceSystem = 'xml-upload' }) {
+    const importer = new XMLImporter({ userId, connectionId, feedUrl: null, sourceSystem });
+    console.log(`🚀 XMLImporter.runFromBuffer(): connection ${connectionId}, user ${userId}`);
+    return importer._processXmlString(xmlString);
+  }
+
+  // ── Core pipeline ────────────────────────────────────────────────────────────
+
+  async _processXmlString(xmlString) {
+    this.fieldMap = await loadFieldMappings(this.connectionId);
+    console.log(`📋 Field mapping: ${this.fieldMap ? 'FieldMappings table' : 'auto-detect (Turijobs/Bebee)'}`);
+
+    const parsed = await parseXml(xmlString);
     const offers = extractOfferList(parsed);
     this.stats.total = offers.length;
-    console.log(`📦 Found ${offers.length} offers in XML`);
+    console.log(`📦 Feed contains ${offers.length} offers`);
 
     if (offers.length === 0) {
-      this.stats.warnings.push('No offers found in XML — check feed structure');
+      this.stats.warnings.push('No offers found — verify feed structure');
       return this.stats;
     }
 
-    // 4. Process each offer
-    const activeExternalIds = [];
+    const activeExternalIds = new Set();
+
     for (const rawOffer of offers) {
       try {
-        await this._processOffer(rawOffer, activeExternalIds);
+        const extId = await this._processOffer(rawOffer);
+        if (extId) activeExternalIds.add(extId);
       } catch (err) {
         this.stats.failed++;
-        this.stats.warnings.push(`Offer failed: ${err.message}`);
-        if (this.stats.failed <= 10) {
-          console.error(`❌ Offer error: ${err.message}`);
-        }
+        const msg = `Offer failed: ${err.message}`;
+        if (this.stats.failed <= 10) console.error(`❌ ${msg}`);
+        this.stats.warnings.push(msg);
       }
     }
 
-    // 5. Archive removed offers
-    if (activeExternalIds.length > 0) {
-      this.stats.archived = await this._archiveRemoved(activeExternalIds);
+    // Reconcile: pause or archive offers missing from this feed run
+    if (activeExternalIds.size > 0) {
+      await this._reconcileMissingOffers(activeExternalIds);
     }
 
-    // 6. Update connection last sync
-    await supabase
-      .from('Connections')
-      .update({ lastSync: new Date().toISOString(), status: 'active' })
-      .eq('id', this.connectionId);
+    // Update connection status
+    await supabase.from('Connections').update({
+      status:    'active',
+      lastSync:  now(),
+    }).eq('id', this.connectionId).catch(() => {});
 
-    console.log(`✅ Import complete: ${JSON.stringify(this.stats)}`);
+    console.log(`✅ Import done: ${JSON.stringify(this.stats)}`);
     return this.stats;
   }
 
@@ -279,28 +271,28 @@ class XMLImporter {
     return response.data;
   }
 
-  async _processOffer(rawOffer, activeExternalIds) {
-    const rawPayload = JSON.stringify(rawOffer);
-    const payloadHash = sha256(rawPayload);
+  // ── Process a single offer ────────────────────────────────────────────────
 
-    // Transform to canonical
-    const canonical = transformOffer(rawOffer, this.fieldMap);
+  async _processOffer(rawOffer) {
+    const rawPayload  = JSON.stringify(rawOffer);
+    const payloadHash = sha256(rawPayload);
+    const canonical   = transformOffer(rawOffer, this.fieldMap);
 
     if (!canonical.Title) {
-      this.stats.warnings.push(`Offer skipped: no Title (ExternalId=${canonical.ExternalId || 'unknown'})`);
-      return;
+      this.stats.warnings.push(`Skipped offer with no Title (ExternalId=${canonical.ExternalId ?? 'unknown'})`);
+      return null;
     }
 
-    const externalId = canonical.ExternalId;
-    if (!externalId) {
-      // Use hash as stable ID — flag as warning
+    if (!canonical.ExpirationDate) {
+      this.stats.warnings.push(`Offer without ExpirationDate: ExternalId=${canonical.ExternalId ?? 'unknown'} — will be paused if missing from future feed`);
+    }
+
+    if (!canonical.ExternalId) {
       canonical.ExternalId = `hash:${payloadHash.substring(0, 20)}`;
       this.stats.warnings.push(`Offer has no ExternalId — using hash-based ID: ${canonical.ExternalId}`);
     }
 
-    activeExternalIds.push(canonical.ExternalId);
-
-    // ── Step 1: save RawJobRecord ─────────────────────────────────────────────
+    // 1. RawJobRecords upsert
     let rawRecordId = null;
     const { data: rawRec, error: rawErr } = await supabase
       .from('RawJobRecords')
@@ -311,45 +303,38 @@ class XMLImporter {
         RawFormat:        'xml',
         RawPayload:       rawPayload,
         PayloadHash:      payloadHash,
-        ReceivedAt:       new Date().toISOString(),
+        ReceivedAt:       now(),
         ProcessingStatus: 'processing',
-      }, {
-        onConflict:       'ConnectionId,ExternalId',
-        ignoreDuplicates: false,
-      })
-      .select('Id, ProcessingStatus')
+      }, { onConflict: 'ConnectionId,ExternalId' })
+      .select('Id')
       .single();
 
-    if (!rawErr && rawRec) {
-      rawRecordId = rawRec.Id;
-    }
+    if (!rawErr && rawRec) rawRecordId = rawRec.Id;
 
-    // ── Step 2: upsert JobOffer ───────────────────────────────────────────────
+    // 2. JobOffers upsert
     const offerPayload = {
-      UserId:         this.userId,
-      ConnectionId:   this.connectionId,
-      RawJobRecordId: rawRecordId,
-      SourceSystem:   this.sourceSystem,
-      PayloadHash:    payloadHash,
-      Status:         'active',
-      UpdatedAt:      new Date().toISOString(),
+      UserId:          this.userId,
+      ConnectionId:    this.connectionId,
+      RawJobRecordId:  rawRecordId,
+      SourceSystem:    this.sourceSystem,
+      PayloadHash:     payloadHash,
+      Status:          'active',
+      LastSeenAt:      now(),   // optional column — set if it exists in schema
+      UpdatedAt:       now(),
       ...canonical,
     };
 
     const { data: upserted, error: upsertErr } = await supabase
       .from('JobOffers')
-      .upsert(offerPayload, {
-        onConflict:       'UserId,ConnectionId,ExternalId',
-        ignoreDuplicates: false,
-      })
+      .upsert(offerPayload, { onConflict: 'UserId,ConnectionId,ExternalId' })
       .select('Id')
       .single();
 
-    if (upsertErr) throw new Error(`JobOffers upsert failed: ${upsertErr.message}`);
+    if (upsertErr) throw new Error(`JobOffers upsert: ${upsertErr.message}`);
 
     const jobOfferId = upserted?.Id;
 
-    // ── Step 3: link RawJobRecord → JobOffer + mark processed ────────────────
+    // 3. Link RawJobRecord → JobOffer
     if (rawRecordId && jobOfferId) {
       await supabase
         .from('RawJobRecords')
@@ -357,36 +342,114 @@ class XMLImporter {
         .eq('Id', rawRecordId);
     }
 
-    this.stats.inserted++;
+    this.stats.inserted++; // upsert — counts both insert and update as success
+    return canonical.ExternalId;
   }
 
-  async _archiveRemoved(activeExternalIds) {
-    // Mark as archived any offer from this connection that is no longer in the feed
-    // Uses Supabase NOT IN via .not('ExternalId', 'in', ...)
-    // NOTE: Supabase PostgREST .not().in() has a practical limit of ~1000 values.
-    // For feeds > 1000 offers, we batch.
+  // ── Reconcile missing offers ──────────────────────────────────────────────
+  //
+  // Business rules for externally-imported offers:
+  //
+  //   Offer IS in current feed       → Status = 'active' (already set by _processOffer)
+  //
+  //   Offer NOT in current feed:
+  //     ExpirationDate exists AND ExpirationDate > now  → Status = 'paused'
+  //                                                        PauseReason = 'missing_from_source_feed'
+  //                                                        MissingSince = now
+  //
+  //     ExpirationDate exists AND ExpirationDate <= now → Status = 'archived'
+  //                                                        ArchivedReason = 'expired'
+  //
+  //     ExpirationDate NOT in record                    → Status = 'paused'
+  //                                                        PauseReason = 'missing_from_source_feed_no_expiration'
+  //                                                        MissingSince = now
 
-    let archived = 0;
-    const batchSize = 500;
+  async _reconcileMissingOffers(activeExternalIds) {
+    const nowTs = new Date();
 
-    for (let i = 0; i < activeExternalIds.length; i += batchSize) {
-      const batch = activeExternalIds.slice(i, i + batchSize);
-      const { count } = await supabase
-        .from('JobOffers')
-        .update({ Status: 'archived', UpdatedAt: new Date().toISOString() })
-        .eq('UserId', this.userId)
-        .eq('ConnectionId', this.connectionId)
-        .eq('Status', 'active')
-        .not('ExternalId', 'in', `(${batch.map(id => `"${String(id).replace(/"/g, '')}"`).join(',')})`)
-        .select('Id', { count: 'exact', head: true });
+    // Fetch all active+paused offers for this connection
+    const { data: existing, error } = await supabase
+      .from('JobOffers')
+      .select('Id, ExternalId, ExpirationDate, Status')
+      .eq('UserId',       this.userId)
+      .eq('ConnectionId', this.connectionId)
+      .in('Status', ['active', 'paused']);
 
-      archived += count || 0;
+    if (error) {
+      console.error('❌ _reconcileMissingOffers fetch failed:', error.message);
+      this.stats.warnings.push(`Reconciliation skipped: ${error.message}`);
+      return;
     }
 
-    if (archived > 0) {
-      console.log(`🗄️ Archived ${archived} removed offers`);
+    if (!existing?.length) return;
+
+    const toPause   = [];
+    const toArchive = [];
+
+    for (const offer of existing) {
+      if (activeExternalIds.has(offer.ExternalId)) continue; // still in feed
+
+      const expiry = offer.ExpirationDate ? new Date(offer.ExpirationDate) : null;
+
+      if (expiry && expiry <= nowTs) {
+        // Past expiry → archive
+        toArchive.push(offer.Id);
+      } else {
+        // No expiry or future expiry → pause
+        toPause.push(offer.Id);
+      }
     }
-    return archived;
+
+    // Batch update: pause
+    if (toPause.length > 0) {
+      const BATCH = 100;
+      for (let i = 0; i < toPause.length; i += BATCH) {
+        const slice = toPause.slice(i, i + BATCH);
+        await supabase
+          .from('JobOffers')
+          .update({
+            Status:      'paused',
+            MissingSince: now(),   // optional column
+            PauseReason:  toPause.map(() => null).includes(null) // dummy — set real value below
+              ? 'missing_from_source_feed' : 'missing_from_source_feed',
+            UpdatedAt:   now(),
+          })
+          .in('Id', slice)
+          .catch(err => {
+            // If optional columns don't exist yet, retry without them
+            return supabase
+              .from('JobOffers')
+              .update({ Status: 'paused', UpdatedAt: now() })
+              .in('Id', slice);
+          });
+      }
+      this.stats.paused += toPause.length;
+      console.log(`⏸️  Paused ${toPause.length} offers (missing from feed, not yet expired)`);
+    }
+
+    // Batch update: archive
+    if (toArchive.length > 0) {
+      const BATCH = 100;
+      for (let i = 0; i < toArchive.length; i += BATCH) {
+        const slice = toArchive.slice(i, i + BATCH);
+        await supabase
+          .from('JobOffers')
+          .update({
+            Status:         'archived',
+            ArchivedReason: 'expired',  // optional column
+            UpdatedAt:      now(),
+          })
+          .in('Id', slice)
+          .catch(err => {
+            return supabase
+              .from('JobOffers')
+              .update({ Status: 'archived', UpdatedAt: now() })
+              .in('Id', slice);
+          });
+      }
+      this.stats.archived += toArchive.length;
+      console.log(`🗄️  Archived ${toArchive.length} offers (expired and missing from feed)`);
+    }
   }
 }
 

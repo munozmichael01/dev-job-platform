@@ -169,6 +169,25 @@ CREATE TABLE "JobOffers" (
   "PublicationDate"   TIMESTAMP,
   "ExpirationDate"    TIMESTAMP,
   "Status"            VARCHAR(50) NOT NULL DEFAULT 'active',
+  -- Valid values: 'active', 'paused', 'archived', 'expired', 'draft'
+  -- Semantics for externally-imported offers:
+  --   active   = present in the most recent feed run
+  --   paused   = missing from feed but ExpirationDate is future (or absent)
+  --   archived = missing from feed AND ExpirationDate is past
+  -- NOTE: JobOffers.Status ≠ DistributionItems.Status — they are independent.
+  --   JobOffers.Status  = availability of the canonical offer
+  --   DistributionItems.Status = publication state on each external channel
+
+  -- Feed reconciliation columns (optional — code writes these if they exist)
+  "LastSeenAt"        TIMESTAMP,
+  -- Timestamp of the last feed import run that included this offer
+  "MissingSince"      TIMESTAMP,
+  -- Set when offer disappears from feed (before archiving)
+  "PauseReason"       VARCHAR(100),
+  -- e.g. 'missing_from_source_feed', 'missing_from_source_feed_no_expiration'
+  "ArchivedReason"    VARCHAR(100),
+  -- e.g. 'expired', 'manually_removed', 'feed_connection_deleted'
+
   "CreatedAt"         TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
   "UpdatedAt"         TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
 
@@ -361,6 +380,9 @@ CREATE TABLE "Campaigns" (
   "EndDate"         TIMESTAMP,
   "Status"          VARCHAR(50) NOT NULL DEFAULT 'draft',
   -- Valid values: 'draft', 'active', 'paused', 'completed', 'archived'
+  "Config"          JSONB,
+  -- Config stores campaign-level settings preserved for frontend compatibility:
+  -- distributionType, targetApplications, maxCPA, manualBid, priority, autoOptimization
   "CreatedByUserId" BIGINT REFERENCES "Users"("Id"),
   "CreatedAt"       TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
   "UpdatedAt"       TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
@@ -447,6 +469,14 @@ CREATE TABLE "ChannelCredentials" (
   "ChannelId"             INTEGER NOT NULL REFERENCES "DistributionChannels"("Id"),
   "Name"                  VARCHAR(255) NOT NULL,
   "CredentialsEncrypted"  TEXT,
+  "ConfigurationData"     JSONB,
+  "IsActive"              BOOLEAN NOT NULL DEFAULT true,
+  "IsValidated"           BOOLEAN NOT NULL DEFAULT false,
+  "LastValidated"         TIMESTAMP,
+  "ValidationError"       TEXT,
+  "DailyBudgetLimit"      DECIMAL(10,2),
+  "MonthlyBudgetLimit"    DECIMAL(10,2),
+  "MaxCPA"                DECIMAL(10,2),
   "Status"                VARCHAR(50) NOT NULL DEFAULT 'active',
   "CreatedAt"             TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
   "UpdatedAt"             TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,

@@ -653,48 +653,80 @@ router.post("/:id/upload", async (req, res) => {
       })
     }
 
-    // XML file upload: migration to XMLImporter from file not yet implemented.
-    // Returning 501 to signal a clear "not ready" instead of a silent 500.
-    // TODO: build XMLImporter.runFromBuffer(xmlString, {userId, connectionId}) for file uploads.
-    if (fileExt === '.xml') {
-      console.log(`⚠️ XML file upload for connection ${id} — not yet migrated to clean importer (501)`)
-      return res.status(501).json({
-        success: false,
-        error: "Importación de archivo XML manual no disponible en esta versión",
-        message: "Use el feed URL automático de la conexión (POST /api/connections/:id/import), o suba un archivo CSV.",
-        plannedFix: "XMLImporter.runFromBuffer() — pendiente de implementar"
-      })
-    }
-
     console.log(`🔄 Processing ${fileExt} file upload for connection ${id}`)
     await supabase.from('Connections').update({ status: 'importing' }).eq('id', id)
 
-    let result = { imported: 0, errors: 0, failedOffers: [] }
+    let processed = 0
+    let errors    = 0
 
     try {
-      const tempDir = require('path').join(__dirname, '../../temp')
-      if (!require('fs').existsSync(tempDir)) require('fs').mkdirSync(tempDir, { recursive: true })
-      const tempFilePath = require('path').join(tempDir, `${Date.now()}_${uploadedFile.name}`)
-      await uploadedFile.mv(tempFilePath)
+      if (fileExt === '.xml') {
+        // Read file into buffer, then use XMLImporter.runFromBuffer — same clean pipeline as feed import
+        const xmlString = uploadedFile.data
+          ? uploadedFile.data.toString('utf8')
+          : await uploadedFile.mv
+            ? await (() => {
+                const path = require('path')
+                const fs   = require('fs')
+                const tmp  = path.join(__dirname, '../../temp', `${Date.now()}_${uploadedFile.name}`)
+                if (!fs.existsSync(path.dirname(tmp))) fs.mkdirSync(path.dirname(tmp), { recursive: true })
+                return new Promise((res, rej) =>
+                  uploadedFile.mv(tmp, err => err ? rej(err) : res(fs.readFileSync(tmp, 'utf8')))
+                ).finally(() => fs.existsSync(tmp) && fs.unlinkSync(tmp))
+              })()
+            : null
 
-      if (fileExt === '.csv') {
-        const CSVProcessor = require("../processors/csvProcessor")
-        const processor = new CSVProcessor(connection, tempFilePath)
-        result = await processor.process()
+        if (!xmlString) throw new Error('Could not read XML file content')
+
+        const XMLImporter = require("../processors/xmlImporter")
+        const stats = await XMLImporter.runFromBuffer(xmlString, {
+          userId:       connection.UserId || connection.userId,
+          connectionId: parseInt(id),
+          sourceSystem: `conn-${id}-upload`,
+        })
+        processed = (stats.inserted || 0) + (stats.updated || 0)
+        errors    = stats.failed || 0
+
+        await supabase.from('Connections').update({
+          status:         'active',
+          lastSync:       new Date().toISOString(),
+          importedOffers: processed,
+          errorCount:     errors,
+        }).eq('id', id)
+
+        return res.json({
+          success: true,
+          message: `Archivo XML procesado: ${processed} ofertas, ${errors} errores`,
+          processed,
+          errors,
+          filename: uploadedFile.name,
+          stats,
+        })
+
+      } else if (fileExt === '.csv') {
+        const path = require('path')
+        const fs   = require('fs')
+        const tempDir  = path.join(__dirname, '../../temp')
+        if (!fs.existsSync(tempDir)) fs.mkdirSync(tempDir, { recursive: true })
+        const tempPath = path.join(tempDir, `${Date.now()}_${uploadedFile.name}`)
+        await uploadedFile.mv(tempPath)
+        try {
+          const CSVProcessor = require("../processors/csvProcessor")
+          const result = await new CSVProcessor(connection, tempPath).process()
+          processed = result.imported || 0
+          errors    = result.errors || 0
+        } finally {
+          if (fs.existsSync(tempPath)) fs.unlinkSync(tempPath)
+        }
+
       } else if (fileExt === '.json') {
         console.log("⚠️ JSON file processing not yet implemented")
-        result = { imported: 0, errors: 0, failedOffers: [] }
       }
-
-      if (require('fs').existsSync(tempFilePath)) require('fs').unlinkSync(tempFilePath)
 
     } catch (processingError) {
       console.error("❌ Error processing file:", processingError.message)
-      result = { imported: 0, errors: 1, failedOffers: [{ reason: processingError.message }] }
+      errors = 1
     }
-
-    const processed = result.imported || 0
-    const errors    = result.errors || 0
 
     await supabase.from('Connections').update({
       status:         'active',
@@ -705,7 +737,7 @@ router.post("/:id/upload", async (req, res) => {
 
     res.json({
       success: true,
-      message: "Archivo procesado exitosamente",
+      message: `Archivo procesado: ${processed} ofertas, ${errors} errores`,
       processed,
       errors,
       filename: uploadedFile.name,
