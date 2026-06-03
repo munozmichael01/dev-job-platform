@@ -1,5 +1,5 @@
 const express = require('express');
-const { pool, poolConnect, sql } = require('./src/db/db');
+const { pool, poolConnect, sql, supabase } = require('./src/db/db');
 const JobOffersSearchService = require('./src/services/jobOffersSearchService');
 // const trackRoutes = require('./track'); // Archivo no encontrado - comentado temporalmente
 const connectionsRouter = require('./src/routes/connections');
@@ -748,6 +748,49 @@ app.get('/job-offers',
       filterConditions.push('jo.UserId = @currentUserId');
       queryParams.push({ name: 'currentUserId', type: sql.BigInt, value: req.userId });
       console.log(`🔒 Filtrando ofertas para usuario ${req.userId} (${req.user.role})`);
+
+      const { count: userOffersCount, error: userOffersError } = await supabase
+        .from('JobOffers')
+        .select('Id', { count: 'exact', head: true })
+        .eq('UserId', req.userId);
+
+      if (userOffersError) {
+        console.warn(`⚠️ No se pudo comprobar ofertas para usuario ${req.userId}: ${userOffersError.message}`);
+      } else if ((userOffersCount || 0) === 0) {
+        console.log(`✅ Usuario ${req.userId} sin ofertas: devolviendo empty state`);
+        return res.json({
+          success: true,
+          data: [],
+          items: [],
+          hasMore: false,
+          total: 0,
+          next: null,
+          pagination: {
+            page: validatedPage,
+            limit: validatedLimit,
+            total: 0,
+            pages: 0,
+            hasMore: false,
+            lastCreatedAt: null,
+            lastId: null
+          },
+          stats: {
+            totalOffers: 0,
+            activeOffers: 0,
+            pendingOffers: 0,
+            pausedOffers: 0,
+            totalSectors: 0,
+            totalCities: 0
+          },
+          filters: {
+            search: cleanSearch || null,
+            status: cleanStatus || 'all',
+            location: cleanLocation || 'all',
+            sector: cleanSector || 'all',
+            externalId: cleanExternalId || 'all'
+          }
+        });
+      }
     } else {
       console.log(`🔑 Super admin: viendo todas las ofertas sin filtro`);
     }

@@ -352,6 +352,7 @@ export default function OfertasPage() {
   const uniqueSectors = sectors
   const uniqueCompanies = companies
   const uniqueExternalIds = externalIds
+  const hasActiveFilters = Object.keys(currentFilters).some((key) => key !== 'mode')
 
   const formatDate = (dateString: string) => {
     try {
@@ -776,7 +777,11 @@ export default function OfertasPage() {
           ) : ofertas.length === 0 ? (
             <div className="text-center py-8">
               <p className="text-muted-foreground">
-                {error ? 'Error cargando ofertas' : 'No se encontraron ofertas con los filtros aplicados'}
+                {error
+                  ? 'Error cargando ofertas'
+                  : hasActiveFilters
+                    ? 'No se encontraron ofertas con los filtros aplicados'
+                    : 'Todavía no tienes ofertas cargadas'}
               </p>
             </div>
           ) : (
