@@ -10,6 +10,7 @@ const channelWebhooksRouter = require('./src/routes/channelWebhooks');
 const userCredentialsRouter = require('./src/routes/userCredentials');
 const metricsRouter = require('./src/routes/metrics');
 const offersRouter = require('./src/routes/offers');
+const jobOffersRouter = require('./src/routes/jobOffers');
 const swaggerUi = require('swagger-ui-express');
 const YAML = require('yamljs');
 const path = require('path');
@@ -149,6 +150,7 @@ app.use('/api/users', userCredentialsRouter);
 app.use('/api/credentials', userCredentialsRouter);
 app.use('/api/metrics', metricsRouter);
 app.use('/api/offers', offersRouter);
+app.use('/', jobOffersRouter);
 
 // Router para control de límites internos
 const internalLimitsRouter = require('./src/routes/internalLimits');
