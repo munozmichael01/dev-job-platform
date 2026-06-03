@@ -24,6 +24,12 @@ export function useApi() {
       return res.json()
     },
 
+    getImportStatus: async (connectionId: number) => {
+      const res = await fetchWithAuth(`${API_URL}/api/connections/${connectionId}/import/status`)
+      if (!res.ok) return null
+      return res.json()
+    },
+
     importConnection: async (connectionId: number) => {
       const res = await fetchWithAuth(`${API_URL}/api/connections/${connectionId}/import`, {
         method: 'POST'

@@ -149,6 +149,36 @@ export default function ConexionesPage() {
     fetchConexiones()
   }, [])
 
+  // Auto-resume: when connections load, check for any that have pending RawJobRecords
+  // (from a previously interrupted import) and restart the loop automatically.
+  // Handles: page refresh, browser deploy reload, navigation away mid-import.
+  useEffect(() => {
+    if (conexiones.length === 0) return
+    const xmlConns = conexiones.filter(c =>
+      (c.type || c.Type || '').toUpperCase() === 'XML' && !importing[c.id]
+    )
+    if (xmlConns.length === 0) return
+
+    const checkAndResume = async () => {
+      for (const conn of xmlConns) {
+        try {
+          const status = await api.getImportStatus(conn.id)
+          if ((status?.pendingRecords ?? 0) > 0) {
+            console.log(`🔄 Auto-resuming import for connection ${conn.id} — ${status.pendingRecords} pending records`)
+            handleSync(conn.id)
+            break // resume one at a time
+          }
+        } catch {
+          // Non-critical — silently skip if status check fails
+        }
+      }
+    }
+
+    // Small delay so connections list is fully rendered before triggering
+    const timer = setTimeout(checkAndResume, 1000)
+    return () => clearTimeout(timer)
+  }, [conexiones.length])
+
   // ✅ CREAR NUEVA CONEXIÓN
   const handleCreateConnection = async () => {
     // Validación básica

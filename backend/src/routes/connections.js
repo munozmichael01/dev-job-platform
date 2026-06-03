@@ -732,7 +732,36 @@ router.post("/:id/import", addUserIdToRequest, requireAuth, onlyOwnData('UserId'
   }
 })
 
-// POST /api/connections/:id/test-upload - Test endpoint 
+// GET /api/connections/:id/import/status — lightweight import progress check
+// Used by frontend auto-resume logic on page load.
+router.get("/:id/import/status", addUserToRequest, requireAuth, async (req, res) => {
+  const { id } = req.params
+  try {
+    const [connRes, pendingRes, processedRes, offersRes] = await Promise.all([
+      supabase.from('Connections').select('status, importedOffers, lastSync, errorCount').eq('id', id).single(),
+      supabase.from('RawJobRecords').select('Id', { count: 'exact', head: true }).eq('ConnectionId', id).in('ProcessingStatus', ['pending', 'failed']),
+      supabase.from('RawJobRecords').select('Id', { count: 'exact', head: true }).eq('ConnectionId', id).eq('ProcessingStatus', 'processed'),
+      supabase.from('JobOffers').select('Id', { count: 'exact', head: true }).eq('ConnectionId', id),
+    ])
+    const conn = connRes.data
+    res.json({
+      success:          true,
+      connectionId:     parseInt(id),
+      connectionStatus: conn?.status,
+      pendingRecords:   pendingRes.count || 0,
+      processedRecords: processedRes.count || 0,
+      jobOffers:        offersRes.count || 0,
+      importedOffers:   conn?.importedOffers || 0,
+      lastSync:         conn?.lastSync,
+      isImporting:      conn?.status === 'importing',
+      hasMore:          (pendingRes.count || 0) > 0,
+    })
+  } catch (error) {
+    res.status(500).json({ success: false, error: error.message })
+  }
+})
+
+// POST /api/connections/:id/test-upload - Test endpoint
 router.post("/:id/test-upload", async (req, res) => {
   console.log("🎯 TEST UPLOAD endpoint hit!")
   res.json({ message: "Test upload endpoint works!", id: req.params.id })
@@ -975,159 +1004,130 @@ router.get("/:id/fields", addUserToRequest, requireAuth, async (req, res) => {
   console.log(`🔍 GET /api/connections/:id/fields - ID: ${id}`)
 
   try {
-    // Obtener la conexión con Supabase
     const { data: connection, error: connError } = await supabase
       .from('Connections')
-      .select('*')
+      .select('id, name, type, url, FeedUrl, Endpoint, UserId, status')
       .eq('id', id)
-      .single();
+      .single()
 
     if (connError || !connection) {
-      console.log(`❌ Conexión no encontrada: ${id}`)
-      return res.status(404).json({ error: "Conexión no encontrada" })
+      return res.status(404).json({ success: false, error: "Conexión no encontrada" })
     }
 
-    console.log("✅ Conexión encontrada para detección de campos:", connection)
+    const connectionType = (connection.type || '').toLowerCase()
 
-    // Usar minúsculas para acceder a los campos (CORRECCIÓN PRINCIPAL)
-    const connectionType = connection.type || connection.Type
+    // ── XML: fetch first offer and return its field names ──────────────────────
+    if (connectionType === "xml") {
+      const feedUrl = connection.FeedUrl || connection.url || connection.Endpoint
+      if (!feedUrl) {
+        return res.status(400).json({ success: false, error: "Conexión XML sin URL configurada" })
+      }
 
-    if (!connectionType) {
-      console.error("❌ Tipo de conexión no definido:", connection)
-      return res.status(400).json({
-        error: "Tipo de conexión no definido",
-        connectionData: connection,
+      try {
+        const axios  = require('axios')
+        const xml2js = require('xml2js')
+
+        const response = await axios.get(feedUrl, {
+          timeout: 15000,
+          headers: { 'User-Agent': 'TalentOS-FieldDetector/1.0' },
+          httpsAgent: new (require('https').Agent)({ rejectUnauthorized: false }),
+        })
+        const parsed = await new xml2js.Parser({
+          explicitArray: false, ignoreAttrs: false, mergeAttrs: true, trim: true,
+        }).parseStringPromise(response.data)
+
+        // Find first offer in the feed (same logic as XMLImporter.extractOfferList)
+        const rootKey = Object.keys(parsed)[0]
+        const root = parsed[rootKey]
+        let firstOffer = null
+        for (const key of ['job', 'offer', 'item', 'listing', 'vacancy']) {
+          const val = root?.[key]
+          if (val) { firstOffer = Array.isArray(val) ? val[0] : val; break }
+        }
+        if (!firstOffer && root && typeof root === 'object') {
+          for (const k of Object.keys(root)) {
+            const v = root[k]
+            if (Array.isArray(v) && v.length > 0) { firstOffer = v[0]; break }
+          }
+        }
+
+        if (!firstOffer) {
+          return res.status(422).json({ success: false, error: "No se encontraron ofertas en el feed XML" })
+        }
+
+        const fields = Object.entries(firstOffer).map(([name, value]) => ({
+          name,
+          type: typeof value === 'object' ? 'object' : String(value).match(/^\d{4}-\d{2}-\d{2}/) ? 'date' : isNaN(Number(value)) ? 'string' : 'number',
+          sample: typeof value === 'object' ? JSON.stringify(value).substring(0, 80) : String(value).substring(0, 100),
+          required: false,
+          description: name,
+        }))
+
+        return res.json({ success: true, fields, source: 'xml-feed-live' })
+
+      } catch (fetchErr) {
+        return res.status(502).json({
+          success: false,
+          error: `No se pudo leer el feed XML: ${fetchErr.message}`,
+          feedUrl,
+        })
+      }
+    }
+
+    // ── API: not yet implemented ──────────────────────────────────────────────
+    if (connectionType === "api") {
+      return res.status(501).json({
+        success: false,
+        error: "Detección de campos para conexiones API no está implementada aún",
+        message: "Configure los campos manualmente o use una conexión XML"
       })
     }
 
-    console.log(`🔄 Detectando campos para conexión tipo: ${connectionType}`)
+    // ── Manual: infer from last imported RawJobRecords (if any) ──────────────
+    if (connectionType === "manual") {
+      try {
+        // Infer field names from the last processed RawJobRecord's raw payload
+        const { data: rawRec } = await supabase
+          .from('RawJobRecords')
+          .select('RawPayload')
+          .eq('ConnectionId', id)
+          .eq('ProcessingStatus', 'processed')
+          .order('ReceivedAt', { ascending: false })
+          .limit(1)
 
-    // Crear el procesador según el tipo
-    let processor
-    try {
-      if (connectionType.toLowerCase() === "xml") {
-        const XMLProcessor = require("../processors/xmlProcessor")
-        processor = new XMLProcessor(connection)
-      } else if (connectionType.toLowerCase() === "api") {
-        const APIProcessor = require("../processors/apiProcessor")
-        processor = new APIProcessor(connection)
-      } else if (connectionType.toLowerCase() === "manual") {
-        // Para conexiones manuales, intentar detectar campos del último archivo procesado
-        console.log("📁 Conexión manual - buscando campos del último archivo procesado")
-        
-        try {
-          // Buscar si hay ofertas procesadas para esta conexión para obtener estructura real
-          const { data: offers, error: offersError } = await supabase
-            .from('JobOffers')
-            .select('*')
-            .eq('ConnectionId', connection.id)
-            .order('CreatedAt', { ascending: false })
-            .limit(1);
+        if (rawRec?.[0]?.RawPayload) {
+          const sample = JSON.parse(rawRec[0].RawPayload)
+          const fields = Object.entries(sample).map(([name, value]) => ({
+            name,
+            type: typeof value === 'object' ? 'object' : isNaN(Number(value)) ? 'string' : 'number',
+            sample: String(value).substring(0, 100),
+            required: false,
+            description: name,
+          }))
+          return res.json({ success: true, fields, source: 'last-processed-record' })
+        }
+      } catch {}
 
-          if (!offersError && offers && offers.length > 0) {
-            // Hay ofertas procesadas, detectar campos basado en los datos reales
-            const sampleOffer = offers[0]
-            console.log("✅ Detectando campos basado en oferta procesada")
-            
-            const detectedFields = []
-            
-            // Mapear campos de la base de datos a campos de origen típicos
-            const dbToSourceMapping = {
-              'ExternalId': { name: 'id', sample: sampleOffer.ExternalId, type: 'string', description: 'ID único de la oferta' },
-              'Title': { name: 'title', sample: sampleOffer.Title, type: 'string', description: 'Título de la oferta' },
-              'JobTitle': { name: 'jobtitle', sample: sampleOffer.JobTitle, type: 'string', description: 'Título del puesto' },
-              'Description': { name: 'content', sample: sampleOffer.Description?.substring(0, 100) + '...', type: 'text', description: 'Descripción completa' },
-              'CompanyName': { name: 'company', sample: sampleOffer.CompanyName, type: 'string', description: 'Nombre de la empresa' },
-              'Sector': { name: 'category', sample: sampleOffer.Sector, type: 'string', description: 'Categoría o sector' },
-              'City': { name: 'city', sample: sampleOffer.City, type: 'string', description: 'Ciudad' },
-              'Region': { name: 'region', sample: sampleOffer.Region, type: 'string', description: 'Región' },
-              'Country': { name: 'country', sample: sampleOffer.Country, type: 'string', description: 'País' },
-              'ExternalUrl': { name: 'url', sample: sampleOffer.ExternalUrl, type: 'url', description: 'URL externa' },
-              'ApplicationUrl': { name: 'url_apply', sample: sampleOffer.ApplicationUrl, type: 'url', description: 'URL de aplicación' },
-              'PublicationDate': { name: 'publication', sample: sampleOffer.PublicationDate?.toISOString().split('T')[0], type: 'date', description: 'Fecha de publicación' },
-              'JobType': { name: 'jobtype', sample: sampleOffer.JobType, type: 'string', description: 'Tipo de trabajo' },
-              'Vacancies': { name: 'vacancies', sample: sampleOffer.Vacancies?.toString(), type: 'number', description: 'Número de vacantes' }
-            }
-
-            // Crear campos detectados basados en datos reales
-            Object.entries(dbToSourceMapping).forEach(([dbField, sourceField]) => {
-              if (sampleOffer[dbField] && sampleOffer[dbField] !== null && sampleOffer[dbField] !== '') {
-                detectedFields.push({
-                  name: sourceField.name,
-                  type: sourceField.type,
-                  sample: sourceField.sample || '',
-                  required: false,
-                  description: sourceField.description
-                })
-              }
-            })
-
-            console.log(`✅ Detectados ${detectedFields.length} campos basados en datos reales`)
-            
-            return res.status(200).json({
-              success: true,
-              fields: detectedFields,
-              note: "Campos detectados basados en el último archivo procesado"
-            })
-          } else {
-            // No hay ofertas procesadas, retornar campos estándar
-            console.log("📁 No hay ofertas procesadas - retornando campos estándar")
-            return res.status(200).json({
-              success: true,
-              fields: [
-                { name: "id", type: "string", sample: "12345", required: false, description: "ID único de la oferta" },
-                { name: "title", type: "string", sample: "Desarrollador Full Stack", required: true, description: "Título de la oferta" },
-                { name: "company", type: "string", sample: "Tech Solutions S.A.", required: true, description: "Nombre de la empresa" },
-                { name: "description", type: "text", sample: "Desarrollador con experiencia en React y Node.js...", required: false, description: "Descripción del puesto" },
-                { name: "location", type: "string", sample: "Madrid, España", required: true, description: "Ubicación" },
-                { name: "url", type: "url", sample: "https://example.com/apply", required: true, description: "URL de aplicación" },
-                { name: "publication_date", type: "date", sample: "2024-01-15", required: true, description: "Fecha de publicación" }
-              ],
-              note: "Campos estándar - procese un archivo primero para detectar campos reales"
-            })
-          }
-        } catch (detectError) {
-          console.error("❌ Error detectando campos de conexión manual:", detectError)
-          // Fallback a campos estándar
-          return res.status(200).json({
+          // Fallback: standard field set
+          return res.json({
             success: true,
+            source: 'standard-fallback',
             fields: [
-              { name: "id", type: "string", sample: "12345", required: false, description: "ID único de la oferta" },
-              { name: "title", type: "string", sample: "Desarrollador Full Stack", required: true, description: "Título de la oferta" },
-              { name: "company", type: "string", sample: "Tech Solutions S.A.", required: true, description: "Nombre de la empresa" },
-              { name: "description", type: "text", sample: "Desarrollador con experiencia en React y Node.js...", required: false, description: "Descripción del puesto" }
-            ],
-            note: "Campos estándar por error en detección"
+              { name: "id",           type: "string", sample: "12345",      required: false, description: "ID único" },
+              { name: "title",        type: "string", sample: "Desarrollador Full Stack", required: true, description: "Título" },
+              { name: "company",      type: "string", sample: "TechCorp",   required: true,  description: "Empresa" },
+              { name: "description",  type: "text",   sample: "Descripción...", required: false, description: "Descripción" },
+              { name: "url",          type: "url",    sample: "https://...", required: true, description: "URL aplicación" },
+              { name: "publication",  type: "date",   sample: "2024-01-15", required: false, description: "Fecha publicación" },
+            ]
           })
         }
-      } else {
-        throw new Error(`Tipo de conexión no soportado: ${connectionType}`)
-      }
-    } catch (processorError) {
-      console.error("❌ Error creando procesador para detección:", processorError)
-      return res.status(400).json({
-        error: `Tipo de conexión no soportado: ${connectionType}`,
-        details: processorError.message,
-      })
-    }
 
-    console.log("🔍 Detectando campos de origen...")
+        return res.status(400).json({ success: false, error: `Tipo de conexión no soportado: ${connectionType}` })
 
-    // Detectar campos
-    const fields = await processor.detectFields()
-
-    console.log("✅ Campos detectados:", fields)
-
-    res.json({
-      success: true,
-      fields: fields,
-    })
   } catch (error) {
     console.error("❌ Error detectando campos:", error)
-    res.status(500).json({
-      error: "Error detectando campos",
-      details: error.message,
-    })
+    res.status(500).json({ success: false, error: "Error detectando campos", details: error.message })
   }
 })
 
