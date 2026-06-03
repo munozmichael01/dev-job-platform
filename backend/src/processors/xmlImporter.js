@@ -383,72 +383,74 @@ class XMLImporter {
 
     if (!existing?.length) return;
 
-    const toPause   = [];
-    const toArchive = [];
+    // Three distinct buckets — each gets its own PauseReason / ArchivedReason
+    const toPauseFutureExpiry    = [];  // ExpirationDate exists AND > now
+    const toPauseNoExpiry        = [];  // ExpirationDate absent
+    const toArchiveExpired       = [];  // ExpirationDate exists AND <= now
 
     for (const offer of existing) {
       if (activeExternalIds.has(offer.ExternalId)) continue; // still in feed
 
       const expiry = offer.ExpirationDate ? new Date(offer.ExpirationDate) : null;
 
-      if (expiry && expiry <= nowTs) {
-        // Past expiry → archive
-        toArchive.push(offer.Id);
+      if (!expiry) {
+        toPauseNoExpiry.push(offer.Id);
+      } else if (expiry <= nowTs) {
+        toArchiveExpired.push(offer.Id);
       } else {
-        // No expiry or future expiry → pause
-        toPause.push(offer.Id);
+        toPauseFutureExpiry.push(offer.Id);
       }
     }
 
-    // Batch update: pause
-    if (toPause.length > 0) {
-      const BATCH = 100;
-      for (let i = 0; i < toPause.length; i += BATCH) {
-        const slice = toPause.slice(i, i + BATCH);
+    const missingSince = now();
+    const BATCH = 100;
+
+    // Batch update: paused — missing, ExpirationDate exists but is future
+    if (toPauseFutureExpiry.length > 0) {
+      for (let i = 0; i < toPauseFutureExpiry.length; i += BATCH) {
+        const slice = toPauseFutureExpiry.slice(i, i + BATCH);
         await supabase
           .from('JobOffers')
-          .update({
-            Status:      'paused',
-            MissingSince: now(),   // optional column
-            PauseReason:  toPause.map(() => null).includes(null) // dummy — set real value below
-              ? 'missing_from_source_feed' : 'missing_from_source_feed',
-            UpdatedAt:   now(),
-          })
+          .update({ Status: 'paused', MissingSince: missingSince, PauseReason: 'missing_from_source_feed', UpdatedAt: missingSince })
           .in('Id', slice)
-          .catch(err => {
-            // If optional columns don't exist yet, retry without them
-            return supabase
-              .from('JobOffers')
-              .update({ Status: 'paused', UpdatedAt: now() })
-              .in('Id', slice);
-          });
+          .catch(() =>
+            supabase.from('JobOffers').update({ Status: 'paused', UpdatedAt: missingSince }).in('Id', slice)
+          );
       }
-      this.stats.paused += toPause.length;
-      console.log(`⏸️  Paused ${toPause.length} offers (missing from feed, not yet expired)`);
+      this.stats.paused += toPauseFutureExpiry.length;
+      console.log(`⏸️  Paused ${toPauseFutureExpiry.length} offers (missing, future expiry)`);
     }
 
-    // Batch update: archive
-    if (toArchive.length > 0) {
-      const BATCH = 100;
-      for (let i = 0; i < toArchive.length; i += BATCH) {
-        const slice = toArchive.slice(i, i + BATCH);
+    // Batch update: paused — missing, no ExpirationDate
+    if (toPauseNoExpiry.length > 0) {
+      for (let i = 0; i < toPauseNoExpiry.length; i += BATCH) {
+        const slice = toPauseNoExpiry.slice(i, i + BATCH);
         await supabase
           .from('JobOffers')
-          .update({
-            Status:         'archived',
-            ArchivedReason: 'expired',  // optional column
-            UpdatedAt:      now(),
-          })
+          .update({ Status: 'paused', MissingSince: missingSince, PauseReason: 'missing_from_source_feed_no_expiration', UpdatedAt: missingSince })
           .in('Id', slice)
-          .catch(err => {
-            return supabase
-              .from('JobOffers')
-              .update({ Status: 'archived', UpdatedAt: now() })
-              .in('Id', slice);
-          });
+          .catch(() =>
+            supabase.from('JobOffers').update({ Status: 'paused', UpdatedAt: missingSince }).in('Id', slice)
+          );
       }
-      this.stats.archived += toArchive.length;
-      console.log(`🗄️  Archived ${toArchive.length} offers (expired and missing from feed)`);
+      this.stats.paused += toPauseNoExpiry.length;
+      console.log(`⏸️  Paused ${toPauseNoExpiry.length} offers (missing, no expiration date)`);
+    }
+
+    // Batch update: archived — ExpirationDate is past
+    if (toArchiveExpired.length > 0) {
+      for (let i = 0; i < toArchiveExpired.length; i += BATCH) {
+        const slice = toArchiveExpired.slice(i, i + BATCH);
+        await supabase
+          .from('JobOffers')
+          .update({ Status: 'archived', ArchivedReason: 'expired', UpdatedAt: missingSince })
+          .in('Id', slice)
+          .catch(() =>
+            supabase.from('JobOffers').update({ Status: 'archived', UpdatedAt: missingSince }).in('Id', slice)
+          );
+      }
+      this.stats.archived += toArchiveExpired.length;
+      console.log(`🗄️  Archived ${toArchiveExpired.length} offers (expired and missing from feed)`);
     }
   }
 }
