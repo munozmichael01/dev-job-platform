@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, useEffect } from "react"
+import { useState, useEffect, useRef, useCallback } from "react"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
@@ -65,9 +65,22 @@ export default function ConexionesPage() {
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [creating, setCreating] = useState(false)
-  const [importing, setImporting] = useState<Record<number, boolean>>({})
+  // ── Import queue state (display) ──────────────────────────────────────────
+  const [importQueue, setImportQueue]     = useState<number[]>([])
+  const [activeImportId, setActiveImportId] = useState<number | null>(null)
   const [importProgress, setImportProgress] = useState<Record<number, { processed: number; total: number }>>({})
-  const stopImport = useState<Record<number, boolean>>({})[0]
+  const [importStatus, setImportStatus]   = useState<Record<number, 'idle'|'queued'|'importing'|'complete'|'error'>>({})
+
+  // Refs for queue processor — avoids stale closures
+  const importQueueRef   = useRef<number[]>([])
+  const activeImportRef  = useRef<number | null>(null)
+  const isProcessingRef  = useRef(false)
+
+  // Legacy compat — keeps disabled state in sync with queue status
+  const importing: Record<number, boolean> = {
+    ...(activeImportId !== null ? { [activeImportId]: true } : {}),
+    ...Object.fromEntries(importQueue.map(id => [id, false])),
+  }
 
   const [newConnection, setNewConnection] = useState({
     name: "",
@@ -149,33 +162,56 @@ export default function ConexionesPage() {
     fetchConexiones()
   }, [])
 
-  // Auto-resume: when connections load, check for any that have pending RawJobRecords
-  // (from a previously interrupted import) and restart the loop automatically.
-  // Handles: page refresh, browser deploy reload, navigation away mid-import.
+  // ── Build import queue on page load ────────────────────────────────────────
+  // When connections load, check ALL XML connections for pending records and
+  // add them to the queue in priority order. Handles: page refresh, deploy.
   useEffect(() => {
-    if (conexiones.length === 0) return
-    const xmlConns = conexiones.filter(c =>
-      (c.type || c.Type || '').toUpperCase() === 'XML' && !importing[c.id]
-    )
+    if (conexiones.length === 0 || isProcessingRef.current) return
+    const xmlConns = conexiones.filter(c => (c.type || c.Type || '').toUpperCase() === 'XML')
     if (xmlConns.length === 0) return
 
-    const checkAndResume = async () => {
-      for (const conn of xmlConns) {
-        try {
-          const status = await api.getImportStatus(conn.id)
-          if ((status?.pendingRecords ?? 0) > 0) {
-            console.log(`🔄 Auto-resuming import for connection ${conn.id} — ${status.pendingRecords} pending records`)
-            handleSync(conn.id)
-            break // resume one at a time
+    const buildAndStartQueue = async () => {
+      const results = await Promise.all(
+        xmlConns.map(async conn => {
+          try {
+            const s = await api.getImportStatus(conn.id)
+            return { id: conn.id, pending: s?.pendingRecords ?? 0, lastSync: conn.lastSync ?? conn.LastSync ?? '0' }
+          } catch {
+            return { id: conn.id, pending: 0, lastSync: '0' }
           }
-        } catch {
-          // Non-critical — silently skip if status check fails
-        }
-      }
+        })
+      )
+
+      const toQueue = results
+        .filter(r => r.pending > 0)
+        .filter(r => !importQueueRef.current.includes(r.id) && activeImportRef.current !== r.id)
+        .sort((a, b) => {
+          const tA = a.lastSync ? new Date(a.lastSync).getTime() : 0
+          const tB = b.lastSync ? new Date(b.lastSync).getTime() : 0
+          if (tA !== tB) return tA - tB   // oldest lastSync first
+          return a.id - b.id               // fallback: lower id first
+        })
+        .map(r => r.id)
+
+      if (toQueue.length === 0) return
+
+      importQueueRef.current = [...importQueueRef.current, ...toQueue]
+      setImportQueue([...importQueueRef.current])
+      setImportStatus(prev => {
+        const next = { ...prev }
+        toQueue.forEach(id => { next[id] = 'queued' })
+        return next
+      })
+
+      toast({
+        title: `${toQueue.length} importación${toQueue.length > 1 ? 'es' : ''} pendiente${toQueue.length > 1 ? 's' : ''}`,
+        description: 'Reanudando automáticamente. Si sales, se reanuda al volver.',
+      })
+
+      processImportQueue()
     }
 
-    // Small delay so connections list is fully rendered before triggering
-    const timer = setTimeout(checkAndResume, 1000)
+    const timer = setTimeout(buildAndStartQueue, 1200)
     return () => clearTimeout(timer)
   }, [conexiones.length])
 
@@ -380,17 +416,13 @@ export default function ConexionesPage() {
       if (file) {
         try {
           console.log(`📁 Starting upload process for file: ${file.name}, size: ${file.size}, type: ${file.type}`)
-          console.log(`📁 Setting importing state to true for connection ${connectionId}`)
-          setImporting((prev) => ({ ...prev, [connectionId]: true }))
-          
           // Mostrar toast de inicio
           toast({
             title: "Procesando archivo",
             description: `Subiendo ${file.name}...`,
           });
-          
-          console.log(`📁 About to call uploadFile(${connectionId}, file)...`)
-          const result = await uploadFile(connectionId, file)
+
+          const result = await api.uploadFile(connectionId, file)
           console.log("✅ Upload completado:", result)
 
           // Actualización optimista inmediata del estado local
@@ -429,13 +461,10 @@ export default function ConexionesPage() {
           })
         } finally {
           console.log(`📁 Setting importing state to false for connection ${connectionId}`)
-          setImporting((prev) => ({ ...prev, [connectionId]: false }))
+          // manual upload doesn't use the import queue
         }
       } else {
         console.log("❌ No file selected in onchange handler")
-        console.log("📁 Input target:", e.target)
-        console.log("📁 Files array:", (e.target as HTMLInputElement).files)
-        setImporting((prev) => ({ ...prev, [connectionId]: false }))
       }
     }
     
@@ -463,77 +492,95 @@ export default function ConexionesPage() {
     }
   }
 
-  // ✅ SINCRONIZAR OFERTAS — loop automático hasta hasMore=false
-  const handleSync = async (connectionId: number) => {
-    if (importing[connectionId]) return
-
-    setImporting((prev) => ({ ...prev, [connectionId]: true }))
-    setImportProgress((prev) => ({ ...prev, [connectionId]: { processed: 0, total: 0 } }))
-
+  // ── Core batch loop for one connection ────────────────────────────────────
+  const runBatchLoop = async (connectionId: number) => {
+    let batchCount = 0
+    const MAX_BATCHES = 120 // 120 × 200 = 24k offers
     let totalProcessed = 0
-    let grandTotal     = 0
-    let batchCount     = 0
-    const MAX_BATCHES  = 100 // safety cap — 100 × 200 = 20 000 offers max
+    let grandTotal = 0
 
-    try {
-      console.log(`🔄 Iniciando importación automática para conexión ${connectionId}`)
+    while (batchCount < MAX_BATCHES) {
+      batchCount++
+      const result = await api.importConnection(connectionId)
+      console.log(`📦 [${connectionId}] Batch ${batchCount}:`, result?.phase, result?.result)
 
-      while (batchCount < MAX_BATCHES) {
-        batchCount++
-        const result = await api.importConnection(connectionId)
+      const batchImported  = result.result?.imported  ?? result.imported  ?? 0
+      const batchTotal     = result.result?.total     ?? result.total     ?? grandTotal
+      const batchProcessed = result.result?.processed ?? result.processed ?? (totalProcessed + batchImported)
+      const hasMore        = result.hasMore ?? result.result?.hasMore ?? false
 
-        console.log(`📦 Batch ${batchCount}:`, result)
+      totalProcessed = batchProcessed || (totalProcessed + batchImported)
+      if (batchTotal > grandTotal) grandTotal = batchTotal
 
-        // Normalise field names — backend uses result.result.* or top-level
-        const batchImported = result.result?.imported ?? result.imported ?? 0
-        const batchTotal    = result.result?.total    ?? result.total    ?? grandTotal
-        const batchProcessed = result.result?.processed ?? result.processed ?? (totalProcessed + batchImported)
-        const hasMore       = result.hasMore ?? result.result?.hasMore ?? false
-        const remaining     = result.remaining ?? result.result?.remaining ?? 0
+      setImportProgress(prev => ({
+        ...prev,
+        [connectionId]: { processed: totalProcessed, total: grandTotal || totalProcessed }
+      }))
+      setConexiones(prev => prev.map(c =>
+        c.id === connectionId ? { ...c, status: 'importing', importedOffers: totalProcessed } : c
+      ))
 
-        totalProcessed = batchProcessed || (totalProcessed + batchImported)
-        if (batchTotal > grandTotal) grandTotal = batchTotal
+      if (!hasMore) break
+      await new Promise(r => setTimeout(r, 300))
+    }
+    return totalProcessed
+  }
 
-        // Update live progress indicator
-        setImportProgress((prev) => ({
-          ...prev,
-          [connectionId]: { processed: totalProcessed, total: grandTotal || totalProcessed }
-        }))
+  // ── Sequential queue processor ─────────────────────────────────────────────
+  const processImportQueue = useCallback(async () => {
+    if (isProcessingRef.current) return
+    isProcessingRef.current = true
 
-        // Optimistic local state update
-        setConexiones(prev => prev.map(conn =>
-          conn.id === connectionId
-            ? { ...conn, status: "importing", importedOffers: totalProcessed }
-            : conn
-        ))
+    while (importQueueRef.current.length > 0) {
+      const connectionId = importQueueRef.current[0]
+      importQueueRef.current = importQueueRef.current.slice(1)
+      setImportQueue([...importQueueRef.current])
 
-        if (!hasMore) {
-          // Import complete
-          console.log(`✅ Importación completada: ${totalProcessed} ofertas`)
-          break
-        }
+      activeImportRef.current = connectionId
+      setActiveImportId(connectionId)
+      setImportStatus(prev => ({ ...prev, [connectionId]: 'importing' }))
+      setImportProgress(prev => ({ ...prev, [connectionId]: { processed: 0, total: 0 } }))
 
-        // Small delay between batches to avoid hammering the backend
-        await new Promise(resolve => setTimeout(resolve, 300))
+      try {
+        const total = await runBatchLoop(connectionId)
+        setImportStatus(prev => ({ ...prev, [connectionId]: 'complete' }))
+        toast({
+          title: "Importación completada",
+          description: `${total.toLocaleString()} ofertas importadas correctamente`,
+        })
+      } catch (err) {
+        console.error(`❌ Import failed for connection ${connectionId}:`, err)
+        setImportStatus(prev => ({ ...prev, [connectionId]: 'error' }))
+        toast({
+          title: `Error en conexión ${connectionId}`,
+          description: err instanceof Error ? err.message : "Error desconocido",
+          variant: "destructive",
+        })
+        // Continue with next in queue
       }
 
-      toast({
-        title: "Sincronización exitosa",
-        description: `${totalProcessed.toLocaleString()} ofertas importadas correctamente`,
-      })
+      activeImportRef.current = null
+      setActiveImportId(null)
+      await fetchConexiones() // refresh after each connection
+    }
 
-    } catch (err) {
-      console.error("❌ Error en importación:", err)
-      toast({
-        title: "Error en sincronización",
-        description: err instanceof Error ? err.message : "Error desconocido",
-        variant: "destructive",
-      })
-    } finally {
-      setImporting((prev) => ({ ...prev, [connectionId]: false }))
-      setImportProgress((prev) => ({ ...prev, [connectionId]: { processed: totalProcessed, total: grandTotal } }))
-      // Refresh from server to confirm final state
-      await fetchConexiones()
+    isProcessingRef.current = false
+  }, []) // stable — reads from refs, not state
+
+  // ── Public: enqueue a connection import ────────────────────────────────────
+  const handleSync = (connectionId: number) => {
+    // Skip if already active or queued
+    if (importQueueRef.current.includes(connectionId)) return
+    if (activeImportRef.current === connectionId) return
+
+    // Reset error state if re-syncing a failed connection
+    setImportStatus(prev => ({ ...prev, [connectionId]: 'queued' }))
+
+    importQueueRef.current = [...importQueueRef.current, connectionId]
+    setImportQueue([...importQueueRef.current])
+
+    if (!isProcessingRef.current) {
+      processImportQueue()
     }
   }
 
@@ -713,6 +760,20 @@ export default function ConexionesPage() {
 
   return (
     <div className="flex flex-col gap-6 p-6">
+      {/* Import queue info banner */}
+      {(activeImportId !== null || importQueue.length > 0) && (
+        <div className="flex items-center gap-3 rounded-md border border-blue-200 bg-blue-50 px-4 py-2 text-sm text-blue-800">
+          <RefreshCw className="h-4 w-4 animate-spin flex-shrink-0" />
+          <span>
+            {activeImportId !== null
+              ? `Importando conexión ${activeImportId}${importProgress[activeImportId]?.total > 0 ? ` — ${importProgress[activeImportId].processed.toLocaleString()} / ${importProgress[activeImportId].total.toLocaleString()} ofertas` : '…'}`
+              : `${importQueue.length} importación${importQueue.length > 1 ? 'es' : ''} en cola`}
+            {importQueue.length > 0 && activeImportId !== null && ` · ${importQueue.length} más en cola`}
+            {' '}— Si sales de esta página, se pausará y reanudará al volver.
+          </span>
+        </div>
+      )}
+
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-4">
           <SidebarTrigger />
@@ -1121,28 +1182,46 @@ export default function ConexionesPage() {
                             </Button>
                           </>
                         ) : (
-                          // Para conexiones XML/API: sync con progreso automático
-                          <div className="flex flex-col items-start gap-0.5">
-                            <Button
-                              variant="outline"
-                              size="sm"
-                              onClick={() => handleSync(conexion.id)}
-                              disabled={getConnectionStatus(conexion) === "error" || importing[conexion.id]}
-                              title={importing[conexion.id] ? "Importando..." : "Sincronizar ofertas"}
-                            >
-                              <RefreshCw className={`h-4 w-4 ${importing[conexion.id] ? "animate-spin" : ""}`} />
-                              <span className="ml-1 text-xs">
-                                {importing[conexion.id] ? "Importando…" : "Sync"}
-                              </span>
-                            </Button>
-                            {importing[conexion.id] && importProgress[conexion.id]?.total > 0 && (
-                              <span className="text-xs text-muted-foreground whitespace-nowrap">
-                                {importProgress[conexion.id].processed.toLocaleString()}
-                                {" / "}
-                                {importProgress[conexion.id].total.toLocaleString()}
-                              </span>
-                            )}
-                          </div>
+                          // Para conexiones XML/API: queue-aware sync button
+                          (() => {
+                            const connStatus = importStatus[conexion.id]
+                            const isActive   = activeImportId === conexion.id
+                            const isQueued   = importQueue.includes(conexion.id)
+                            const isError    = connStatus === 'error'
+                            const progress   = importProgress[conexion.id]
+                            const showProgress = isActive && (progress?.total ?? 0) > 0
+
+                            const label = isActive  ? 'Importando…'
+                                        : isQueued  ? 'En cola'
+                                        : isError   ? 'Error — reintentar'
+                                        : connStatus === 'complete' ? 'Completado'
+                                        : 'Sync'
+
+                            return (
+                              <div className="flex flex-col items-start gap-0.5">
+                                <Button
+                                  variant={isError ? "destructive" : "outline"}
+                                  size="sm"
+                                  onClick={() => handleSync(conexion.id)}
+                                  disabled={isActive || isQueued}
+                                  title={label}
+                                >
+                                  <RefreshCw className={`h-4 w-4 ${isActive ? 'animate-spin' : ''}`} />
+                                  <span className="ml-1 text-xs">{label}</span>
+                                </Button>
+                                {showProgress && (
+                                  <span className="text-xs text-muted-foreground whitespace-nowrap">
+                                    {progress.processed.toLocaleString()} / {progress.total.toLocaleString()}
+                                  </span>
+                                )}
+                                {isQueued && !isActive && (
+                                  <span className="text-xs text-muted-foreground">
+                                    {`Pos. ${importQueue.indexOf(conexion.id) + 1} en cola`}
+                                  </span>
+                                )}
+                              </div>
+                            )
+                          })()
                         )}
                         <Button variant="outline" size="sm" asChild>
                           <Link href={`/conexiones/${conexion.id}/mapeo`}>

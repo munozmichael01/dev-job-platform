@@ -744,17 +744,20 @@ router.get("/:id/import/status", addUserToRequest, requireAuth, async (req, res)
       supabase.from('JobOffers').select('Id', { count: 'exact', head: true }).eq('ConnectionId', id),
     ])
     const conn = connRes.data
+    const pending   = pendingRes.count || 0
+    const processed = processedRes.count || 0
     res.json({
       success:          true,
       connectionId:     parseInt(id),
       connectionStatus: conn?.status,
-      pendingRecords:   pendingRes.count || 0,
-      processedRecords: processedRes.count || 0,
+      pendingRecords:   pending,
+      processedRecords: processed,
+      totalRecords:     pending + processed,
       jobOffers:        offersRes.count || 0,
       importedOffers:   conn?.importedOffers || 0,
       lastSync:         conn?.lastSync,
       isImporting:      conn?.status === 'importing',
-      hasMore:          (pendingRes.count || 0) > 0,
+      hasMore:          pending > 0,
     })
   } catch (error) {
     res.status(500).json({ success: false, error: error.message })
