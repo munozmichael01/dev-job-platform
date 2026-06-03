@@ -318,8 +318,8 @@ CREATE TABLE IF NOT EXISTS "SegmentJobOffers" (
 -- Archive actions: Campaigns_bak already created in Phase 0
 
 DROP TABLE IF EXISTS "CampaignChannels";   -- 0 rows, safe
+DROP TABLE IF EXISTS "CampaignSegments";   -- explicit drop, do not rely on CASCADE
 DROP TABLE IF EXISTS "Campaigns" CASCADE;  -- Campaigns_bak already created
--- Note: old CampaignSegments (if it exists in Supabase) also dropped by CASCADE
 
 -- DistributionChannels catalog MUST exist before CampaignChannels (FK dependency)
 CREATE TABLE IF NOT EXISTS "DistributionChannels" (

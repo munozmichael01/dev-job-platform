@@ -78,7 +78,7 @@ jobOffers.js:
 | Contar ofertas | `Segments.OfferCount` (INTEGER stored) | No existe — calculado | **✘ Roto** — columna eliminada |
 | Leer/escribir segmentos | `pool.request()` + SQL Server adapter | Supabase nativo | **✘ Roto** — adapter en toda la ruta |
 | Estimar ofertas | `JobOffers WITH (READPAST)` hint | `JobOffers` sin hints | **✘ Roto** — SQL Server syntax |
-| Campañas del segmento | `CampaignSegments` JOIN | No existe — `Campaigns.SegmentId` FK directo | **✘ Roto** — tabla eliminada |
+| Campañas del segmento | `CampaignSegments` JOIN | `CampaignSegments` existe — misma tabla, misma lógica | ✅ Compatible — solo migrar a Supabase nativo |
 | Muestra de ofertas | `JobOffers.Id`, `.StatusId = 1` | `JobOffers.Id`, `.Status = 'active'` | ⚠️ StatusId → Status |
 
 ### Cambios necesarios
@@ -109,18 +109,18 @@ segments.js — REESCRITURA COMPLETA (toda la ruta usa pool.request())
 
   L222-226 → UPDATE con OfferCount → omitir OfferCount, UPDATE FilterDefinition
 
-  L238 → DELETE check: FROM Campaigns WHERE SegmentId=@Id → .eq('SegmentId', id) en Supabase
+  L238 → DELETE check: FROM Campaigns WHERE SegmentId=@Id
+         Nuevo: Campaigns no tiene SegmentId — el check de integridad lo da el CASCADE en CampaignSegments
+         Cambio: eliminar este check o reemplazar por .from('CampaignSegments').select().eq('SegmentId', id)
 
-  L407-412 → CampaignSegments JOIN → Campaigns WHERE SegmentId=id
-             Tabla CampaignSegments no existe en nuevo schema
-             Los segmentos van directamente por Campaigns.SegmentId
+  L407-412 → CampaignSegments JOIN — CONSERVAR esta lógica
+             CampaignSegments SÍ existe en el nuevo schema (tabla M:N formal)
+             Solo migrar de pool.request() a Supabase nativo
 
   L433-436 → JobOffers WITH (READPAST) → eliminar hint
 
   L494 → INSERT INTO Segments (...UserId omitido en duplicate...) → añadir UserId
 ```
-
-**Nota crítica:** `CampaignSegments` es una tabla intermedia que **no existe en el nuevo schema**. El nuevo schema usa `Campaigns.SegmentId` (FK directa a un segmento). Si la lógica multi-segmento es necesaria, hay que decidir si `CampaignSegments` se añade al nuevo schema o si se limita a un segmento por campaña.
 
 ---
 
@@ -131,7 +131,7 @@ segments.js — REESCRITURA COMPLETA (toda la ruta usa pool.request())
 | Uso actual | Columna/tabla actual | En nuevo schema | ¿Roto? |
 |---|---|---|---|
 | Canales de la campaña | `Campaigns.Channels` (JSON TEXT) | No existe — `CampaignChannels` tabla | **✘ Roto** — columna eliminada |
-| Segmentos múltiples | `CampaignSegments` tabla | No existe en nuevo schema | **✘ Roto** — tabla eliminada |
+| Segmentos múltiples | `CampaignSegments` tabla | `CampaignSegments` existe — misma estructura | ✅ Compatible — solo migrar a Supabase nativo |
 | DistributionType | `Campaigns.DistributionType` | No está en nuevo schema | **✘ Roto** — columna no incluida |
 | BidStrategy, ManualBid, Priority, AutoOptimization | En Campaigns hoy | No están en nuevo Campaigns | **✘ Roto** — movidos a CampaignChannels |
 | MaxCPA, TargetApplications | En Campaigns | No están en nuevo Campaigns | **✘ Roto** — omitidos |
@@ -147,11 +147,11 @@ campaigns.js — REESCRITURA PARCIAL (adaptar contratos y lógica de negocio)
   L3  → Migrar a Supabase nativo (eliminar pool, poolConnect, sql)
 
   L22-85 (GET /) →
-    - Eliminar JOIN Segments s ON c.SegmentId = s.Id (Segments.OfferCount ya no existe)
-    - Eliminar JOIN CampaignSegments (tabla eliminada)
-    - Calcular SegmentOffers via COUNT de JobOffers con FilterDefinition del segmento
+    - Eliminar JOIN Segments ON c.SegmentId (Campaigns ya no tiene SegmentId)
+    - Conservar lógica de CampaignSegments — ahora viene de JOIN CampaignSegments cs ON cs.CampaignId = c.Id
+    - Calcular SegmentOffers via COUNT de JobOffers con FilterDefinition del segmento (Segments.OfferCount eliminado)
     - Channels: leer de CampaignChannels JOIN DistributionChannels en vez de JSON
-    - Devolver Channels como array de objetos {id, code, name} no como strings
+    - Aplicar shim: devolver Channels:["jooble"] + Budget:<BudgetTotal> para compat frontend (Sección 10)
 
   L88-258 (POST /) →
     - Campaigns nuevo tiene: Name, Description, BudgetTotal, BudgetCurrency,
@@ -195,7 +195,7 @@ campaigns.js — REESCRITURA PARCIAL (adaptar contratos y lógica de negocio)
 | PK de oferta | `JobOffers.Id` | `JobOffers.Id` | ✅ Compatible |
 | Insertar en CampaignChannels | `OfferId, ChannelId, AllocatedBudget, AllocatedTarget, CurrentCPA, BidAmount, QualityScore, ConversionRate, Status, AutoOptimization` | Solo: `CampaignId, ChannelId, Budget, BidStrategy, Status, Config` | **✘ Roto** — schema completamente diferente |
 | JOIN CampaignChannels→JobOffers | `cc.OfferId = jo.Id` | No existe OfferId en CampaignChannels | **✘ Roto** |
-| `CampaignSegments` | tabla intermedia | No existe | **✘ Roto** |
+| `CampaignSegments` | tabla intermedia M:N | Existe — misma estructura | ✅ Compatible — solo migrar a Supabase nativo |
 | Leer Segments.Filters | vía Segments query | Filters → FilterDefinition | **✘ Roto** |
 
 ### Cambios necesarios
@@ -338,35 +338,52 @@ Si la tabla no existe, el CREATE en el SQL propuesto la crea desde cero. Si exis
 
 ## 9. Orden recomendado: ¿código primero o schema primero?
 
-**Recomendación: código primero.**
+**El schema y el código no se despliegan de forma aislada. Se coordinan en una ventana de mantenimiento controlada.**
 
-### Por qué código primero
-
-1. El nuevo schema rompe funcionalidad activa. Si se ejecuta el SQL sin código adaptado, el backend falla inmediatamente para los usuarios.
-2. Los cambios de código pueden estar listos y probados en local con el schema actual (usando el schema anterior como red de seguridad).
-3. Una vez que el código esté listo y el SQL aprobado, se ejecutan juntos en una ventana de mantenimiento.
-4. Permite hacer code review del nuevo código antes de comprometer el schema.
-
-### Secuencia propuesta
+### Secuencia aprobada
 
 ```
-Semana actual (análisis)
-  [x] Este documento — análisis completo
+PASO 1 — Preparar código en branch (antes de tocar producción)
+  [ ] Crear branch: feat/clean-domain-migration
+  [ ] Migrar segments.js a Supabase nativo:
+        Filters → FilterDefinition, OfferCount eliminado, CampaignSegments conservado
+  [ ] Migrar campaigns.js a Supabase nativo:
+        Channels JSON → CampaignChannels JOIN, CampaignSegments M:N, shims activos
+  [ ] Migrar campaignDistributionService.js:
+        StatusId → Status, CampaignChannels sin OfferId, DistributionItems para per-offer
+  [ ] Ajustar jobOffers.js:
+        StatusId → Status en filtros y mapOffer, OfferId → Id en promo filter
+  [ ] Revisar que todos los shims estén implementados (Channels, Budget, segments)
+  [ ] Code review del branch — no mergear hasta que el SQL esté aprobado
 
-Semana próxima (código)
-  [ ] Migrar segments.js a Supabase nativo (todo pool.request() eliminado)
-  [ ] Migrar campaigns.js a Supabase nativo (columnas nuevas, CampaignChannels)
-  [ ] Migrar campaignDistributionService.js (StatusId → Status, OfferId → Id)
-  [ ] jobOffers.js ya migrado — solo ajustes menores (StatusId → Status, OfferId → Id en promo filter)
-  [ ] Decidir CampaignSegments: ¿un segmento por campaña o mantener tabla?
+PASO 2 — Revisar y aprobar SQL final
+  [ ] Revisar proposed-clean-domain-schema.sql con Codex
+  [ ] Confirmar counts actuales en Supabase (Users=15, Connections=89, etc.)
+  [ ] Confirmar JobOffers COUNT = 0 (prerequisito del DROP)
+  [ ] Backup manual de Users, Connections, Campaigns, Segments desde Supabase dashboard
+  [ ] Aprobar SQL explícitamente antes de continuar
 
-Ventana de migración (schema + código juntos)
-  [ ] Verificar backup de Users, Connections, Campaigns, Segments
-  [ ] Ejecutar proposed-clean-domain-schema.sql por fases
-  [ ] Verificar counts post-migración
-  [ ] Deploy del código nuevo
-  [ ] Smoke tests: login, GET /job-offers, GET /api/segments, GET /api/campaigns
+PASO 3 — Ventana de migración (schema + deploy en secuencia inmediata)
+  [ ] Ejecutar proposed-clean-domain-schema.sql fase por fase en Supabase SQL Editor
+  [ ] Verificar counts post-migración:
+        Users=15, Connections=89, JobOffers=0, Segments=0, Campaigns=0
+        DistributionChannels=7, Segments_bak=17, Campaigns_bak=15
+  [ ] Ejecutar NOTIFY pgrst, 'reload schema'
+  [ ] Desplegar el código del branch inmediatamente (no dejar ventana sin código compatible)
+
+PASO 4 — Smoke tests post-deploy
+  [ ] POST /api/auth/login → 200
+  [ ] GET /api/auth/verify → 200
+  [ ] GET /job-offers → 200, total: 0, sin 500
+  [ ] GET /api/segments → 200, array vacío (segmentos archivados, no migrados)
+  [ ] GET /api/campaigns → 200, array vacío (campañas archivadas, no migradas)
+  [ ] POST /api/segments (crear uno nuevo) → 201
+  [ ] POST /api/campaigns (crear una nueva) → 201
 ```
+
+### Principio
+
+Schema y código son un cambio atómico desde la perspectiva del sistema. Si se ejecuta el SQL sin el código nuevo, el backend falla para todos los usuarios activos. Si se despliega el código sin el SQL, nada funciona tampoco. La ventana de mantenimiento garantiza que ambos cambios ocurran en secuencia inmediata y controlada.
 
 ---
 
