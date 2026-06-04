@@ -594,7 +594,12 @@ router.post("/:id/import", addUserIdToRequest, requireAuth, onlyOwnData('UserId'
                 .eq('ProcessingStatus', 'processed')
               const activeExternalIds = new Set((processedRecs || []).map(r => r.ExternalId).filter(Boolean))
 
-              await importer._reconcileMissingOffers(activeExternalIds)
+              // Reconciliation is best-effort — a timeout here must NOT break the import status
+              try {
+                await importer._reconcileMissingOffers(activeExternalIds)
+              } catch (reconcileErr) {
+                console.error(`⚠️ Reconciliation failed for conn ${id} (non-fatal): ${reconcileErr.message}`)
+              }
 
               // Count canonical JobOffers via JobOfferSources (per-connection)
               const sourcesRes = await supabase

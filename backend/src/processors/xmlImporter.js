@@ -609,24 +609,35 @@ class XMLImporter {
       }
     };
 
-    // Helper: update canonical JobOffer only if no remaining active source
+    // Helper: update canonical JobOffers that have NO remaining active source.
+    // Uses a single "fetch all still-active sources" query instead of N queries.
     const updateCanonicalIfNoActiveSources = async (entries, canonicalPatch) => {
       const jobOfferIds = [...new Set(entries.map(e => e.jobOfferId))];
-      for (const jid of jobOfferIds) {
-        const { count } = await supabase
-          .from('JobOfferSources')
-          .select('Id', { count: 'exact', head: true })
-          .eq('JobOfferId', jid)
-          .eq('StatusInSource', 'active');
-        if ((count ?? 0) === 0) {
-          await supabase.from('JobOffers')
-            .update({ ...canonicalPatch, UpdatedAt: missingSince })
-            .eq('Id', jid)
-            .catch(() =>
-              supabase.from('JobOffers').update({ Status: canonicalPatch.Status, UpdatedAt: missingSince }).eq('Id', jid)
-            );
-        }
+      if (jobOfferIds.length === 0) return;
+
+      // Single query: which of these JobOfferIds still have at least one active source?
+      const { data: stillActive } = await supabase
+        .from('JobOfferSources')
+        .select('JobOfferId')
+        .in('JobOfferId', jobOfferIds)
+        .eq('StatusInSource', 'active');
+
+      const activeSet = new Set((stillActive || []).map(r => r.JobOfferId));
+      const noActiveSources = jobOfferIds.filter(id => !activeSet.has(id));
+
+      if (noActiveSources.length === 0) return;
+
+      // Batch update canonical offers with no remaining active source
+      for (let i = 0; i < noActiveSources.length; i += BATCH) {
+        const slice = noActiveSources.slice(i, i + BATCH);
+        await supabase.from('JobOffers')
+          .update({ ...canonicalPatch, UpdatedAt: missingSince })
+          .in('Id', slice)
+          .catch(() =>
+            supabase.from('JobOffers').update({ Status: canonicalPatch.Status, UpdatedAt: missingSince }).in('Id', slice)
+          );
       }
+      console.log(`📝 Updated ${noActiveSources.length} canonical offers (no active sources remaining)`);
     };
 
     if (toPauseFuture.length > 0) {
