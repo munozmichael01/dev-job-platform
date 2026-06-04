@@ -187,17 +187,26 @@ export default function ConexionesPage() {
     const buildAndStartQueue = async () => {
       const results = await Promise.all(
         xmlConns.map(async conn => {
+          const connLastSync = conn.lastSync ?? conn.LastSync ?? null
+          const connStatus   = (conn.status || conn.Status || '').toLowerCase()
           try {
             const s = await api.getImportStatus(conn.id)
-            return { id: conn.id, pending: s?.pendingRecords ?? 0, lastSync: conn.lastSync ?? conn.LastSync ?? '0' }
+            return {
+              id:        conn.id,
+              pending:   s?.pendingRecords ?? 0,
+              lastSync:  connLastSync,
+              // Auto-queue new connections (never synced or explicitly pending)
+              isNew:     !connLastSync || connStatus === 'pending',
+            }
           } catch {
-            return { id: conn.id, pending: 0, lastSync: '0' }
+            return { id: conn.id, pending: 0, lastSync: connLastSync, isNew: !connLastSync || connStatus === 'pending' }
           }
         })
       )
 
       const toQueue = results
-        .filter(r => r.pending > 0)
+        // Include if: has pending records (interrupted) OR is a new connection (never synced)
+        .filter(r => r.pending > 0 || r.isNew)
         .filter(r => !queueRef.current.includes(r.id) && activeRef.current !== r.id)
         .sort((a, b) => {
           const tA = a.lastSync ? new Date(a.lastSync).getTime() : 0
@@ -217,9 +226,16 @@ export default function ConexionesPage() {
         return next
       })
 
+      const newConns     = results.filter(r => toQueue.includes(r.id) && r.isNew && r.pending === 0).length
+      const resumeConns  = toQueue.length - newConns
+      const title = newConns > 0 && resumeConns === 0
+        ? `Iniciando ${newConns} importación${newConns > 1 ? 'es' : ''} nueva${newConns > 1 ? 's' : ''}`
+        : resumeConns > 0 && newConns === 0
+          ? `Reanudando ${resumeConns} importación${resumeConns > 1 ? 'es' : ''} pendiente${resumeConns > 1 ? 's' : ''}`
+          : `${toQueue.length} importaciones en cola`
       toast({
-        title: `${toQueue.length} importación${toQueue.length > 1 ? 'es' : ''} pendiente${toQueue.length > 1 ? 's' : ''}`,
-        description: 'Reanudando automáticamente. Si sales, se reanuda al volver.',
+        title,
+        description: 'Procesando automáticamente. Si sales, se reanudará al volver.',
       })
 
       // Call via ref — always uses the latest processQueueFn
