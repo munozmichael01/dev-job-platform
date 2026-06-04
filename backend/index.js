@@ -154,7 +154,7 @@ app.use('/api/metrics', metricsRouter);
 app.use('/api/offers', offersRouter);
 app.use('/', jobOffersRouter);
 app.use('/api/import', importOffersRouter);
-app.use('/api/import', importSchedulerRouter);
+app.use('/api/scheduled', importSchedulerRouter);  // separate path — no JWT middleware from importOffersRouter
 
 // Router para control de límites internos
 const internalLimitsRouter = require('./src/routes/internalLimits');

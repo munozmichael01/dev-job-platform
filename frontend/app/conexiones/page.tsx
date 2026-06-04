@@ -562,13 +562,14 @@ export default function ConexionesPage() {
       setImportProgress(prev => ({ ...prev, [connectionId]: { processed: 0, total: 0 } }))
 
       try {
-        // Kick off first batch — server handles the rest on subsequent calls
+        // Kick off ONE batch — server (run-scheduled cron) handles the rest.
+        // The browser is an OBSERVER, not a worker.
         await apiRef.current.startImportBatch(connectionId)
-        console.log(`🚀 [conn ${connectionId}] first batch started, switching to polling`)
+        console.log(`🚀 [conn ${connectionId}] import started, observing via polling`)
 
-        // Poll /import/status until complete or error
+        // Poll /import/status every 5s — display progress, never trigger more work
         const POLL_INTERVAL = 5000
-        const MAX_POLLS = 360 // 30 min max polling (360 × 5s)
+        const MAX_POLLS = 360 // 30 min observation window (360 × 5s)
         let polls = 0
 
         while (polls < MAX_POLLS) {
@@ -578,9 +579,9 @@ export default function ConexionesPage() {
           const status = await apiRef.current.getImportStatus(connectionId)
           if (!status) break
 
-          const processed = status.importedOffers ?? status.processedRecords ?? 0
-          const total     = status.totalRecords ?? processed
-          const hasMore   = status.hasMore ?? (status.pendingRecords > 0)
+          const processed  = status.importedOffers ?? status.processedRecords ?? 0
+          const total      = status.totalRecords ?? processed
+          const hasMore    = status.hasMore ?? (status.pendingRecords > 0)
           const connStatus = status.connectionStatus
 
           setImportProgress(prev => ({
@@ -588,8 +589,8 @@ export default function ConexionesPage() {
             [connectionId]: { processed, total }
           }))
 
+          // Stop observing when server marks the connection complete
           if (connStatus === 'active' || !hasMore) {
-            // Complete
             console.log(`✅ [conn ${connectionId}] complete — ${processed} offers`)
             break
           }
@@ -597,18 +598,20 @@ export default function ConexionesPage() {
             throw new Error(`La conexión entró en estado error durante el import`)
           }
 
-          // If server still has pending work, kick the next batch
-          // (covers cases where the cron hasn't run yet and user is watching)
-          if (hasMore && connStatus === 'importing') {
-            try { await apiRef.current.startImportBatch(connectionId) } catch { /* server handles */ }
-          }
+          // NOTE: we do NOT call startImportBatch here.
+          // If hasMore=true and the user is watching, the cron will pick it up.
+          // The import does NOT depend on this polling loop to continue.
         }
 
-        setImportStatus(prev => ({ ...prev, [connectionId]: 'complete' }))
+        // Show informative toast based on final state
         const finalStatus = await apiRef.current.getImportStatus(connectionId)
+        const finalHasMore = finalStatus?.hasMore ?? (finalStatus?.pendingRecords > 0)
+        setImportStatus(prev => ({ ...prev, [connectionId]: finalHasMore ? 'queued' : 'complete' }))
         toastRef.current({
-          title: 'Importación completada',
-          description: `${(finalStatus?.importedOffers ?? 0).toLocaleString()} ofertas importadas`,
+          title: finalHasMore ? 'Importación en curso' : 'Importación completada',
+          description: finalHasMore
+            ? `${(finalStatus?.importedOffers ?? 0).toLocaleString()} ofertas procesadas. El sistema continuará en la próxima ejecución programada.`
+            : `${(finalStatus?.importedOffers ?? 0).toLocaleString()} ofertas importadas correctamente`,
         })
 
       } catch (err) {
