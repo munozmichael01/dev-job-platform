@@ -425,23 +425,39 @@ router.post("/:id/import", addUserIdToRequest, requireAuth, onlyOwnData('UserId'
       .single();
 
     if (!statusError && statusCheck && statusCheck.status === 'importing') {
-      const lastSyncDate = statusCheck.lastSync ? new Date(statusCheck.lastSync) : null;
-      const ageMs = lastSyncDate ? Date.now() - lastSyncDate.getTime() : Infinity;
-      const isStale = ageMs > IMPORT_LOCK_TTL_MS;
+      // Check pending records BEFORE evaluating the lock.
+      // If there are pending records, this is the SAME import job continuing in a new batch call —
+      // the batched two-phase model calls this endpoint multiple times per import.
+      // The lock should only block a DIFFERENT, concurrent import attempt.
+      const { count: pendingNow } = await supabase
+        .from('RawJobRecords')
+        .select('Id', { count: 'exact', head: true })
+        .eq('ConnectionId', id)
+        .eq('ProcessingStatus', 'pending');
 
-      if (!isStale) {
-        console.log(`⚠️ Importación ya en progreso para conexión ${id} (lock activo, ${Math.round(ageMs/1000)}s ago)`)
-        return res.status(409).json({
-          success: false,
-          error: "Importación ya en progreso",
-          message: "Esta conexión ya se está procesando. Espera a que termine o reintenta en 10 minutos.",
-          lockAgeSeconds: Math.round(ageMs / 1000)
-        })
+      if ((pendingNow || 0) > 0) {
+        // Active import in progress with pending work — allow this batch to proceed
+        console.log(`✅ Import en progreso para conexión ${id} — ${pendingNow} pendientes, procesando siguiente batch`)
+      } else {
+        // No pending work: evaluate stale lock
+        const lastSyncDate = statusCheck.lastSync ? new Date(statusCheck.lastSync) : null;
+        const ageMs = lastSyncDate ? Date.now() - lastSyncDate.getTime() : Infinity;
+        const isStale = ageMs > IMPORT_LOCK_TTL_MS;
+
+        if (!isStale) {
+          console.log(`⚠️ Importación ya en progreso para conexión ${id} (lock activo, ${Math.round(ageMs/1000)}s ago)`)
+          return res.status(409).json({
+            success: false,
+            error: "Importación ya en progreso",
+            message: "Esta conexión ya se está procesando. Espera a que termine o reintenta en 10 minutos.",
+            lockAgeSeconds: Math.round(ageMs / 1000)
+          })
+        }
+
+        // Stale lock with no pending work: auto-reset and allow fresh import
+        console.log(`⚠️ Lock caducado para conexión ${id} (${Math.round(ageMs/60000)} min, sin pendientes) — reseteando`)
+        await supabase.from('Connections').update({ status: 'error' }).eq('id', id)
       }
-
-      // Stale lock: auto-reset and allow retry
-      console.log(`⚠️ Lock de importación caducado para conexión ${id} (${Math.round(ageMs/60000)} min) — reseteando a error`)
-      await supabase.from('Connections').update({ status: 'error' }).eq('id', id)
     }
 
     // Obtener la conexión con Supabase
