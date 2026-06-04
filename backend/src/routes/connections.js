@@ -502,18 +502,19 @@ router.post("/:id/import", addUserIdToRequest, requireAuth, onlyOwnData('UserId'
         //
         // UI contract preserved: response always includes result.{imported, errors, hasMore, nextOffset}
 
-        const XMLImporter = require("../processors/xmlImporter")
-        const userId      = connection.UserId || connection.userId
-        const connId      = parseInt(id)
-        const BATCH_SIZE  = parseInt(req.query.batchSize) || 200
-        const sourceSystem = `conn-${id}`
+        const XMLImporter  = require("../processors/xmlImporter")
+        const userId       = connection.UserId || connection.userId
+        const connId       = parseInt(id)
+        const BATCH_SIZE   = parseInt(req.query.batchSize) || 200
+        // Infer canonical sourceSystem from feed URL (same offer from two connections → same sourceSystem)
+        const sourceSystem = XMLImporter.inferSourceSystem(connectionUrl)
 
-        // Check for pending records from a previous buffer pass
+        // Check for PENDING records only (failed are non-blocking, do not trigger Phase 2)
         const { count: pendingCount } = await supabase
           .from('RawJobRecords')
           .select('Id', { count: 'exact', head: true })
           .eq('ConnectionId', connId)
-          .in('ProcessingStatus', ['pending', 'failed'])
+          .eq('ProcessingStatus', 'pending')
 
         await supabase.from('Connections').update({
           status:   'importing',
@@ -559,7 +560,8 @@ router.post("/:id/import", addUserIdToRequest, requireAuth, onlyOwnData('UserId'
               userId, connectionId: connId, sourceSystem, batchSize: BATCH_SIZE
             })
 
-            const isComplete = batchResult.remaining === 0
+            // isComplete when NO more pending records (failed records are non-blocking)
+            const isComplete = (batchResult.pendingOnly ?? batchResult.remaining ?? 0) === 0
 
             if (isComplete) {
               // Final batch: run reconciliation then mark complete
@@ -578,42 +580,52 @@ router.post("/:id/import", addUserIdToRequest, requireAuth, onlyOwnData('UserId'
 
               await importer._reconcileMissingOffers(activeExternalIds)
 
-              // Count total JobOffers for this connection
-              const { count: totalOffers } = await supabase
-                .from('JobOffers')
+              // Count canonical JobOffers via JobOfferSources (per-connection)
+              const sourcesRes = await supabase
+                .from('JobOfferSources')
                 .select('Id', { count: 'exact', head: true })
-                .eq('ConnectionId', connId)
+                .eq('ConnectionId', connId).eq('StatusInSource', 'active')
+              const linkedOffers = sourcesRes.error
+                ? (await supabase.from('RawJobRecords').select('Id', { count: 'exact', head: true }).eq('ConnectionId', connId).eq('ProcessingStatus', 'processed')).count || 0
+                : sourcesRes.count || 0
 
               await supabase.from('Connections').update({
                 status:         'active',
                 lastSync:       new Date().toISOString(),
-                importedOffers: totalOffers || 0,
-                errorCount:     batchResult.failed,
+                importedOffers: linkedOffers,
+                errorCount:     batchResult.failedTotal || 0,
               }).eq('id', id)
 
               return res.json({
-                success:  true,
-                message:  `Importación completa: ${totalOffers} ofertas activas`,
-                phase:    'complete',
+                success:       true,
+                message:       `Importación completa: ${linkedOffers} ofertas canónicas activas`,
+                phase:         'complete',
+                hasMore:       false,
+                remaining:     0,
+                pendingRecords: 0,
+                failedRecords:  batchResult.failedTotal || 0,
+                processed:     linkedOffers,
+                total:         linkedOffers,
                 result: {
                   imported:   batchResult.processed,
-                  errors:     batchResult.failed,
+                  errors:     batchResult.failedTotal || 0,
                   hasMore:    false,
-                  nextOffset: 0,
-                  total:      totalOffers || 0,
+                  remaining:  0,
+                  total:      linkedOffers,
                 },
-                stats:    { ...batchResult, reconciled: true },
+                stats: { ...batchResult, reconciled: true },
               })
 
             } else {
-              // More batches needed — include cumulative totals for progress display
+              // More batches needed — pending only drives hasMore (failed are non-blocking)
               const { count: processedSoFar } = await supabase
                 .from('RawJobRecords')
                 .select('Id', { count: 'exact', head: true })
                 .eq('ConnectionId', connId)
                 .eq('ProcessingStatus', 'processed')
-              const totalBuffered = (processedSoFar || 0) + batchResult.remaining
-              const processedTotal = processedSoFar || 0
+              const pendingRemaining = batchResult.pendingOnly ?? batchResult.remaining ?? 0
+              const totalBuffered    = (processedSoFar || 0) + pendingRemaining + (batchResult.failedTotal || 0)
+              const processedTotal   = processedSoFar || 0
 
               await supabase.from('Connections').update({
                 lastSync:       new Date().toISOString(),
@@ -621,18 +633,20 @@ router.post("/:id/import", addUserIdToRequest, requireAuth, onlyOwnData('UserId'
               }).eq('id', id)
 
               return res.json({
-                success:   true,
-                message:   `Procesando: ${processedTotal} de ${totalBuffered} ofertas`,
-                phase:     'process',
-                hasMore:   true,
-                remaining: batchResult.remaining,
-                processed: processedTotal,
-                total:     totalBuffered,
+                success:        true,
+                message:        `Procesando: ${processedTotal} de ~${totalBuffered} ofertas`,
+                phase:          'process',
+                hasMore:        pendingRemaining > 0,  // failed do NOT keep hasMore true
+                remaining:      pendingRemaining,
+                pendingRecords: pendingRemaining,
+                failedRecords:  batchResult.failedTotal || 0,
+                processed:      processedTotal,
+                total:          totalBuffered,
                 result: {
                   imported:  batchResult.processed,
-                  errors:    batchResult.failed,
-                  hasMore:   true,
-                  remaining: batchResult.remaining,
+                  errors:    batchResult.failedTotal || 0,
+                  hasMore:   pendingRemaining > 0,
+                  remaining: pendingRemaining,
                   processed: processedTotal,
                   total:     totalBuffered,
                 },
@@ -737,26 +751,42 @@ router.post("/:id/import", addUserIdToRequest, requireAuth, onlyOwnData('UserId'
 router.get("/:id/import/status", addUserToRequest, requireAuth, async (req, res) => {
   const { id } = req.params
   try {
-    const [connRes, pendingRes, processedRes, offersRes] = await Promise.all([
+    const [connRes, pendingRes, failedRes, processedRes, sourcesRes] = await Promise.all([
       supabase.from('Connections').select('status, importedOffers, lastSync, errorCount').eq('id', id).single(),
-      supabase.from('RawJobRecords').select('Id', { count: 'exact', head: true }).eq('ConnectionId', id).in('ProcessingStatus', ['pending', 'failed']),
-      supabase.from('RawJobRecords').select('Id', { count: 'exact', head: true }).eq('ConnectionId', id).eq('ProcessingStatus', 'processed'),
-      supabase.from('JobOffers').select('Id', { count: 'exact', head: true }).eq('ConnectionId', id),
+      // Pending only (hasMore = pendingRecords > 0 — failed records are non-blocking)
+      supabase.from('RawJobRecords').select('Id', { count: 'exact', head: true })
+        .eq('ConnectionId', id).eq('ProcessingStatus', 'pending'),
+      // Failed separately — informational, does not block import
+      supabase.from('RawJobRecords').select('Id', { count: 'exact', head: true })
+        .eq('ConnectionId', id).eq('ProcessingStatus', 'failed'),
+      supabase.from('RawJobRecords').select('Id', { count: 'exact', head: true })
+        .eq('ConnectionId', id).eq('ProcessingStatus', 'processed'),
+      // importedOffers = active JobOfferSources for this connection (canonical count per source)
+      // Falls back to 0 if JobOfferSources table doesn't exist yet (pre-migration)
+      supabase.from('JobOfferSources').select('Id', { count: 'exact', head: true })
+        .eq('ConnectionId', id).eq('StatusInSource', 'active'),
     ])
-    const conn = connRes.data
-    const pending   = pendingRes.count || 0
+    const conn      = connRes.data
+    const pending   = pendingRes.count  || 0
+    const failed    = failedRes.count   || 0
     const processed = processedRes.count || 0
+    // If JobOfferSources doesn't exist yet, fall back to connection.importedOffers
+    const linkedOffers = sourcesRes.error ? (conn?.importedOffers || 0) : (sourcesRes.count || 0)
+
     res.json({
       success:          true,
       connectionId:     parseInt(id),
       connectionStatus: conn?.status,
+      // Pending — drives hasMore; does NOT include failed (non-blocking)
       pendingRecords:   pending,
+      failedRecords:    failed,
       processedRecords: processed,
-      totalRecords:     pending + processed,
-      jobOffers:        offersRes.count || 0,
-      importedOffers:   conn?.importedOffers || 0,
+      totalRecords:     pending + failed + processed,
+      // importedOffers = active sources for this connection (canonical count)
+      importedOffers:   linkedOffers,
       lastSync:         conn?.lastSync,
       isImporting:      conn?.status === 'importing',
+      // hasMore = pendingRecords > 0 only; failed records do not keep the queue alive
       hasMore:          pending > 0,
     })
   } catch (error) {

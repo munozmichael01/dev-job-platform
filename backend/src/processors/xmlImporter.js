@@ -1,35 +1,32 @@
 /**
- * XMLImporter — Clean MVP
+ * XMLImporter — Canonical deduplication model
  *
- * Supports two entry points:
- *   importer.run()                  — fetch XML from connection feed URL
- *   XMLImporter.runFromBuffer(xml, opts) — process XML string (file upload, test)
+ * Three-table ingestion pipeline:
+ *   RawJobRecords  — immutable raw payload, one row per (ConnectionId, ExternalId)
+ *   JobOffers      — canonical offer, one row per (UserId, SourceSystem, ExternalId)
+ *   JobOfferSources — M:N link: one canonical offer → many (connection, externalId) sources
  *
- * Pipeline:
- *   XML string → parse → per offer:
- *     1. RawJobRecords upsert (raw payload + hash)
- *     2. Transform to canonical JobOffer
- *     3. JobOffers upsert (UserId + ConnectionId + ExternalId)
- *     4. Link RawJobRecord.JobOfferId
- *   After all offers:
- *     5. _reconcileMissingOffers (paused or archived based on ExpirationDate)
+ * Deduplication contract:
+ *   Two connections sending the same ExternalId from the same SourceSystem
+ *   → ONE canonical JobOffer row (deduplicated)
+ *   → TWO JobOfferSources rows (one per connection)
  *
- * Status semantics for externally-imported offers:
- *   'active'   — offer is present in the current feed import
- *   'paused'   — offer disappeared from feed but ExpirationDate is in the future (or absent)
- *   'archived' — offer disappeared from feed AND ExpirationDate is past
- *   'expired'  — alias for archived when reason is expiration
+ * Reconciliation rule:
+ *   JobOfferSources.StatusInSource tracks per-connection availability.
+ *   JobOffers.Status is only changed to paused/archived when ALL linked sources
+ *   are no longer active. A canonical offer survives if any source still sends it.
  *
- * NOTE: JobOffers.Status tracks the canonical offer's availability.
- *       DistributionItems.Status tracks distribution/publication state per channel.
- *       These are independent — do not conflate them.
+ * Entry points:
+ *   XMLImporter.run()              — fetch from feed URL, full pipeline
+ *   XMLImporter.runFromBuffer()    — process XML string (file upload / test)
+ *   XMLImporter.fetchToBuffer()    — Phase 1: fetch XML → save all to RawJobRecords
+ *   XMLImporter.processBatch()     — Phase 2+: transform pending RawJobRecords → JobOffers
  *
  * Rules:
- *   - No pool.request() — Supabase client only
- *   - No LLM in import path — deterministic mapping first, IA only as future assist
- *   - ExternalId is NEVER the internal PK
- *   - Optional reconciliation columns: LastSeenAt, MissingSince, PauseReason, ArchivedReason
- *     (code writes them if present; no error if columns don't exist yet)
+ *   - No pool.request() — Supabase only
+ *   - No LLM — deterministic mapping
+ *   - ExternalId is never the internal PK
+ *   - Truncation aligned with VARCHAR(255) columns in schema
  */
 
 const axios  = require('axios');
@@ -37,8 +34,30 @@ const xml2js = require('xml2js');
 const crypto = require('crypto');
 const { supabase } = require('../db/db');
 
+// ─── Source system inference ──────────────────────────────────────────────────
+// Canonical SourceSystem is derived from the feed URL hostname, not the
+// connection name. This ensures the same provider is always identified the same
+// way regardless of how the connection is named.
+
+function inferSourceSystem(feedUrl) {
+  try {
+    const host = new URL(feedUrl).hostname.toLowerCase().replace(/^www\./, '');
+    if (host.includes('turijobs')) return 'turijobs';
+    if (host.includes('bebee'))    return 'bebee';
+    if (host.includes('infojobs')) return 'infojobs';
+    if (host.includes('linkedin')) return 'linkedin';
+    if (host.includes('indeed'))   return 'indeed';
+    if (host.includes('jooble'))   return 'jooble';
+    if (host.includes('talent'))   return 'talent';
+    // Fallback: use the second-level domain as identifier
+    const parts = host.split('.');
+    return parts.length >= 2 ? parts[parts.length - 2] : host;
+  } catch {
+    return 'xml-feed';
+  }
+}
+
 // ─── Auto-detection mapping: Turijobs / Bebee XML feed ───────────────────────
-// Extend or override per-connection via FieldMappings table.
 
 const TURIJOBS_AUTO_MAP = {
   'id':               'ExternalId',
@@ -112,12 +131,10 @@ function parseXml(xmlString) {
 function extractOfferList(parsed) {
   const rootKey = Object.keys(parsed)[0];
   const root    = parsed[rootKey];
-  // Try common feed structures
   for (const key of ['job', 'offer', 'item', 'listing', 'vacancy']) {
     const val = root?.[key];
     if (val) return Array.isArray(val) ? val : [val];
   }
-  // Depth 2 fallback
   if (root && typeof root === 'object') {
     for (const k of Object.keys(root)) {
       const v = root[k];
@@ -132,8 +149,6 @@ function extractOfferList(parsed) {
   }
   return [];
 }
-
-// ─── Load FieldMappings for a connection ──────────────────────────────────────
 
 async function loadFieldMappings(connectionId) {
   const { data, error } = await supabase
@@ -150,6 +165,13 @@ async function loadFieldMappings(connectionId) {
 }
 
 // ─── Transform raw XML offer → canonical JobOffer fields ─────────────────────
+// Truncation lengths aligned with current schema:
+//   VARCHAR(500)  → Title
+//   VARCHAR(255)  → most classification fields (now widened from 100)
+//   VARCHAR(100)  → Language, CountryCode (short codes)
+//   VARCHAR(20)   → Postcode
+//   VARCHAR(1024) → URLs
+//   TEXT          → descriptions (no limit)
 
 function transformOffer(rawOffer, fieldMap) {
   const effective = fieldMap || TURIJOBS_AUTO_MAP;
@@ -160,29 +182,36 @@ function transformOffer(rawOffer, fieldMap) {
     if (val != null) out[target] = val;
   }
 
-  // Type coercions
-  if (out.ExternalId != null)        out.ExternalId        = safeStr(out.ExternalId, 255);
-  if (out.Title != null)             out.Title             = safeStr(out.Title, 500);
+  if (out.ExternalId != null)        out.ExternalId    = safeStr(out.ExternalId, 255);
+  if (out.Title != null)             out.Title         = safeStr(out.Title, 500);
   if (out.DescriptionHtml != null) {
     out.DescriptionHtml = safeStr(out.DescriptionHtml);
     out.DescriptionText = out.DescriptionHtml
       ? out.DescriptionHtml.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim()
       : null;
   }
+
+  // VARCHAR(255) fields — schema widened from 100 to handle real feed values
   for (const f of ['CompanyName','CompanyExternalId','Sector','Subcategory','City','Region',
-                   'Country','Postcode','Address','JobType','ContractType','WorkdayType','Seniority','Language']) {
-    if (out[f] != null) out[f] = safeStr(out[f], f === 'Language' ? 10 : f === 'Postcode' ? 20 : 255);
+                   'Country','Address','JobType','ContractType','WorkdayType','Seniority']) {
+    if (out[f] != null) out[f] = safeStr(out[f], 255);
   }
+
+  // Short code fields — stay at their natural lengths
+  if (out.Language    != null) out.Language    = safeStr(out.Language, 10);
   if (out.CountryCode != null) out.CountryCode = safeStr(out.CountryCode, 10);
+  if (out.Postcode    != null) out.Postcode    = safeStr(out.Postcode, 20);
+
   for (const f of ['ExternalUrl','ApplicationUrl','CompanyLogoUrl']) {
     if (out[f] != null) out[f] = safeStr(out[f], 1024);
   }
-  if (out.SalaryRaw != null)    out.SalaryRaw    = safeStr(out.SalaryRaw, 500);
-  if (out.Latitude != null)     out.Latitude     = safeNum(out.Latitude);
-  if (out.Longitude != null)    out.Longitude    = safeNum(out.Longitude);
-  if (out.Vacancies != null)    out.Vacancies    = safeNum(out.Vacancies) ?? 1;
+
+  if (out.SalaryRaw  != null) out.SalaryRaw  = safeStr(out.SalaryRaw, 500);
+  if (out.Latitude   != null) out.Latitude   = safeNum(out.Latitude);
+  if (out.Longitude  != null) out.Longitude  = safeNum(out.Longitude);
+  if (out.Vacancies  != null) out.Vacancies  = safeNum(out.Vacancies) ?? 1;
   if (out.PublicationDate != null) out.PublicationDate = safeDate(out.PublicationDate);
-  if (out.ExpirationDate != null)  out.ExpirationDate  = safeDate(out.ExpirationDate);
+  if (out.ExpirationDate  != null) out.ExpirationDate  = safeDate(out.ExpirationDate);
 
   return out;
 }
@@ -190,12 +219,13 @@ function transformOffer(rawOffer, fieldMap) {
 // ─── XMLImporter class ────────────────────────────────────────────────────────
 
 class XMLImporter {
-  constructor({ userId, connectionId, feedUrl, sourceSystem = 'xml-feed' }) {
+  constructor({ userId, connectionId, feedUrl, sourceSystem = null }) {
     if (!userId || !connectionId) throw new Error('XMLImporter requires userId and connectionId');
     this.userId       = userId;
     this.connectionId = connectionId;
     this.feedUrl      = feedUrl || null;
-    this.sourceSystem = sourceSystem;
+    // sourceSystem is inferred from feedUrl if not provided
+    this.sourceSystem = sourceSystem || (feedUrl ? inferSourceSystem(feedUrl) : 'xml-feed');
     this.fieldMap     = null;
     this.stats = { total: 0, inserted: 0, updated: 0, failed: 0, paused: 0, archived: 0, warnings: [] };
   }
@@ -204,39 +234,34 @@ class XMLImporter {
 
   async run() {
     if (!this.feedUrl) throw new Error('XMLImporter.run() requires a feedUrl');
-    console.log(`🚀 XMLImporter.run(): connection ${this.connectionId}, user ${this.userId}`);
+    console.log(`🚀 XMLImporter.run(): conn ${this.connectionId}, user ${this.userId}, source=${this.sourceSystem}`);
     const xmlString = await this._fetchXml();
     return this._processXmlString(xmlString);
   }
 
-  // ── Entry point 2: process XML string directly (file upload, tests) ─────────
+  // ── Entry point 2: process XML string (file upload / test) ──────────────────
 
-  static async runFromBuffer(xmlString, { userId, connectionId, sourceSystem = 'xml-upload' }) {
-    const importer = new XMLImporter({ userId, connectionId, feedUrl: null, sourceSystem });
-    console.log(`🚀 XMLImporter.runFromBuffer(): connection ${connectionId}, user ${userId}`);
+  static async runFromBuffer(xmlString, { userId, connectionId, feedUrl = '', sourceSystem = null }) {
+    const ss = sourceSystem || (feedUrl ? inferSourceSystem(feedUrl) : 'xml-upload');
+    const importer = new XMLImporter({ userId, connectionId, feedUrl, sourceSystem: ss });
+    console.log(`🚀 XMLImporter.runFromBuffer(): conn ${connectionId}, source=${ss}`);
     return importer._processXmlString(xmlString);
   }
 
-  // ── Entry point 3: buffer XML feed into RawJobRecords only (Phase 1 of batched import)
-  //
-  // Fetches the XML feed, saves EVERY offer as a 'pending' RawJobRecord.
-  // Does NOT touch JobOffers. Returns total buffered count.
-  // Existing 'processed'/'failed' records are NOT reset — only truly new ones are added.
-  // Call processBatch() afterwards to transform them into JobOffers.
+  // ── Entry point 3: buffer — fetch XML → save all to RawJobRecords ───────────
 
-  static async fetchToBuffer(feedUrl, { userId, connectionId, sourceSystem = 'xml-feed' }) {
+  static async fetchToBuffer(feedUrl, { userId, connectionId }) {
+    const sourceSystem = inferSourceSystem(feedUrl);
     const importer = new XMLImporter({ userId, connectionId, feedUrl, sourceSystem });
-    console.log(`🚀 XMLImporter.fetchToBuffer(): connection ${connectionId}, user ${userId}`);
+    console.log(`🚀 XMLImporter.fetchToBuffer(): conn ${connectionId}, source=${sourceSystem}`);
 
-    importer.fieldMap = await loadFieldMappings(connectionId);
-    const xmlString  = await importer._fetchXml();
-    const parsed     = await parseXml(xmlString);
-    const offers     = extractOfferList(parsed);
-
+    importer.fieldMap  = await loadFieldMappings(connectionId);
+    const xmlString    = await importer._fetchXml();
+    const parsed       = await parseXml(xmlString);
+    const offers       = extractOfferList(parsed);
     console.log(`📦 Feed has ${offers.length} offers — buffering to RawJobRecords`);
 
     let buffered = 0;
-    let skipped  = 0; // already processed, left as-is
     const warnings = [];
 
     for (const rawOffer of offers) {
@@ -250,75 +275,57 @@ class XMLImporter {
         warnings.push(`No ExternalId, using hash: ${canonical.ExternalId}`);
       }
 
-      // Upsert: if already 'processed', leave it untouched (set ignoreDuplicates=false but
-      // only update non-processed records by checking conflict behaviour).
-      // Strategy: upsert with ProcessingStatus='pending' only when inserting new rows.
-      // For existing rows, update only if NOT already 'processed'.
       const { error } = await supabase
         .from('RawJobRecords')
         .upsert({
-          UserId:           userId,
-          ConnectionId:     connectionId,
-          ExternalId:       canonical.ExternalId,
-          RawFormat:        'xml',
-          RawPayload:       rawPayload,
-          PayloadHash:      payloadHash,
-          ReceivedAt:       now(),
-          ProcessingStatus: 'pending',
-        }, {
-          onConflict: 'ConnectionId,ExternalId',
-          // Overwrite previous failed/pending records; leave 'processed' ones by filtering below
-        });
+          UserId: userId, ConnectionId: connectionId, ExternalId: canonical.ExternalId,
+          RawFormat: 'xml', RawPayload: rawPayload, PayloadHash: payloadHash,
+          ReceivedAt: now(), ProcessingStatus: 'pending',
+        }, { onConflict: 'ConnectionId,ExternalId' });
 
-      if (error) {
-        warnings.push(`Buffer error ${canonical.ExternalId}: ${error.message}`);
-      } else {
-        buffered++;
-      }
+      if (error) { warnings.push(`Buffer error ${canonical.ExternalId}: ${error.message}`); }
+      else buffered++;
     }
 
-    // Count truly pending (may include previously failed)
     const { count: pendingCount } = await supabase
       .from('RawJobRecords')
       .select('Id', { count: 'exact', head: true })
       .eq('ConnectionId', connectionId)
       .in('ProcessingStatus', ['pending', 'failed']);
 
-    console.log(`✅ Buffer complete: ${buffered} upserted, ${pendingCount} pending for processing`);
-
-    return {
-      total:       offers.length,
-      buffered,
-      pendingCount: pendingCount || 0,
-      warnings,
-    };
+    console.log(`✅ Buffer: ${buffered} upserted, ${pendingCount ?? 0} pending`);
+    return { total: offers.length, buffered, pendingCount: pendingCount ?? 0, sourceSystem, warnings };
   }
 
-  // ── Entry point 4: process one batch from RawJobRecords buffer (Phase 2+ of batched import)
+  // ── Entry point 4: process one batch from RawJobRecords ─────────────────────
+  // Reads up to batchSize pending RawJobRecords for the connection,
+  // upserts to JobOffers (canonical dedup), upserts to JobOfferSources (per-source link),
+  // marks records processed.
   //
-  // Reads up to `batchSize` pending/failed RawJobRecords for the connection,
-  // transforms them into JobOffers (upsert), and marks them 'processed'.
-  // Does NOT run reconciliation — caller is responsible for that on the final batch.
-  //
-  // Returns:
-  //   { processed, failed, remaining, batchExternalIds (Set), warnings }
+  // Returns: { processed, failed, remaining, pendingOnly, batchExternalIds, warnings }
 
-  static async processBatch({ userId, connectionId, sourceSystem = 'xml-feed', batchSize = 200 }) {
-    console.log(`🔄 XMLImporter.processBatch(): connection ${connectionId}, batchSize=${batchSize}`);
+  static async processBatch({ userId, connectionId, feedUrl = '', sourceSystem = null, batchSize = 200 }) {
+    const ss = sourceSystem || (feedUrl ? inferSourceSystem(feedUrl) : 'xml-feed');
+    console.log(`🔄 XMLImporter.processBatch(): conn ${connectionId}, source=${ss}, batchSize=${batchSize}`);
 
     const fieldMap = await loadFieldMappings(connectionId);
 
-    // Fetch pending batch
+    // Fetch pending batch — failed records are NOT included (non-blocking)
     const { data: batch, error: fetchErr } = await supabase
       .from('RawJobRecords')
       .select('Id, ExternalId, RawPayload, PayloadHash')
       .eq('ConnectionId', connectionId)
-      .in('ProcessingStatus', ['pending', 'failed'])
+      .eq('ProcessingStatus', 'pending')
       .order('Id', { ascending: true })
       .limit(batchSize);
 
     if (fetchErr) throw new Error(`processBatch fetch: ${fetchErr.message}`);
-    if (!batch?.length) return { processed: 0, failed: 0, remaining: 0, batchExternalIds: new Set(), warnings: [] };
+    if (!batch?.length) {
+      const { count: remaining } = await supabase
+        .from('RawJobRecords').select('Id', { count: 'exact', head: true })
+        .eq('ConnectionId', connectionId).eq('ProcessingStatus', 'pending');
+      return { processed: 0, failed: 0, remaining: remaining ?? 0, pendingOnly: remaining ?? 0, batchExternalIds: new Set(), warnings: [] };
+    }
 
     const warnings = [];
     const batchExternalIds = new Set();
@@ -335,31 +342,45 @@ class XMLImporter {
         if (!canonical.Title) throw new Error('No Title after transform');
         if (!canonical.ExternalId) canonical.ExternalId = `hash:${record.PayloadHash?.substring(0,20)}`;
 
-        // Upsert to JobOffers
+        const nowTs = now();
+
+        // ── 1. Upsert to JobOffers — canonical dedup ─────────────────────────
+        // Conflict key: UserId + SourceSystem + ExternalId
+        // Two connections with the same offer → same canonical row, updated in place.
         const offerPayload = {
-          UserId:        userId,
-          ConnectionId:  connectionId,
-          RawJobRecordId: record.Id,
-          SourceSystem:  sourceSystem,
-          PayloadHash:   record.PayloadHash,
-          Status:        'active',
-          LastSeenAt:    now(),
-          UpdatedAt:     now(),
+          UserId: userId, ConnectionId: connectionId, // ConnectionId = first/primary connection (informational)
+          RawJobRecordId: record.Id, SourceSystem: ss,
+          PayloadHash: record.PayloadHash, Status: 'active', LastSeenAt: nowTs, UpdatedAt: nowTs,
           ...canonical,
         };
 
         const { data: upserted, error: upsertErr } = await supabase
           .from('JobOffers')
-          .upsert(offerPayload, { onConflict: 'UserId,ConnectionId,ExternalId' })
+          .upsert(offerPayload, { onConflict: 'UserId,SourceSystem,ExternalId' })
           .select('Id')
           .single();
 
         if (upsertErr) throw new Error(`JobOffers upsert: ${upsertErr.message}`);
+        const jobOfferId = upserted?.Id;
+        if (!jobOfferId) throw new Error('JobOffers upsert returned no Id');
 
-        // Link RawJobRecord → JobOffer + mark processed
+        // ── 2. Upsert to JobOfferSources — per-source link ────────────────────
+        // Conflict key: UserId + ConnectionId + ExternalId
+        // This row records that this connection/feed sent this offer.
+        const { error: srcErr } = await supabase
+          .from('JobOfferSources')
+          .upsert({
+            UserId: userId, JobOfferId: jobOfferId, ConnectionId: connectionId,
+            RawJobRecordId: record.Id, SourceSystem: ss, ExternalId: canonical.ExternalId,
+            PayloadHash: record.PayloadHash, StatusInSource: 'active', LastSeenAt: nowTs, UpdatedAt: nowTs,
+          }, { onConflict: 'UserId,ConnectionId,ExternalId' });
+
+        if (srcErr) throw new Error(`JobOfferSources upsert: ${srcErr.message}`);
+
+        // ── 3. Link RawJobRecord → JobOffer, mark processed ───────────────────
         await supabase
           .from('RawJobRecords')
-          .update({ JobOfferId: upserted?.Id, ProcessingStatus: 'processed' })
+          .update({ JobOfferId: jobOfferId, ProcessingStatus: 'processed' })
           .eq('Id', record.Id);
 
         batchExternalIds.add(canonical.ExternalId);
@@ -372,28 +393,35 @@ class XMLImporter {
         warnings.push(msg);
         await supabase
           .from('RawJobRecords')
-          .update({ ProcessingStatus: 'failed', ProcessingError: err.message })
+          .update({ ProcessingStatus: 'failed', ProcessingError: err.message.substring(0, 500) })
           .eq('Id', record.Id);
       }
     }
 
-    // Count remaining pending
-    const { count: remaining } = await supabase
-      .from('RawJobRecords')
-      .select('Id', { count: 'exact', head: true })
-      .eq('ConnectionId', connectionId)
-      .in('ProcessingStatus', ['pending', 'failed']);
+    // Count remaining PENDING only (failed are non-blocking)
+    const { count: pendingOnly } = await supabase
+      .from('RawJobRecords').select('Id', { count: 'exact', head: true })
+      .eq('ConnectionId', connectionId).eq('ProcessingStatus', 'pending');
+    const { count: failedTotal } = await supabase
+      .from('RawJobRecords').select('Id', { count: 'exact', head: true })
+      .eq('ConnectionId', connectionId).eq('ProcessingStatus', 'failed');
 
-    console.log(`✅ Batch done: ${processed} processed, ${failedCount} failed, ${remaining ?? 0} remaining`);
-
-    return { processed, failed: failedCount, remaining: remaining ?? 0, batchExternalIds, warnings };
+    console.log(`✅ Batch: ${processed} ok, ${failedCount} failed, ${pendingOnly ?? 0} pending remaining, ${failedTotal ?? 0} total failed`);
+    return {
+      processed, failed: failedCount,
+      remaining: pendingOnly ?? 0,   // hasMore = remaining > 0
+      pendingOnly: pendingOnly ?? 0,
+      failedTotal: failedTotal ?? 0,
+      batchExternalIds,
+      warnings,
+    };
   }
 
   // ── Core pipeline ────────────────────────────────────────────────────────────
 
   async _processXmlString(xmlString) {
     this.fieldMap = await loadFieldMappings(this.connectionId);
-    console.log(`📋 Field mapping: ${this.fieldMap ? 'FieldMappings table' : 'auto-detect (Turijobs/Bebee)'}`);
+    console.log(`📋 Field mapping: ${this.fieldMap ? 'FieldMappings table' : `auto-detect (${this.sourceSystem})`}`);
 
     const parsed = await parseXml(xmlString);
     const offers = extractOfferList(parsed);
@@ -419,16 +447,12 @@ class XMLImporter {
       }
     }
 
-    // Reconcile: pause or archive offers missing from this feed run
     if (activeExternalIds.size > 0) {
       await this._reconcileMissingOffers(activeExternalIds);
     }
 
-    // Update connection status
-    await supabase.from('Connections').update({
-      status:    'active',
-      lastSync:  now(),
-    }).eq('id', this.connectionId).catch(() => {});
+    await supabase.from('Connections').update({ status: 'active', lastSync: now() })
+      .eq('id', this.connectionId).catch(() => {});
 
     console.log(`✅ Import done: ${JSON.stringify(this.stats)}`);
     return this.stats;
@@ -443,25 +467,22 @@ class XMLImporter {
     return response.data;
   }
 
-  // ── Process a single offer ────────────────────────────────────────────────
-
   async _processOffer(rawOffer) {
     const rawPayload  = JSON.stringify(rawOffer);
     const payloadHash = sha256(rawPayload);
     const canonical   = transformOffer(rawOffer, this.fieldMap);
+    const nowTs       = now();
 
     if (!canonical.Title) {
-      this.stats.warnings.push(`Skipped offer with no Title (ExternalId=${canonical.ExternalId ?? 'unknown'})`);
+      this.stats.warnings.push(`Skipped (no Title): ${canonical.ExternalId ?? 'unknown'}`);
       return null;
     }
-
     if (!canonical.ExpirationDate) {
-      this.stats.warnings.push(`Offer without ExpirationDate: ExternalId=${canonical.ExternalId ?? 'unknown'} — will be paused if missing from future feed`);
+      this.stats.warnings.push(`No ExpirationDate: ${canonical.ExternalId ?? 'unknown'} — will be paused if missing from future feed`);
     }
-
     if (!canonical.ExternalId) {
       canonical.ExternalId = `hash:${payloadHash.substring(0, 20)}`;
-      this.stats.warnings.push(`Offer has no ExternalId — using hash-based ID: ${canonical.ExternalId}`);
+      this.stats.warnings.push(`No ExternalId, using hash: ${canonical.ExternalId}`);
     }
 
     // 1. RawJobRecords upsert
@@ -469,44 +490,41 @@ class XMLImporter {
     const { data: rawRec, error: rawErr } = await supabase
       .from('RawJobRecords')
       .upsert({
-        UserId:           this.userId,
-        ConnectionId:     this.connectionId,
-        ExternalId:       canonical.ExternalId,
-        RawFormat:        'xml',
-        RawPayload:       rawPayload,
-        PayloadHash:      payloadHash,
-        ReceivedAt:       now(),
-        ProcessingStatus: 'processing',
+        UserId: this.userId, ConnectionId: this.connectionId, ExternalId: canonical.ExternalId,
+        RawFormat: 'xml', RawPayload: rawPayload, PayloadHash: payloadHash,
+        ReceivedAt: nowTs, ProcessingStatus: 'processing',
       }, { onConflict: 'ConnectionId,ExternalId' })
-      .select('Id')
-      .single();
-
+      .select('Id').single();
     if (!rawErr && rawRec) rawRecordId = rawRec.Id;
 
-    // 2. JobOffers upsert
+    // 2. JobOffers upsert — canonical dedup by UserId+SourceSystem+ExternalId
     const offerPayload = {
-      UserId:          this.userId,
-      ConnectionId:    this.connectionId,
-      RawJobRecordId:  rawRecordId,
-      SourceSystem:    this.sourceSystem,
-      PayloadHash:     payloadHash,
-      Status:          'active',
-      LastSeenAt:      now(),   // optional column — set if it exists in schema
-      UpdatedAt:       now(),
+      UserId: this.userId, ConnectionId: this.connectionId,
+      RawJobRecordId: rawRecordId, SourceSystem: this.sourceSystem,
+      PayloadHash: payloadHash, Status: 'active', LastSeenAt: nowTs, UpdatedAt: nowTs,
       ...canonical,
     };
 
     const { data: upserted, error: upsertErr } = await supabase
       .from('JobOffers')
-      .upsert(offerPayload, { onConflict: 'UserId,ConnectionId,ExternalId' })
-      .select('Id')
-      .single();
-
+      .upsert(offerPayload, { onConflict: 'UserId,SourceSystem,ExternalId' })
+      .select('Id').single();
     if (upsertErr) throw new Error(`JobOffers upsert: ${upsertErr.message}`);
-
     const jobOfferId = upserted?.Id;
 
-    // 3. Link RawJobRecord → JobOffer
+    // 3. JobOfferSources upsert — per-source link
+    if (jobOfferId) {
+      const { error: srcErr } = await supabase
+        .from('JobOfferSources')
+        .upsert({
+          UserId: this.userId, JobOfferId: jobOfferId, ConnectionId: this.connectionId,
+          RawJobRecordId: rawRecordId, SourceSystem: this.sourceSystem, ExternalId: canonical.ExternalId,
+          PayloadHash: payloadHash, StatusInSource: 'active', LastSeenAt: nowTs, UpdatedAt: nowTs,
+        }, { onConflict: 'UserId,ConnectionId,ExternalId' });
+      if (srcErr) throw new Error(`JobOfferSources upsert: ${srcErr.message}`);
+    }
+
+    // 4. Link RawJobRecord → JobOffer + mark processed
     if (rawRecordId && jobOfferId) {
       await supabase
         .from('RawJobRecords')
@@ -514,117 +532,123 @@ class XMLImporter {
         .eq('Id', rawRecordId);
     }
 
-    this.stats.inserted++; // upsert — counts both insert and update as success
+    this.stats.inserted++;
     return canonical.ExternalId;
   }
 
   // ── Reconcile missing offers ──────────────────────────────────────────────
   //
-  // Business rules for externally-imported offers:
+  // For this connection's active JobOfferSources, if an offer is no longer in the feed:
+  //   1. Update JobOfferSources.StatusInSource (paused / archived)
+  //   2. Only update JobOffers.Status if NO other source still has StatusInSource='active'
   //
-  //   Offer IS in current feed       → Status = 'active' (already set by _processOffer)
-  //
-  //   Offer NOT in current feed:
-  //     ExpirationDate exists AND ExpirationDate > now  → Status = 'paused'
-  //                                                        PauseReason = 'missing_from_source_feed'
-  //                                                        MissingSince = now
-  //
-  //     ExpirationDate exists AND ExpirationDate <= now → Status = 'archived'
-  //                                                        ArchivedReason = 'expired'
-  //
-  //     ExpirationDate NOT in record                    → Status = 'paused'
-  //                                                        PauseReason = 'missing_from_source_feed_no_expiration'
-  //                                                        MissingSince = now
+  // This preserves canonical offers that are still being sent by another connection.
 
   async _reconcileMissingOffers(activeExternalIds) {
     const nowTs = new Date();
+    const missingSince = now();
+    const BATCH = 100;
 
-    // Fetch all active+paused offers for this connection
-    const { data: existing, error } = await supabase
-      .from('JobOffers')
-      .select('Id, ExternalId, ExpirationDate, Status')
-      .eq('UserId',       this.userId)
+    // Fetch all active JobOfferSources for this connection
+    const { data: sources, error } = await supabase
+      .from('JobOfferSources')
+      .select('Id, JobOfferId, ExternalId, StatusInSource')
+      .eq('UserId', this.userId)
       .eq('ConnectionId', this.connectionId)
-      .in('Status', ['active', 'paused']);
+      .eq('StatusInSource', 'active');
 
     if (error) {
       console.error('❌ _reconcileMissingOffers fetch failed:', error.message);
       this.stats.warnings.push(`Reconciliation skipped: ${error.message}`);
       return;
     }
+    if (!sources?.length) return;
 
-    if (!existing?.length) return;
+    // Categorise missing sources
+    // We need ExpirationDate from the canonical JobOffer for the decision
+    const missingSourceIds = sources
+      .filter(s => !activeExternalIds.has(s.ExternalId))
+      .map(s => s.Id);
 
-    // Three distinct buckets — each gets its own PauseReason / ArchivedReason
-    const toPauseFutureExpiry    = [];  // ExpirationDate exists AND > now
-    const toPauseNoExpiry        = [];  // ExpirationDate absent
-    const toArchiveExpired       = [];  // ExpirationDate exists AND <= now
+    if (missingSourceIds.length === 0) return;
 
-    for (const offer of existing) {
-      if (activeExternalIds.has(offer.ExternalId)) continue; // still in feed
+    // Fetch JobOffer details for missing sources to get ExpirationDate
+    const missingOfferIds = [...new Set(
+      sources.filter(s => !activeExternalIds.has(s.ExternalId)).map(s => s.JobOfferId)
+    )];
 
-      const expiry = offer.ExpirationDate ? new Date(offer.ExpirationDate) : null;
+    const { data: canonicalOffers } = await supabase
+      .from('JobOffers')
+      .select('Id, ExpirationDate')
+      .in('Id', missingOfferIds);
 
-      if (!expiry) {
-        toPauseNoExpiry.push(offer.Id);
-      } else if (expiry <= nowTs) {
-        toArchiveExpired.push(offer.Id);
-      } else {
-        toPauseFutureExpiry.push(offer.Id);
-      }
+    const expiryMap = new Map((canonicalOffers || []).map(o => [o.Id, o.ExpirationDate]));
+
+    const toPauseFuture  = []; // { sourceId, jobOfferId }
+    const toPauseNoExp   = []; // { sourceId, jobOfferId }
+    const toArchive      = []; // { sourceId, jobOfferId }
+
+    for (const src of sources) {
+      if (activeExternalIds.has(src.ExternalId)) continue;
+      const expStr = expiryMap.get(src.JobOfferId);
+      const expiry = expStr ? new Date(expStr) : null;
+      const entry  = { sourceId: src.Id, jobOfferId: src.JobOfferId };
+
+      if (!expiry)              toPauseNoExp.push(entry);
+      else if (expiry <= nowTs) toArchive.push(entry);
+      else                      toPauseFuture.push(entry);
     }
 
-    const missingSince = now();
-    const BATCH = 100;
-
-    // Batch update: paused — missing, ExpirationDate exists but is future
-    if (toPauseFutureExpiry.length > 0) {
-      for (let i = 0; i < toPauseFutureExpiry.length; i += BATCH) {
-        const slice = toPauseFutureExpiry.slice(i, i + BATCH);
-        await supabase
-          .from('JobOffers')
-          .update({ Status: 'paused', MissingSince: missingSince, PauseReason: 'missing_from_source_feed', UpdatedAt: missingSince })
-          .in('Id', slice)
-          .catch(() =>
-            supabase.from('JobOffers').update({ Status: 'paused', UpdatedAt: missingSince }).in('Id', slice)
-          );
+    // Helper: update JobOfferSources in batches
+    const updateSources = async (entries, patch) => {
+      const ids = entries.map(e => e.sourceId);
+      for (let i = 0; i < ids.length; i += BATCH) {
+        await supabase.from('JobOfferSources')
+          .update({ ...patch, UpdatedAt: missingSince })
+          .in('Id', ids.slice(i, i + BATCH));
       }
-      this.stats.paused += toPauseFutureExpiry.length;
-      console.log(`⏸️  Paused ${toPauseFutureExpiry.length} offers (missing, future expiry)`);
+    };
+
+    // Helper: update canonical JobOffer only if no remaining active source
+    const updateCanonicalIfNoActiveSources = async (entries, canonicalPatch) => {
+      const jobOfferIds = [...new Set(entries.map(e => e.jobOfferId))];
+      for (const jid of jobOfferIds) {
+        const { count } = await supabase
+          .from('JobOfferSources')
+          .select('Id', { count: 'exact', head: true })
+          .eq('JobOfferId', jid)
+          .eq('StatusInSource', 'active');
+        if ((count ?? 0) === 0) {
+          await supabase.from('JobOffers')
+            .update({ ...canonicalPatch, UpdatedAt: missingSince })
+            .eq('Id', jid)
+            .catch(() =>
+              supabase.from('JobOffers').update({ Status: canonicalPatch.Status, UpdatedAt: missingSince }).eq('Id', jid)
+            );
+        }
+      }
+    };
+
+    if (toPauseFuture.length > 0) {
+      await updateSources(toPauseFuture, { StatusInSource: 'paused', MissingSince: missingSince, PauseReason: 'missing_from_source_feed' });
+      await updateCanonicalIfNoActiveSources(toPauseFuture, { Status: 'paused', MissingSince: missingSince, PauseReason: 'missing_from_source_feed' });
+      this.stats.paused += toPauseFuture.length;
+      console.log(`⏸️  Paused ${toPauseFuture.length} sources (missing, future expiry)`);
     }
-
-    // Batch update: paused — missing, no ExpirationDate
-    if (toPauseNoExpiry.length > 0) {
-      for (let i = 0; i < toPauseNoExpiry.length; i += BATCH) {
-        const slice = toPauseNoExpiry.slice(i, i + BATCH);
-        await supabase
-          .from('JobOffers')
-          .update({ Status: 'paused', MissingSince: missingSince, PauseReason: 'missing_from_source_feed_no_expiration', UpdatedAt: missingSince })
-          .in('Id', slice)
-          .catch(() =>
-            supabase.from('JobOffers').update({ Status: 'paused', UpdatedAt: missingSince }).in('Id', slice)
-          );
-      }
-      this.stats.paused += toPauseNoExpiry.length;
-      console.log(`⏸️  Paused ${toPauseNoExpiry.length} offers (missing, no expiration date)`);
+    if (toPauseNoExp.length > 0) {
+      await updateSources(toPauseNoExp, { StatusInSource: 'paused', MissingSince: missingSince, PauseReason: 'missing_from_source_feed_no_expiration' });
+      await updateCanonicalIfNoActiveSources(toPauseNoExp, { Status: 'paused', MissingSince: missingSince, PauseReason: 'missing_from_source_feed_no_expiration' });
+      this.stats.paused += toPauseNoExp.length;
+      console.log(`⏸️  Paused ${toPauseNoExp.length} sources (missing, no expiration)`);
     }
-
-    // Batch update: archived — ExpirationDate is past
-    if (toArchiveExpired.length > 0) {
-      for (let i = 0; i < toArchiveExpired.length; i += BATCH) {
-        const slice = toArchiveExpired.slice(i, i + BATCH);
-        await supabase
-          .from('JobOffers')
-          .update({ Status: 'archived', ArchivedReason: 'expired', UpdatedAt: missingSince })
-          .in('Id', slice)
-          .catch(() =>
-            supabase.from('JobOffers').update({ Status: 'archived', UpdatedAt: missingSince }).in('Id', slice)
-          );
-      }
-      this.stats.archived += toArchiveExpired.length;
-      console.log(`🗄️  Archived ${toArchiveExpired.length} offers (expired and missing from feed)`);
+    if (toArchive.length > 0) {
+      await updateSources(toArchive, { StatusInSource: 'archived', ArchivedReason: 'expired' });
+      await updateCanonicalIfNoActiveSources(toArchive, { Status: 'archived', ArchivedReason: 'expired' });
+      this.stats.archived += toArchive.length;
+      console.log(`🗄️  Archived ${toArchive.length} sources (expired and missing)`);
     }
   }
 }
 
+XMLImporter.inferSourceSystem = inferSourceSystem;
 module.exports = XMLImporter;
