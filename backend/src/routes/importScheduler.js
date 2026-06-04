@@ -24,7 +24,7 @@ const { supabase } = require('../db/db');
 const { addUserToRequest, requireAuth, isSuperAdmin } = require('../middleware/authMiddleware');
 
 const SAFE_BUDGET_MS = 42000; // 42s — safe margin before Vercel's 60s function limit
-const BATCH_SIZE     = 75;   // 75 offers per batch — 100 was ~35s, targeting <25s
+const BATCH_SIZE     = 50;   // 75 was ~29s (too close), 50 targets ~18-20s
 
 // ── Auth middleware for cron endpoint ─────────────────────────────────────────
 
