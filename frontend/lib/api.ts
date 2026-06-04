@@ -30,6 +30,17 @@ export function useApi() {
       return res.json()
     },
 
+    // Start one import batch — returns { hasMore, remaining, processed, phase }
+    // Frontend polls getImportStatus for progress; does NOT loop here.
+    startImportBatch: async (connectionId: number) => {
+      const res = await fetchWithAuth(`${API_URL}/api/import/start/${connectionId}`, {
+        method: 'POST'
+      })
+      if (!res.ok) throw new Error('Error al iniciar importación')
+      return res.json()
+    },
+
+    // Legacy: kept for compatibility with existing importConnection calls in queue processor
     importConnection: async (connectionId: number) => {
       const res = await fetchWithAuth(`${API_URL}/api/connections/${connectionId}/import`, {
         method: 'POST'

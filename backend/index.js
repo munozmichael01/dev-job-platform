@@ -11,7 +11,8 @@ const userCredentialsRouter = require('./src/routes/userCredentials');
 const metricsRouter = require('./src/routes/metrics');
 const offersRouter = require('./src/routes/offers');
 const jobOffersRouter = require('./src/routes/jobOffers');
-const importOffersRouter = require('./src/routes/importOffers');
+const importOffersRouter    = require('./src/routes/importOffers');
+const importSchedulerRouter = require('./src/routes/importScheduler');
 const swaggerUi = require('swagger-ui-express');
 const YAML = require('yamljs');
 const path = require('path');
@@ -153,6 +154,7 @@ app.use('/api/metrics', metricsRouter);
 app.use('/api/offers', offersRouter);
 app.use('/', jobOffersRouter);
 app.use('/api/import', importOffersRouter);
+app.use('/api/import', importSchedulerRouter);
 
 // Router para control de límites internos
 const internalLimitsRouter = require('./src/routes/internalLimits');

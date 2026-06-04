@@ -536,7 +536,17 @@ export default function ConexionesPage() {
 
   const processQueueRef = useRef<() => Promise<void>>(async () => {})
 
-  // Re-assigned every render so inner calls always have fresh api/toast/fetch
+  // ── processQueueFn: start batch + poll for completion ─────────────────────
+  // New model (server-driven imports):
+  //   1. Call /api/import/start/:id — triggers one batch on the server
+  //   2. Poll /api/connections/:id/import/status every 5s
+  //   3. When hasMore=false → connection is complete, move to next in queue
+  //   4. If user closes tab: server has already persisted progress in RawJobRecords.
+  //      Next page load detects pendingRecords > 0 and resumes via buildAndStartQueue.
+  //
+  // The import no longer depends on the browser staying open.
+  // The Vercel Cron (daily) also calls run-scheduled to catch connections the user never opened.
+
   const processQueueFn = async (): Promise<void> => {
     if (processingRef.current) return
     processingRef.current = true
@@ -552,43 +562,53 @@ export default function ConexionesPage() {
       setImportProgress(prev => ({ ...prev, [connectionId]: { processed: 0, total: 0 } }))
 
       try {
-        // ── Batch loop — uses apiRef.current (always fresh) ──────────────────
-        let batchCount = 0
-        let totalProcessed = 0
-        let grandTotal = 0
-        const MAX_BATCHES = 120
+        // Kick off first batch — server handles the rest on subsequent calls
+        await apiRef.current.startImportBatch(connectionId)
+        console.log(`🚀 [conn ${connectionId}] first batch started, switching to polling`)
 
-        while (batchCount < MAX_BATCHES) {
-          batchCount++
-          // apiRef.current is updated every render — no stale closure here
-          const result = await apiRef.current.importConnection(connectionId)
-          console.log(`📦 [conn ${connectionId}] batch ${batchCount} phase=${result?.phase}`)
+        // Poll /import/status until complete or error
+        const POLL_INTERVAL = 5000
+        const MAX_POLLS = 360 // 30 min max polling (360 × 5s)
+        let polls = 0
 
-          const batchImported  = result.result?.imported  ?? result.imported  ?? 0
-          const batchTotal     = result.result?.total     ?? result.total     ?? grandTotal
-          const batchProcessed = result.result?.processed ?? result.processed ?? (totalProcessed + batchImported)
-          const hasMore        = result.hasMore ?? result.result?.hasMore ?? false
+        while (polls < MAX_POLLS) {
+          await new Promise(r => setTimeout(r, POLL_INTERVAL))
+          polls++
 
-          totalProcessed = batchProcessed || (totalProcessed + batchImported)
-          if (batchTotal > grandTotal) grandTotal = batchTotal
+          const status = await apiRef.current.getImportStatus(connectionId)
+          if (!status) break
 
-          // State setters are stable — safe to call from any render's closure
+          const processed = status.importedOffers ?? status.processedRecords ?? 0
+          const total     = status.totalRecords ?? processed
+          const hasMore   = status.hasMore ?? (status.pendingRecords > 0)
+          const connStatus = status.connectionStatus
+
           setImportProgress(prev => ({
             ...prev,
-            [connectionId]: { processed: totalProcessed, total: grandTotal || totalProcessed }
+            [connectionId]: { processed, total }
           }))
-          setConexiones(prev => prev.map(c =>
-            c.id === connectionId ? { ...c, status: 'importing', importedOffers: totalProcessed } : c
-          ))
 
-          if (!hasMore) break
-          await new Promise(r => setTimeout(r, 300))
+          if (connStatus === 'active' || !hasMore) {
+            // Complete
+            console.log(`✅ [conn ${connectionId}] complete — ${processed} offers`)
+            break
+          }
+          if (connStatus === 'error') {
+            throw new Error(`La conexión entró en estado error durante el import`)
+          }
+
+          // If server still has pending work, kick the next batch
+          // (covers cases where the cron hasn't run yet and user is watching)
+          if (hasMore && connStatus === 'importing') {
+            try { await apiRef.current.startImportBatch(connectionId) } catch { /* server handles */ }
+          }
         }
 
         setImportStatus(prev => ({ ...prev, [connectionId]: 'complete' }))
+        const finalStatus = await apiRef.current.getImportStatus(connectionId)
         toastRef.current({
           title: 'Importación completada',
-          description: `${totalProcessed.toLocaleString()} ofertas importadas correctamente`,
+          description: `${(finalStatus?.importedOffers ?? 0).toLocaleString()} ofertas importadas`,
         })
 
       } catch (err) {
@@ -599,13 +619,10 @@ export default function ConexionesPage() {
           description: err instanceof Error ? err.message : 'Error desconocido',
           variant: 'destructive',
         })
-        // ← continue with the next connection in the queue
       }
 
       activeRef.current = null
       setActiveImportId(null)
-
-      // fetchConnRef.current is always the latest fetchConexiones
       await fetchConnRef.current()
     }
 
@@ -617,15 +634,15 @@ export default function ConexionesPage() {
 
   // ── handleSync: enqueue or start immediately ───────────────────────────────
   const handleSync = (connectionId: number) => {
-    if (queueRef.current.includes(connectionId)) return  // already queued
-    if (activeRef.current === connectionId) return        // already active
+    if (queueRef.current.includes(connectionId)) return
+    if (activeRef.current === connectionId) return
 
     queueRef.current = [...queueRef.current, connectionId]
     setImportQueue([...queueRef.current])
     setImportStatus(prev => ({ ...prev, [connectionId]: 'queued' }))
 
     if (!processingRef.current) {
-      processQueueRef.current()  // calls the latest version of processQueueFn
+      processQueueRef.current()
     }
   }
 
