@@ -1,8 +1,11 @@
 node_modules/
 *.log
 .env
+.DS_Store
 dist/
 build/
+backend/npm-cache/
+backend/scratch/
 
 # Backup directories
 backup_*/
