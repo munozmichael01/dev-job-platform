@@ -1,5 +1,96 @@
 # Claude Code - Job Platform Project Context
 
+## Acuerdo Operativo Actual (2026-06-02)
+
+Este proyecto esta entrando en una fase de estabilizacion y redireccion estrategica. La vision acordada es evolucionar desde una plataforma de distribucion de ofertas hacia una plataforma de reclutamiento basada en agentes de IA, sin empezar desde cero y sin convertir el producto en un ATS completo antes de validar el primer caso comercial.
+
+### Decision de producto
+
+- No se empieza desde cero.
+- No se aceptan los cambios de Gemini como base de produccion sin auditoria.
+- El primer producto vendible es distribucion inteligente de ofertas con IA.
+- Candidates/Applications/Kanban son parte del futuro, pero despues de estabilizar la base.
+- No se introducen microservicios todavia; se mantiene un monolito mas limpio y modular.
+- Supabase/Postgres es la base definitiva.
+- El adapter legacy de SQL Server debe auditarse y retirarse progresivamente de rutas criticas.
+
+### Orden de trabajo acordado
+
+1. Preservar el estado actual con los cambios de Gemini en una rama `spike/gemini-ats-foundation`.
+2. No borrar ni revertir cambios hasta confirmar que el spike quedo preservado.
+3. Auditar el adapter legacy y las rutas que dependen de el.
+4. Definir el modelo de dominio definitivo antes de crear nuevas tablas ATS.
+5. Corregir rutas criticas actuales, especialmente ofertas, errores 500, CORS y empty states.
+6. Integrar Candidates/Applications solo despues de revisar esquema, auth, RLS y relaciones.
+7. Introducir agentes de IA empezando por redaccion/optimizacion de ofertas y distribucion.
+
+### Ownership por colaborador
+
+#### Claude
+
+- Puede auditar `backend/src/db/supabaseAdapter.js`.
+- Puede auditar dependencias backend.
+- Puede revisar rutas existentes en `backend/src/routes/`.
+- Puede trabajar en login/register frontend.
+- No debe ejecutar migraciones ATS nuevas sin revision previa.
+- No debe limpiar/revertir cambios locales antes de preservar el spike.
+- No debe tocar `backend/index.js` salvo acuerdo explicito.
+
+#### Codex
+
+- Define el modelo de dominio definitivo.
+- Audita `backend/scripts/create-ats-tables.sql`.
+- Revisa el spike de Gemini: `candidates.js`, `applications.js` y `frontend/app/candidatos/`.
+- Define que partes del spike se rescatan, corrigen o descartan.
+- Define specs cerradas para tareas de Gemini.
+- Puede tocar `backend/index.js` solo cuando se acuerde la estructura final de rutas.
+
+#### Gemini
+
+Gemini solo debe recibir tareas acotadas y con contrato cerrado.
+
+Permitido:
+
+- Componentes UI aislados en `frontend/app/`.
+- Prototipos visuales sin cambiar contratos backend.
+- Ajustes pequenos sobre archivos explicitamente autorizados.
+
+Prohibido:
+
+- `backend/index.js`.
+- Migraciones SQL.
+- Auth, permisos, RLS o service-role logic.
+- Adapter legacy o capa de datos central.
+- Cambios de arquitectura.
+- Instalacion de dependencias sin autorizacion.
+
+### Formato obligatorio para tareas de Gemini
+
+Toda tarea para Gemini debe incluir:
+
+- Objetivo.
+- Archivos permitidos.
+- Archivos prohibidos.
+- Inputs disponibles.
+- Output esperado.
+- Criterios de aceptacion.
+- Que no debe hacer.
+
+### Estado del spike Gemini
+
+Gemini dejo cambios relacionados con Candidates/Applications/Kanban. Esos cambios se consideran un spike, no una base aprobada de producto.
+
+Riesgos a revisar antes de integrarlo:
+
+- Posible inconsistencia `JobOffers.Id` vs `JobOffers.OfferId`.
+- RLS posiblemente incompatible con la auth JWT actual.
+- CORS duplicado en rutas nuevas.
+- Scripts temporales y cache local no deben commitearse.
+- El Kanban puede contener logica provisional o datos mock.
+- No ejecutar `create-ats-tables.sql` hasta validar modelo de dominio.
+
+---
+
 ## 📋 Estado del Proyecto (Última actualización: 2026-02-07 - MIGRACIÓN A SUPABASE COMPLETADA)
 
 ### 🎉 **MIGRACIÓN A SUPABASE POSTGRESQL - COMPLETADA CON ÉXITO TOTAL**
@@ -85,9 +176,9 @@ Landing Page (Next.js) → Puerto 3000 ✅ FUNCIONANDO
 ```bash
 # Supabase Configuration
 NEXT_PUBLIC_SUPABASE_URL=https://bdswyiapdxnxexfzwzhv.supabase.co
-NEXT_PUBLIC_SUPABASE_ANON_KEY=sb_publishable_brbj19Bs8N0RQ2E77jEIZA_DaiYN1Eg
-SUPABASE_SERVICE_ROLE_KEY=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...
-SUPABASE_DB_PASSWORD=pMKbL30XpDPF1d9L
+NEXT_PUBLIC_SUPABASE_ANON_KEY=<supabase_anon_key_public_redacted>
+SUPABASE_SERVICE_ROLE_KEY=<redacted>
+SUPABASE_DB_PASSWORD=<redacted>
 
 # Connection string comentado (no necesario con Adapter)
 # SUPABASE_CONNECTION_STRING=postgresql://...
@@ -900,7 +991,7 @@ ALTER TABLE Campaigns ADD ActualApplications INT DEFAULT 0;
    - Puerto TCP/IP 1433 activado
    - Mixed Mode authentication habilitado
    - Usuario `jobplatform` creado con permisos completos
-   - Conexión funcionando con credenciales: `DB_USER=jobplatform`, `DB_PASSWORD=JobPlatform2025!`
+   - Conexión funcionando con credenciales: `DB_USER=<redacted>`, `DB_PASSWORD=<redacted>`
 
 2. ✅ **Multi-tenant data correctamente asignada:**
    - **Usuario test.new.user@example.com (ID: 15)**: 67,696 ofertas, 9 campañas
@@ -974,9 +1065,9 @@ cd C:/Dev/landing-page && npm run dev
 ```
 
 **🔑 Usuarios de Prueba Actualizados:**
-- **test.new.user@example.com** / password123 (UserID 15) - **67,696 ofertas, 9 campañas**
-- **superadmin@jobplatform.com** / admin123 - Ve todos los datos del sistema
-- **michael.munoz@turijobs.com** / Turijobs-2021 (UserID 11) - Datos limpios
+- **test.new.user@example.com** / <redacted> (UserID 15) - **67,696 ofertas, 9 campañas**
+- **superadmin@jobplatform.com** / <redacted> - Ve todos los datos del sistema
+- **michael.munoz@turijobs.com** / <redacted> (UserID 11) - Datos limpios
 
 ### 🔧 **ARCHIVOS CLAVE ACTUALIZADOS**
 
@@ -1015,7 +1106,7 @@ frontend/app/
 **Database Configuration:**
 ```
 backend/
-├── .env - DB_USER=jobplatform, DB_PASSWORD=JobPlatform2025!, DB_PORT=1433
+├── .env - DB_USER=<redacted>, DB_PASSWORD=<redacted>, DB_PORT=1433
 └── src/db/db.js - SQL authentication funcionando
 ```
 
@@ -1578,7 +1669,7 @@ PRÓXIMO OBJETIVO: [especificar según necesidad]
 #### **Dashboard Datos Reales:**
 - `backend/src/routes/metrics.js` - API métricas 100% reales desde BD
 - `frontend/app/page.tsx` - Dashboard consumiendo datos reales
-- `backend/.env` - Configuración BD (DB_USER=jobplatform)
+- `backend/.env` - Configuración BD (DB_USER=<redacted>)
 
 #### **Sistema de Credenciales:**
 - `frontend/components/credentials/ChannelConfigForm.tsx` - Interface Jooble multi-país
