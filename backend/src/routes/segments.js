@@ -35,6 +35,47 @@ function applyUserFilter(query, req, column = 'UserId') {
   return isSuperAdmin(req) ? query : query.eq(column, req.userId);
 }
 
+function sanitizePostgrestOrTerm(value) {
+  return String(value || '')
+    .trim()
+    .replace(/[(),]/g, ' ')
+    .replace(/\s+/g, ' ');
+}
+
+function parseLocationValue(value) {
+  const raw = String(value || '').trim();
+  if (!raw) return null;
+  const [city, ...rest] = raw.split(',');
+  return {
+    city: city?.trim() || null,
+    region: rest.join(',').trim() || null,
+    term: sanitizePostgrestOrTerm(raw)
+  };
+}
+
+function applyLocationFilters(query, locations = []) {
+  const parts = [];
+
+  locations.slice(0, 25).forEach(location => {
+    const parsed = parseLocationValue(location);
+    if (!parsed) return;
+
+    if (parsed.city && parsed.region) {
+      parts.push(`and(City.ilike.%${parsed.city}%,Region.ilike.%${parsed.region}%)`);
+      return;
+    }
+
+    if (parsed.term) {
+      parts.push(`City.ilike.%${parsed.term}%`);
+      parts.push(`Region.ilike.%${parsed.term}%`);
+      parts.push(`Country.ilike.%${parsed.term}%`);
+      parts.push(`CountryCode.ilike.%${parsed.term}%`);
+    }
+  });
+
+  return parts.length > 0 ? query.or(parts.join(',')) : query;
+}
+
 function applySegmentFilters(query, filters) {
   const f = parseFilters(filters);
   const searchParts = [];
@@ -48,8 +89,7 @@ function applySegmentFilters(query, filters) {
   if (searchParts.length > 0) query = query.or(searchParts.join(','));
 
   if (f.locations.length > 0) {
-    const loc = f.locations[0];
-    query = query.or(`City.ilike.%${loc}%,Region.ilike.%${loc}%`);
+    query = applyLocationFilters(query, f.locations);
   }
   if (f.sectors.length > 0) {
     const sector = f.sectors[0];
