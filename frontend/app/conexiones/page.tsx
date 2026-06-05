@@ -235,7 +235,7 @@ export default function ConexionesPage() {
           : `${toQueue.length} importaciones en cola`
       toast({
         title,
-        description: 'Procesando automáticamente. Si sales, se reanudará al volver.',
+        description: 'Procesando automáticamente. Puedes salir de esta página sin problema.',
       })
 
       // Call via ref — always uses the latest processQueueFn
@@ -610,7 +610,7 @@ export default function ConexionesPage() {
         toastRef.current({
           title: finalHasMore ? 'Importación en curso' : 'Importación completada',
           description: finalHasMore
-            ? `${(finalStatus?.importedOffers ?? 0).toLocaleString()} ofertas procesadas. El sistema continuará en la próxima ejecución programada.`
+            ? `${(finalStatus?.importedOffers ?? 0).toLocaleString()} ofertas procesadas. El sistema continuará automáticamente.`
             : `${(finalStatus?.importedOffers ?? 0).toLocaleString()} ofertas importadas correctamente`,
         })
 
@@ -734,9 +734,11 @@ export default function ConexionesPage() {
       case "pending":
         return <Badge variant="secondary">Pendiente</Badge>
       case "importing":
+        // 'importing' means the scheduler has pending work queued in RawJobRecords.
+        // It does NOT mean this browser tab is processing — the external scheduler handles it.
         return <Badge className="bg-blue-100 text-blue-800">
-          <RefreshCw className="h-3 w-3 mr-1 animate-spin" />
-          Procesando...
+          <RefreshCw className="h-3 w-3 mr-1" />
+          En cola
         </Badge>
       case "processing_offers":
         return <Badge className="bg-orange-100 text-orange-800">
@@ -834,7 +836,7 @@ export default function ConexionesPage() {
               ? `Importando conexión ${activeImportId}${importProgress[activeImportId]?.total > 0 ? ` — ${importProgress[activeImportId].processed.toLocaleString()} / ${importProgress[activeImportId].total.toLocaleString()} ofertas` : '…'}`
               : `${importQueue.length} importación${importQueue.length > 1 ? 'es' : ''} en cola`}
             {importQueue.length > 0 && activeImportId !== null && ` · ${importQueue.length} más en cola`}
-            {' '}— Si sales de esta página, se pausará y reanudará al volver.
+            {' '}— Puedes salir de esta página; el sistema seguirá procesando automáticamente.
           </span>
         </div>
       )}
@@ -1198,7 +1200,14 @@ export default function ConexionesPage() {
                     <TableCell>
                       <div className="flex items-center gap-2">
                         {getStatusIcon(getConnectionStatus(conexion))}
-                        {getStatusBadge(getConnectionStatus(conexion))}
+                        {/* Override badge when this tab is actively importing this connection */}
+                        {activeImportId === conexion.id
+                          ? <Badge className="bg-blue-100 text-blue-800">
+                              <RefreshCw className="h-3 w-3 mr-1 animate-spin" />
+                              Importando…
+                            </Badge>
+                          : getStatusBadge(getConnectionStatus(conexion))
+                        }
                       </div>
                     </TableCell>
                     <TableCell>
