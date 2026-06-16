@@ -9,8 +9,8 @@ import { AuthProvider } from "@/contexts/AuthContext"
 import ProtectedRoute from "@/components/ProtectedRoute"
 
 export const metadata: Metadata = {
-  title: "Plataforma de Distribución de Ofertas",
-  description: "Gestión de campañas y distribución de ofertas de empleo",
+  title: "TalentOS",
+  description: "Operaciones de talento, ofertas y distribución inteligente",
 }
 
 export default function RootLayout({
@@ -23,8 +23,8 @@ export default function RootLayout({
       <body className="font-sans" suppressHydrationWarning>
         <ThemeProvider
           attribute="class"
-          defaultTheme="system"
-          enableSystem
+          defaultTheme="light"
+          enableSystem={false}
           disableTransitionOnChange
         >
           <AuthProvider>

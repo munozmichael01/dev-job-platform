@@ -19,6 +19,19 @@ module.exports = {
     },
     extend: {
       colors: {
+        ds: {
+          brand: "#0E5C4A",
+          accent: "#F1543F",
+          lime: "#C6F24E",
+          bg: "#F4F0E8",
+          surface: "#FCFAF6",
+          "surface-2": "#F8F4EB",
+          ink: "#1A1A17",
+          soft: "#79746B",
+          line: "#E7E1D4",
+          "brand-soft": "#DCEFE4",
+          "lime-soft": "#EAF7C4",
+        },
         border: "hsl(var(--border))",
         input: "hsl(var(--input))",
         ring: "hsl(var(--ring))",
@@ -67,6 +80,17 @@ module.exports = {
         lg: "var(--radius)",
         md: "calc(var(--radius) - 2px)",
         sm: "calc(var(--radius) - 4px)",
+      },
+      fontFamily: {
+        sans: ["Hanken Grotesk", "system-ui", "sans-serif"],
+        display: ["Archivo", "Hanken Grotesk", "system-ui", "sans-serif"],
+        mono: ["Space Mono", "ui-monospace", "monospace"],
+      },
+      boxShadow: {
+        hard: "3px 3px 0 #1A1A17",
+        "hard-lg": "5px 5px 0 #1A1A17",
+        pop: "0 24px 50px -28px rgba(26, 26, 23, 0.4)",
+        card: "0 2px 8px -2px rgba(26, 26, 23, 0.12)",
       },
       keyframes: {
         "accordion-down": {

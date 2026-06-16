@@ -71,17 +71,17 @@ export default function LoginPage() {
 
 
   return (
-    <div className="min-h-screen bg-white">
+    <div className="min-h-screen bg-background text-foreground">
       {/* Header */}
-      <header className="bg-white shadow-sm border-b">
+      <header className="border-b border-border bg-card/80 backdrop-blur">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
           <div className="flex justify-between items-center py-4">
             <div className="flex items-center">
-              <div className="w-8 h-8 bg-gradient-to-r from-blue-600 to-blue-700 rounded-lg flex items-center justify-center mr-3">
+              <div className="mr-3 flex h-9 w-9 items-center justify-center rounded-[11px] border-2 border-ds-ink bg-ds-accent text-white shadow-hard">
                 <Zap className="h-5 w-5 text-white" />
               </div>
-              <h1 className="text-xl font-bold text-gray-900">
-                Job<span className="text-blue-600">Platform</span>
+              <h1 className="font-display text-2xl font-black tracking-[-0.05em] text-ds-ink">
+                Talent<span className="text-ds-brand">OS</span>
               </h1>
             </div>
           </div>
@@ -89,20 +89,20 @@ export default function LoginPage() {
       </header>
 
       {/* Main Login Content */}
-      <main className="min-h-[calc(100vh-80px)] bg-gradient-to-br from-blue-50 via-white to-indigo-50">
+      <main className="ds-card-grid min-h-[calc(100vh-80px)] bg-background">
         <div className="flex items-center justify-center min-h-[calc(100vh-80px)] px-4 sm:px-6 lg:px-8">
           <div className="max-w-md w-full space-y-8">
             {/* Login Card */}
-            <div className="bg-white rounded-2xl shadow-xl p-8">
+            <div className="rounded-[24px] border border-border bg-card p-8 shadow-pop">
               <div className="text-center">
-                <div className="mx-auto w-12 h-12 bg-gradient-to-r from-blue-600 to-blue-700 rounded-lg flex items-center justify-center mb-6">
+                <div className="mx-auto mb-6 flex h-12 w-12 items-center justify-center rounded-[14px] border-2 border-ds-ink bg-ds-accent text-white shadow-hard">
                   <Zap className="h-6 w-6 text-white" />
                 </div>
-                <h2 className="text-3xl font-bold text-gray-900">
+                <h2 className="font-display text-4xl font-black tracking-[-0.06em] text-ds-ink">
                   Bienvenido de vuelta
                 </h2>
-                <p className="mt-2 text-sm text-gray-600">
-                  Accede a tu cuenta de <span className="font-bold text-blue-600">Job Distribution Platform</span>
+                <p className="mt-3 text-sm font-medium text-muted-foreground">
+                  Accede a tu cuenta de <span className="font-bold text-ds-brand">TalentOS</span>
                 </p>
               </div>
 
@@ -112,7 +112,7 @@ export default function LoginPage() {
                 <form className="space-y-4" onSubmit={handleSubmit}>
                   {/* Email Field */}
                   <div>
-                    <Label htmlFor="email" className="block text-sm font-medium text-gray-700 mb-1">
+                    <Label htmlFor="email" className="mb-1 block text-sm font-bold text-foreground">
                       Email
                     </Label>
                     <Input
@@ -130,7 +130,7 @@ export default function LoginPage() {
 
                   {/* Password Field */}
                   <div>
-                    <Label htmlFor="password" className="block text-sm font-medium text-gray-700 mb-1">
+                    <Label htmlFor="password" className="mb-1 block text-sm font-bold text-foreground">
                       Contraseña
                     </Label>
                     <div className="relative">
@@ -148,7 +148,7 @@ export default function LoginPage() {
                       <button
                         type="button"
                         onClick={() => setShowPassword(!showPassword)}
-                        className="absolute right-3 top-1/2 transform -translate-y-1/2 text-gray-400 hover:text-gray-600"
+                        className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-ds-brand"
                         disabled={isLoading}
                       >
                         {showPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
@@ -167,7 +167,7 @@ export default function LoginPage() {
                   <Button
                     type="submit"
                     disabled={isLoading}
-                    className="w-full bg-blue-600 hover:bg-blue-700 text-white py-3 px-6 rounded-lg font-medium transition-colors"
+                    className="w-full"
                   >
                     {isLoading ? (
                       <div className="flex items-center justify-center">
@@ -183,25 +183,25 @@ export default function LoginPage() {
                 {/* Benefits */}
                 <div className="relative">
                   <div className="absolute inset-0 flex items-center">
-                    <div className="w-full border-t border-gray-300" />
+                    <div className="w-full border-t border-border" />
                   </div>
                   <div className="relative flex justify-center text-sm">
-                    <span className="px-2 bg-white text-gray-500">¿Por qué elegir JobPlatform?</span>
+                    <span className="bg-card px-2 font-mono text-[11px] uppercase tracking-[0.16em] text-muted-foreground">¿Por qué elegir TalentOS?</span>
                   </div>
                 </div>
 
                 <div className="space-y-4">
-                  <div className="flex items-center text-sm text-gray-600">
-                    <ChartLine className="h-5 w-5 text-green-500 mr-3 flex-shrink-0" />
-                    <span>Optimización automática de CPA y ROI</span>
+                  <div className="flex items-center text-sm font-medium text-muted-foreground">
+                    <ChartLine className="mr-3 h-5 w-5 flex-shrink-0 text-ds-brand" />
+                    <span>Optimización de canales por objetivos y presupuesto</span>
                   </div>
-                  <div className="flex items-center text-sm text-gray-600">
-                    <Users className="h-5 w-5 text-blue-500 mr-3 flex-shrink-0" />
-                    <span>Distribución inteligente en 4+ canales</span>
+                  <div className="flex items-center text-sm font-medium text-muted-foreground">
+                    <Users className="mr-3 h-5 w-5 flex-shrink-0 text-ds-accent" />
+                    <span>ATS y operaciones de talento en una sola base</span>
                   </div>
-                  <div className="flex items-center text-sm text-gray-600">
-                    <Zap className="h-5 w-5 text-purple-500 mr-3 flex-shrink-0" />
-                    <span>Setup en menos de 5 minutos</span>
+                  <div className="flex items-center text-sm font-medium text-muted-foreground">
+                    <Zap className="mr-3 h-5 w-5 flex-shrink-0 text-ds-lime" />
+                    <span>Automatización asistida por IA, humano al mando</span>
                   </div>
                 </div>
               </div>
@@ -209,8 +209,8 @@ export default function LoginPage() {
 
             {/* Additional Info */}
             <div className="text-center">
-              <p className="text-sm text-gray-600">
-                Sistema de login interno • Sin problemas de hydration
+              <p className="font-mono text-[11px] uppercase tracking-[0.16em] text-muted-foreground">
+                Sistema interno de operaciones de talento
               </p>
             </div>
           </div>

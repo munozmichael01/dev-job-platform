@@ -78,13 +78,13 @@ export function AppSidebar() {
   return (
     <Sidebar>
       <SidebarHeader className="border-b border-sidebar-border">
-        <div className="flex items-center gap-2 px-2 py-2">
-          <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-primary text-primary-foreground">
+        <div className="flex items-center gap-3 px-2 py-3">
+          <div className="flex h-9 w-9 items-center justify-center rounded-[11px] border-2 border-ds-ink bg-ds-accent text-white shadow-hard">
             <Zap className="h-4 w-4" />
           </div>
           <div className="flex flex-col">
-            <span className="text-sm font-semibold">JobDistributor</span>
-            <span className="text-xs text-muted-foreground">v2.0</span>
+            <span className="font-display text-base font-black leading-none tracking-[-0.04em]">TalentOS</span>
+            <span className="font-mono text-[10px] uppercase tracking-[0.18em] text-muted-foreground">Ops v1</span>
           </div>
         </div>
       </SidebarHeader>
