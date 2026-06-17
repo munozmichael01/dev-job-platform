@@ -47,8 +47,8 @@ function parseLocationValue(value) {
   if (!raw) return null;
   const [city, ...rest] = raw.split(',');
   return {
-    city: city?.trim() || null,
-    region: rest.join(',').trim() || null,
+    city: sanitizePostgrestOrTerm(city) || null,
+    region: sanitizePostgrestOrTerm(rest.join(',')) || null,
     term: sanitizePostgrestOrTerm(raw)
   };
 }
@@ -82,8 +82,9 @@ function applySegmentFilters(query, filters) {
 
   if (f.jobTitles.length > 0) {
     f.jobTitles.slice(0, 5).forEach(term => {
-      searchParts.push(`Title.ilike.%${term}%`);
-      searchParts.push(`CompanyName.ilike.%${term}%`);
+      const safeTerm = sanitizePostgrestOrTerm(term);
+      searchParts.push(`Title.ilike.%${safeTerm}%`);
+      searchParts.push(`CompanyName.ilike.%${safeTerm}%`);
     });
   }
   if (searchParts.length > 0) query = query.or(searchParts.join(','));
@@ -92,7 +93,7 @@ function applySegmentFilters(query, filters) {
     query = applyLocationFilters(query, f.locations);
   }
   if (f.sectors.length > 0) {
-    const sector = f.sectors[0];
+    const sector = sanitizePostgrestOrTerm(f.sectors[0]);
     query = query.or(`Sector.ilike.%${sector}%,Category.ilike.%${sector}%`);
   }
   if (f.companies.length > 0) {

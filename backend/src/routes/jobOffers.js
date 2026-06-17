@@ -65,8 +65,8 @@ function parseLocationValue(value) {
   if (!raw) return { city: null, region: null, term: null };
 
   const [city, ...rest] = raw.split(',');
-  const parsedCity = city?.trim() || null;
-  const parsedRegion = rest.join(',').trim() || null;
+  const parsedCity = sanitizePostgrestOrTerm(city) || null;
+  const parsedRegion = sanitizePostgrestOrTerm(rest.join(',')) || null;
 
   return {
     city: parsedCity,
@@ -157,7 +157,10 @@ function applyOfferFilters(query, req, filters) {
   query = applyUserFilter(query, req);
   if (filters.status) query = query.eq('Status', filters.status);
   query = applyLocationFilter(query, filters.location);
-  if (filters.sector) query = query.or(`Sector.ilike.%${filters.sector}%,Category.ilike.%${filters.sector}%`);
+  if (filters.sector) {
+    const sector = sanitizePostgrestOrTerm(filters.sector);
+    query = query.or(`Sector.ilike.%${sector}%,Category.ilike.%${sector}%`);
+  }
   if (filters.company) query = query.ilike('CompanyName', `%${filters.company}%`);
   if (filters.externalId) query = query.ilike('ExternalId', `%${filters.externalId}%`);
   if (filters.search) {

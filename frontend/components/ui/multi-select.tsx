@@ -60,6 +60,8 @@ export function MultiSelect({
     }
   }
 
+  const optionKey = (option: MultiSelectOption, index: number) => `${index}:${option.value}`
+
   return (
     <Popover open={open} onOpenChange={setOpen}>
       <PopoverTrigger asChild>
@@ -134,10 +136,11 @@ export function MultiSelect({
                   <div className="h-4 w-4 animate-spin rounded-full border-2 border-primary border-t-transparent" />
                 </div>
               ) : (
-                options.map((option) => (
+                options.map((option, index) => (
                   <CommandItem
                     key={option.value}
-                    value={option.value}
+                    value={optionKey(option, index)}
+                    keywords={[option.label, option.value]}
                     onSelect={() => handleSelect(option.value)}
                   >
                     <Check

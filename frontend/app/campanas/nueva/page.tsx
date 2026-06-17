@@ -79,7 +79,7 @@ export default function NuevaCampanaPage() {
       try {
         const response = await fetchWithAuth(`${API_URL}/api/users/${user.id}/credentials`)
         const data = await response.json()
-        const configured = data.channels?.filter((c: any) => c.isActive && c.isValidated).map((c: any) => c.channelId) || []
+        const configured = data.channels?.filter((c: any) => c.isActive).map((c: any) => c.channelId) || []
         setConfiguredChannels(configured)
       } catch {
         setConfiguredChannels([])
@@ -124,7 +124,7 @@ export default function NuevaCampanaPage() {
     
     // Validar canales configurados para cualquier tipo de distribución
     if (configuredChannels.length === 0) {
-      errors.push("Debe configurar al menos un canal antes de crear una campaña")
+      errors.push("Debe tener al menos un canal activo antes de crear una campaña")
     } else if (formData.distributionType === "manual" && formData.channels.length === 0) {
       errors.push("Debe seleccionar al menos un canal para distribución manual")
     }

@@ -55,6 +55,8 @@ export function SearchableSelect({
     return options.find(option => String(option) === value) || placeholder
   }, [value, options, placeholder])
 
+  const optionKey = (option: string | number, index: number) => `${index}:${String(option)}`
+
   // Truncar texto largo para el display
   const truncateText = (text: string | number, maxLength: number = 25) => {
     const textStr = String(text)
@@ -111,7 +113,8 @@ export function SearchableSelect({
             {filteredOptions.map((option) => (
               <CommandItem
                 key={String(option)}
-                value={String(option)}
+                value={optionKey(option, options.findIndex((item) => String(item) === String(option)))}
+                keywords={[String(option)]}
                 onSelect={() => {
                   onValueChange(String(option))
                   setOpen(false)
