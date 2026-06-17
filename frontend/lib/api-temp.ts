@@ -186,13 +186,13 @@ export async function createSegment(fetchWithAuth: any, data: any) {
   if (!res.ok) throw new Error('Error al crear segmento');
   return res.json();
 }
-export async function getSegment(id: number) {
-  const res = await fetch(`${API_URL}/api/segments/${id}`, { cache: 'no-store' });
+export async function getSegment(fetchWithAuth: any, id: number) {
+  const res = await fetchWithAuth(`${API_URL}/api/segments/${id}`, { cache: 'no-store' });
   if (!res.ok) throw new Error('Error al obtener segmento');
   return res.json();
 }
-export async function updateSegment(id: number, data: any) {
-  const res = await fetch(`${API_URL}/api/segments/${id}`, {
+export async function updateSegment(fetchWithAuth: any, id: number, data: any) {
+  const res = await fetchWithAuth(`${API_URL}/api/segments/${id}`, {
     method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(data),
   });
   if (!res.ok) throw new Error('Error al actualizar segmento');

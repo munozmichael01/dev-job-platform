@@ -55,7 +55,7 @@ export default function EditarSegmentoPage() {
     ;(async () => {
       try {
         setLoading(true)
-        const segment = await getSegment(id)
+        const segment = await getSegment(authFetch, id)
         const filters = segment.Filters || {}
         setFormData({
           name: segment.Name || "",
@@ -148,7 +148,7 @@ export default function EditarSegmentoPage() {
     }
     
     try {
-      await updateSegment(id, {
+      await updateSegment(authFetch, id, {
         name: formData.name,
         description: formData.description,
         filters: {
