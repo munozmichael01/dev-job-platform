@@ -46,12 +46,19 @@ export default function NuevoSegmentoPage() {
   const [estimatedOffers, setEstimatedOffers] = useState<number>(0)
   const [estimating, setEstimating] = useState<boolean>(false)
 
-  // Cargar listas reales
+  // Cargar listas reales de forma contextual: cada selector se calcula usando
+  // los otros filtros activos para evitar opciones que llevan a cero ofertas.
   useEffect(() => {
+    const timer = setTimeout(() => {
     ;(async () => {
       try {
         setLoadingLists(true)
-        const [loc, sec, comp] = await Promise.all([fetchLocations(authFetch, { status: 'active' }), fetchSectors(authFetch, { status: 'active' }), fetchCompanies(authFetch, { status: 'active' })])
+        const base = { status: 'active' as const, jobTitles: formData.jobTitles }
+        const [loc, sec, comp] = await Promise.all([
+          fetchLocations(authFetch, { ...base, sector: formData.sectors, company: formData.companies }),
+          fetchSectors(authFetch, { ...base, location: formData.locations, company: formData.companies }),
+          fetchCompanies(authFetch, { ...base, location: formData.locations, sector: formData.sectors })
+        ])
         setLocationsList(loc?.data || [])
         setSectorsList(sec?.data || [])
         setCompaniesList(comp?.data || [])
@@ -61,7 +68,9 @@ export default function NuevoSegmentoPage() {
         setLoadingLists(false)
       }
     })()
-  }, [])
+    }, 350)
+    return () => clearTimeout(timer)
+  }, [formData.jobTitles.join("|"), formData.locations.join("|"), formData.sectors.join("|"), formData.companies.join("|")])
 
   // Handlers
   const addJobTitle = () => {

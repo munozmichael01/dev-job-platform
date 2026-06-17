@@ -80,12 +80,20 @@ export default function EditarSegmentoPage() {
     })()
   }, [id])
 
-  // Cargar listas reales
+  // Cargar listas reales de forma contextual: cada selector se calcula usando
+  // los otros filtros activos para evitar opciones que llevan a cero ofertas.
   useEffect(() => {
+    if (loading) return
+    const timer = setTimeout(() => {
     ;(async () => {
       try {
         setLoadingLists(true)
-        const [loc, sec, comp] = await Promise.all([fetchLocations(authFetch, { status: 'active' }), fetchSectors(authFetch, { status: 'active' }), fetchCompanies(authFetch, { status: 'active' })])
+        const base = { status: 'active' as const, jobTitles: formData.jobTitles }
+        const [loc, sec, comp] = await Promise.all([
+          fetchLocations(authFetch, { ...base, sector: formData.sectors, company: formData.companies }),
+          fetchSectors(authFetch, { ...base, location: formData.locations, company: formData.companies }),
+          fetchCompanies(authFetch, { ...base, location: formData.locations, sector: formData.sectors })
+        ])
         setLocationsList(loc?.data || [])
         setSectorsList(sec?.data || [])
         setCompaniesList(comp?.data || [])
@@ -95,7 +103,9 @@ export default function EditarSegmentoPage() {
         setLoadingLists(false)
       }
     })()
-  }, [])
+    }, 350)
+    return () => clearTimeout(timer)
+  }, [formData.jobTitles.join("|"), formData.locations.join("|"), formData.sectors.join("|"), formData.companies.join("|"), loading])
 
   // Convert arrays to MultiSelect options
   const sectorsOptions: MultiSelectOption[] = sectorsList.map(sector => ({ label: sector, value: sector }))

@@ -66,11 +66,21 @@ export async function createOffer(data: any) {
 
 export interface FilterParams {
   status?: string
-  location?: string
-  sector?: string
-  company?: string
+  location?: string | string[]
+  sector?: string | string[]
+  company?: string | string[]
+  jobTitle?: string | string[]
+  jobTitles?: string[]
   externalId?: string
   q?: string
+}
+
+function appendFilterParam(params: URLSearchParams, key: string, value?: string | string[]) {
+  if (!value) return;
+  const values = Array.isArray(value) ? value : [value];
+  values
+    .filter(item => item && item !== 'all')
+    .forEach(item => params.append(key, String(item)));
 }
 
 export async function fetchLocations(fetchWithAuth: any, filters: FilterParams = {}) {
@@ -79,8 +89,9 @@ export async function fetchLocations(fetchWithAuth: any, filters: FilterParams =
   
   const params = new URLSearchParams();
   if (filters.status && filters.status !== 'all') params.append('status', filters.status);
-  if (filters.sector && filters.sector !== 'all') params.append('sector', filters.sector);
-  if (filters.company && filters.company !== 'all') params.append('company', filters.company);
+  appendFilterParam(params, 'sector', filters.sector);
+  appendFilterParam(params, 'company', filters.company);
+  appendFilterParam(params, 'jobTitle', filters.jobTitles || filters.jobTitle);
   if (filters.externalId && filters.externalId !== 'all') params.append('externalId', filters.externalId);
   if (filters.q && filters.q.trim()) params.append('q', filters.q.trim());
 
@@ -111,8 +122,9 @@ export async function fetchSectors(fetchWithAuth: any, filters: FilterParams = {
   
   const params = new URLSearchParams();
   if (filters.status && filters.status !== 'all') params.append('status', filters.status);
-  if (filters.location && filters.location !== 'all') params.append('location', filters.location);
-  if (filters.company && filters.company !== 'all') params.append('company', filters.company);
+  appendFilterParam(params, 'location', filters.location);
+  appendFilterParam(params, 'company', filters.company);
+  appendFilterParam(params, 'jobTitle', filters.jobTitles || filters.jobTitle);
   if (filters.externalId && filters.externalId !== 'all') params.append('externalId', filters.externalId);
   if (filters.q && filters.q.trim()) params.append('q', filters.q.trim());
 
@@ -142,9 +154,10 @@ export async function fetchExternalIds(filters: FilterParams = {}) {
   
   const params = new URLSearchParams();
   if (filters.status && filters.status !== 'all') params.append('status', filters.status);
-  if (filters.location && filters.location !== 'all') params.append('location', filters.location);
-  if (filters.sector && filters.sector !== 'all') params.append('sector', filters.sector);
-  if (filters.company && filters.company !== 'all') params.append('company', filters.company);
+  appendFilterParam(params, 'location', filters.location);
+  appendFilterParam(params, 'sector', filters.sector);
+  appendFilterParam(params, 'company', filters.company);
+  appendFilterParam(params, 'jobTitle', filters.jobTitles || filters.jobTitle);
   if (filters.q && filters.q.trim()) params.append('q', filters.q.trim());
 
   const url = `${API_URL}/job-offers/external-ids${params.toString() ? '?' + params.toString() : ''}`;
@@ -341,8 +354,9 @@ export async function fetchCompanies(fetchWithAuth: any, filters: FilterParams =
   
   const params = new URLSearchParams();
   if (filters.status && filters.status !== 'all') params.append('status', filters.status);
-  if (filters.location && filters.location !== 'all') params.append('location', filters.location);
-  if (filters.sector && filters.sector !== 'all') params.append('sector', filters.sector);
+  appendFilterParam(params, 'location', filters.location);
+  appendFilterParam(params, 'sector', filters.sector);
+  appendFilterParam(params, 'jobTitle', filters.jobTitles || filters.jobTitle);
   if (filters.externalId && filters.externalId !== 'all') params.append('externalId', filters.externalId);
   if (filters.q && filters.q.trim()) params.append('q', filters.q.trim());
 

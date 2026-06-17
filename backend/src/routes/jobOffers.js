@@ -91,6 +91,30 @@ function normalizeLocationFilter(value) {
     .filter(item => item && item !== 'all');
 }
 
+function normalizeStringFilter(value) {
+  if (!value) return [];
+  const values = Array.isArray(value) ? value : [value];
+  return values
+    .flatMap(item => String(item || '').split('|'))
+    .map(item => item.trim())
+    .filter(item => item && item !== 'all');
+}
+
+function applyMultiOrFilter(query, values, fields) {
+  const terms = normalizeStringFilter(values)
+    .slice(0, 25)
+    .map(sanitizePostgrestOrTerm)
+    .filter(Boolean);
+  if (terms.length === 0) return query;
+
+  const parts = [];
+  terms.forEach(term => {
+    fields.forEach(field => parts.push(`${field}.ilike.%${term}%`));
+  });
+
+  return parts.length > 0 ? query.or(parts.join(',')) : query;
+}
+
 function applyLocationFilter(query, location) {
   const locations = normalizeLocationFilter(location);
   if (locations.length === 0) return query;
@@ -183,11 +207,9 @@ function applyOfferFilters(query, req, filters) {
   query = applyUserFilter(query, req);
   if (filters.status) query = query.eq('Status', filters.status);
   query = applyLocationFilter(query, filters.locations || filters.location);
-  if (filters.sector) {
-    const sector = sanitizePostgrestOrTerm(filters.sector);
-    query = query.or(`Sector.ilike.%${sector}%,Category.ilike.%${sector}%`);
-  }
-  if (filters.company) query = query.ilike('CompanyName', `%${filters.company}%`);
+  query = applyMultiOrFilter(query, filters.sectors || filters.sector, ['Sector', 'Category']);
+  query = applyMultiOrFilter(query, filters.companies || filters.company, ['CompanyName']);
+  query = applyMultiOrFilter(query, filters.jobTitles || filters.titles, ['Title', 'CompanyName']);
   if (filters.externalId) query = query.ilike('ExternalId', `%${filters.externalId}%`);
   if (filters.search) {
     const term = sanitizePostgrestOrTerm(filters.search);
@@ -200,8 +222,9 @@ router.get('/job-offers/locations', addUserToRequest, requireAuth, async (req, r
   try {
     const filters = {
       status: normalizeStatus(req.query.status),
-      sector: req.query.sector && req.query.sector !== 'all' ? String(req.query.sector).trim() : null,
-      company: req.query.company && req.query.company !== 'all' ? String(req.query.company).trim() : null,
+      sectors: normalizeStringFilter(req.query.sector),
+      companies: normalizeStringFilter(req.query.company),
+      jobTitles: normalizeStringFilter(req.query.jobTitle || req.query.jobTitles),
       externalId: req.query.externalId && req.query.externalId !== 'all' ? String(req.query.externalId).trim() : null,
       search: req.query.q?.trim() || null
     };
@@ -227,7 +250,8 @@ router.get('/job-offers/sectors', addUserToRequest, requireAuth, async (req, res
     const filters = {
       status: normalizeStatus(req.query.status),
       locations: normalizeLocationFilter(req.query.location),
-      company: req.query.company && req.query.company !== 'all' ? String(req.query.company).trim() : null,
+      companies: normalizeStringFilter(req.query.company),
+      jobTitles: normalizeStringFilter(req.query.jobTitle || req.query.jobTitles),
       externalId: req.query.externalId && req.query.externalId !== 'all' ? String(req.query.externalId).trim() : null,
       search: req.query.q?.trim() || null
     };
@@ -253,8 +277,9 @@ router.get('/job-offers/external-ids', addUserToRequest, requireAuth, async (req
     const filters = {
       status: normalizeStatus(req.query.status),
       locations: normalizeLocationFilter(req.query.location),
-      sector: req.query.sector && req.query.sector !== 'all' ? String(req.query.sector).trim() : null,
-      company: req.query.company && req.query.company !== 'all' ? String(req.query.company).trim() : null,
+      sectors: normalizeStringFilter(req.query.sector),
+      companies: normalizeStringFilter(req.query.company),
+      jobTitles: normalizeStringFilter(req.query.jobTitle || req.query.jobTitles),
       search: req.query.q?.trim() || null
     };
     const hasFilters = hasActiveFilterValues(filters);
@@ -292,7 +317,8 @@ router.get('/job-offers/companies', addUserToRequest, requireAuth, async (req, r
     const filters = {
       status: normalizeStatus(req.query.status),
       locations: normalizeLocationFilter(req.query.location),
-      sector: req.query.sector && req.query.sector !== 'all' ? String(req.query.sector).trim() : null,
+      sectors: normalizeStringFilter(req.query.sector),
+      jobTitles: normalizeStringFilter(req.query.jobTitle || req.query.jobTitles),
       externalId: req.query.externalId && req.query.externalId !== 'all' ? String(req.query.externalId).trim() : null,
       search: req.query.q?.trim() || null
     };
