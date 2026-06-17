@@ -137,6 +137,16 @@ export function buildKeysetUrl(
   
   // Agregar parámetros existentes
   Object.entries(params).forEach(([key, value]) => {
+    if (Array.isArray(value)) {
+      value
+        .filter(item => item !== undefined && item !== null && item !== '' && item !== 'all')
+        .forEach(item => {
+          console.log('🔍 BUILDKEYSETURL: Agregando array param', key, '=', item);
+          url.searchParams.append(key, String(item));
+        });
+      return;
+    }
+
     if (value !== undefined && value !== null && value !== '') {
       console.log('🔍 BUILDKEYSETURL: Agregando param', key, '=', value);
       url.searchParams.append(key, String(value));

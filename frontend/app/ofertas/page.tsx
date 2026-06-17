@@ -10,6 +10,7 @@ import { SidebarTrigger } from "@/components/ui/sidebar"
 import { Search, Filter, Eye, MapPin, Calendar, Building2, DollarSign, AlertCircle, CheckCircle, RefreshCw, Loader2, X, Trash2, Play, Pause, Archive, TrendingUp, BarChart3 } from "lucide-react"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { SearchableSelect } from "@/components/ui/searchable-select"
+import { MultiSelect, type MultiSelectOption } from "@/components/ui/multi-select"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip"
 import { useToast } from "@/hooks/use-toast"
@@ -60,7 +61,7 @@ export default function OfertasPage() {
   // Estados para filtros
   const [searchTerm, setSearchTerm] = useState("")
   const [statusFilter, setStatusFilter] = useState<string>("all")
-  const [locationFilter, setLocationFilter] = useState<string>("all")
+  const [locationFilters, setLocationFilters] = useState<string[]>([])
   const [sectorFilter, setSectorFilter] = useState<string>("all")
   const [companyFilter, setCompanyFilter] = useState<string>("all")
   const [externalIdFilter, setExternalIdFilter] = useState<string>("all")
@@ -160,25 +161,25 @@ export default function OfertasPage() {
       ...(debouncedSearchTerm && debouncedSearchTerm.trim() !== '' ? { q: debouncedSearchTerm.trim() } : {}),
       mode: 'auto', // Usar siempre modo auto para cascada inteligente
       ...(statusFilter && statusFilter !== 'all' ? { status: statusFilter } : {}),
-      ...(locationFilter && locationFilter !== 'all' ? { location: locationFilter } : {}),
+      ...(locationFilters.length > 0 ? { location: locationFilters } : {}),
       ...(sectorFilter && sectorFilter !== 'all' ? { sector: sectorFilter } : {}),
       ...(companyFilter && companyFilter !== 'all' ? { company: companyFilter } : {}),
       ...(externalIdFilter && externalIdFilter !== 'all' ? { externalId: externalIdFilter } : {}),
       ...(promocionFilter && promocionFilter !== 'all' ? { promocion: promocionFilter } : {}),
     }
-  }, [debouncedSearchTerm, statusFilter, locationFilter, sectorFilter, companyFilter, externalIdFilter, promocionFilter])
+  }, [debouncedSearchTerm, statusFilter, locationFilters, sectorFilter, companyFilter, externalIdFilter, promocionFilter])
 
   // Filtros estables para evitar loops infinitos
   const currentFilters = useMemo(() => ({
     ...(debouncedSearchTerm && debouncedSearchTerm.trim() !== '' ? { q: debouncedSearchTerm.trim() } : {}),
     mode: 'auto',
     ...(statusFilter && statusFilter !== 'all' ? { status: statusFilter } : {}),
-    ...(locationFilter && locationFilter !== 'all' ? { location: locationFilter } : {}),
+    ...(locationFilters.length > 0 ? { location: locationFilters } : {}),
     ...(sectorFilter && sectorFilter !== 'all' ? { sector: sectorFilter } : {}),
     ...(companyFilter && companyFilter !== 'all' ? { company: companyFilter } : {}),
     ...(externalIdFilter && externalIdFilter !== 'all' ? { externalId: externalIdFilter } : {}),
     ...(promocionFilter && promocionFilter !== 'all' ? { promocion: promocionFilter } : {}),
-  }), [debouncedSearchTerm, statusFilter, locationFilter, sectorFilter, companyFilter, externalIdFilter, promocionFilter])
+  }), [debouncedSearchTerm, statusFilter, locationFilters, sectorFilter, companyFilter, externalIdFilter, promocionFilter])
 
   // Hook de keyset pagination con navegación anterior/siguiente - AUTENTICADO
   const {
@@ -222,7 +223,7 @@ export default function OfertasPage() {
     }, 500); // 500ms debounce
 
     return () => clearTimeout(timeoutId);
-  }, [statusFilter, locationFilter, sectorFilter, companyFilter, externalIdFilter, promocionFilter, debouncedSearchTerm]); // Depende de valores individuales
+  }, [statusFilter, locationFilters, sectorFilter, companyFilter, externalIdFilter, promocionFilter, debouncedSearchTerm]); // Depende de valores individuales
 
   // Cargar opciones de dropdowns con filtros dependientes - ARREGLADO
   useEffect(() => {
@@ -232,7 +233,7 @@ export default function OfertasPage() {
         // Usar currentFilters en lugar de re-crear objeto
         const filterParams = {
           status: statusFilter !== 'all' ? statusFilter : undefined,
-          location: locationFilter !== 'all' ? locationFilter : undefined,
+          location: locationFilters.length > 0 ? locationFilters : undefined,
           sector: sectorFilter !== 'all' ? sectorFilter : undefined,
           company: companyFilter !== 'all' ? companyFilter : undefined,
           externalId: externalIdFilter !== 'all' ? externalIdFilter : undefined,
@@ -313,10 +314,6 @@ export default function OfertasPage() {
     setStatusFilter(value)
   }, [])
 
-  const handleLocationChange = useCallback((value: string) => {
-    setLocationFilter(value)
-  }, [])
-
   const handleSectorChange = useCallback((value: string) => {
     setSectorFilter(value)
   }, [])
@@ -336,7 +333,7 @@ export default function OfertasPage() {
   const handleClearFilters = useCallback(() => {
     setSearchTerm("")
     setStatusFilter("all")
-    setLocationFilter("all")
+    setLocationFilters([])
     setSectorFilter("all")
     setCompanyFilter("all")
     setExternalIdFilter("all")
@@ -349,6 +346,7 @@ export default function OfertasPage() {
 
   // Usar opciones de filtros desde la API (todos los datos, no solo ofertas cargadas)
   const uniqueLocations = locations
+  const locationOptions: MultiSelectOption[] = uniqueLocations.map(location => ({ label: location, value: location }))
   const uniqueSectors = sectors
   const uniqueCompanies = companies
   const uniqueExternalIds = externalIds
@@ -674,13 +672,12 @@ export default function OfertasPage() {
 
             <div className="space-y-2">
               <label className="text-sm font-medium">Ubicación</label>
-              <SearchableSelect
-                options={uniqueLocations}
-                value={locationFilter}
-                onValueChange={handleLocationChange}
+              <MultiSelect
+                options={locationOptions}
+                selected={locationFilters}
+                onChange={setLocationFilters}
                 placeholder="Todas las ubicaciones"
-                searchPlaceholder="Buscar ubicación..."
-                emptyMessage="No se encontraron ubicaciones"
+                emptyText="No se encontraron ubicaciones"
                 loading={loadingOptions}
               />
             </div>

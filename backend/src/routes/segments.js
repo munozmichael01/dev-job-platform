@@ -45,10 +45,14 @@ function sanitizePostgrestOrTerm(value) {
 function parseLocationValue(value) {
   const raw = String(value || '').trim();
   if (!raw) return null;
-  const [city, ...rest] = raw.split(',');
+  const parts = raw
+    .split(',')
+    .map(part => part.trim())
+    .filter(Boolean);
+
   return {
-    city: sanitizePostgrestOrTerm(city) || null,
-    region: sanitizePostgrestOrTerm(rest.join(',')) || null,
+    city: sanitizePostgrestOrTerm(parts[0]) || null,
+    region: parts.length > 1 ? sanitizePostgrestOrTerm(parts[parts.length - 1]) || null : null,
     term: sanitizePostgrestOrTerm(raw)
   };
 }

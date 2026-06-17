@@ -185,6 +185,10 @@ export function useApi() {
     fetchOffers: async (params: any = {}) => {
       const cleanParams = new URLSearchParams()
       Object.entries(params).forEach(([key, value]) => {
+        if (Array.isArray(value)) {
+          value.filter(item => item && item !== 'all').forEach(item => cleanParams.append(key, String(item)))
+          return
+        }
         if (value && value !== 'all') {
           cleanParams.append(key, String(value))
         }
@@ -208,6 +212,10 @@ export function useApi() {
     fetchLocations: async (filters: any = {}) => {
       const params = new URLSearchParams()
       Object.entries(filters).forEach(([key, value]) => {
+        if (Array.isArray(value)) {
+          value.filter(item => item && item !== 'all').forEach(item => params.append(key, String(item)))
+          return
+        }
         if (value && value !== 'all') {
           params.append(key, String(value))
         }
@@ -221,6 +229,10 @@ export function useApi() {
     fetchSectors: async (filters: any = {}) => {
       const params = new URLSearchParams()
       Object.entries(filters).forEach(([key, value]) => {
+        if (Array.isArray(value)) {
+          value.filter(item => item && item !== 'all').forEach(item => params.append(key, String(item)))
+          return
+        }
         if (value && value !== 'all') {
           params.append(key, String(value))
         }
@@ -234,6 +246,10 @@ export function useApi() {
     fetchCompanies: async (filters: any = {}) => {
       const params = new URLSearchParams()
       Object.entries(filters).forEach(([key, value]) => {
+        if (Array.isArray(value)) {
+          value.filter(item => item && item !== 'all').forEach(item => params.append(key, String(item)))
+          return
+        }
         if (value && value !== 'all') {
           params.append(key, String(value))
         }
@@ -247,6 +263,10 @@ export function useApi() {
     fetchExternalIds: async (filters: any = {}) => {
       const params = new URLSearchParams()
       Object.entries(filters).forEach(([key, value]) => {
+        if (Array.isArray(value)) {
+          value.filter(item => item && item !== 'all').forEach(item => params.append(key, String(item)))
+          return
+        }
         if (value && value !== 'all') {
           params.append(key, String(value))
         }
