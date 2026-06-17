@@ -44,7 +44,9 @@ export default function NuevaCampanaPage() {
   })
   const [availableSegments, setAvailableSegments] = useState<{ id: string; name: string; description: string; offerCount: number }[]>([])
   const [configuredChannels, setConfiguredChannels] = useState<string[]>([])
+  const [channelSummary, setChannelSummary] = useState({ active: 0, validated: 0 })
   const [showConfirmModal, setShowConfirmModal] = useState(false)
+  const [showChannelSetupModal, setShowChannelSetupModal] = useState(false)
   const [createdCampaignId, setCreatedCampaignId] = useState<string | null>(null)
   const [isCreatingCampaign, setIsCreatingCampaign] = useState(false)
   const [isActivatingCampaign, setIsActivatingCampaign] = useState(false)
@@ -79,10 +81,14 @@ export default function NuevaCampanaPage() {
       try {
         const response = await fetchWithAuth(`${API_URL}/api/users/${user.id}/credentials`)
         const data = await response.json()
-        const configured = data.channels?.filter((c: any) => c.isActive).map((c: any) => c.channelId) || []
-        setConfiguredChannels(configured)
+        const channels = data.channels || []
+        const activeChannels = channels.filter((c: any) => c.isActive)
+        const validatedChannels = activeChannels.filter((c: any) => c.isValidated)
+        setConfiguredChannels(activeChannels.map((c: any) => c.channelId))
+        setChannelSummary({ active: activeChannels.length, validated: validatedChannels.length })
       } catch {
         setConfiguredChannels([])
+        setChannelSummary({ active: 0, validated: 0 })
       }
     }
     
@@ -111,6 +117,22 @@ export default function NuevaCampanaPage() {
   const calculateEstimatedBudget = React.useCallback(() => {
     return (formData.targetApplications && formData.maxCPA ? Number(formData.targetApplications) * Number(formData.maxCPA) : 0)
   }, [formData.targetApplications, formData.maxCPA])
+
+  const getChannelSetupIssue = React.useCallback(() => {
+    if (channelSummary.active === 0) {
+      return {
+        title: "No tienes canales configurados",
+        description: "Para crear una campaña necesitas configurar al menos un canal de distribución. Puedes hacerlo desde la sección Canales.",
+      }
+    }
+    if (channelSummary.validated === 0) {
+      return {
+        title: "No tienes canales validados",
+        description: "Tienes canales activos, pero todavía no hay ninguno validado. Valida al menos un canal antes de crear una campaña.",
+      }
+    }
+    return null
+  }, [channelSummary])
   
   const validateForm = React.useCallback(() => {
     const errors = []
@@ -121,11 +143,7 @@ export default function NuevaCampanaPage() {
     if (!formData.budget) errors.push("El presupuesto es obligatorio")
     if (!formData.targetApplications) errors.push("El objetivo de aplicaciones es obligatorio")
     if (!formData.maxCPA) errors.push("El CPA máximo es obligatorio")
-    
-    // Validar canales configurados para cualquier tipo de distribución
-    if (configuredChannels.length === 0) {
-      errors.push("Debe tener al menos un canal activo antes de crear una campaña")
-    } else if (formData.distributionType === "manual" && formData.channels.length === 0) {
+    if (configuredChannels.length > 0 && formData.distributionType === "manual" && formData.channels.length === 0) {
       errors.push("Debe seleccionar al menos un canal para distribución manual")
     }
     
@@ -137,6 +155,11 @@ export default function NuevaCampanaPage() {
     const errors = validateForm()
     if (errors.length > 0) {
       toast({ title: "Errores en el formulario", description: errors.join(", "), variant: "destructive" })
+      return
+    }
+
+    if (getChannelSetupIssue()) {
+      setShowChannelSetupModal(true)
       return
     }
 
@@ -576,7 +599,7 @@ export default function NuevaCampanaPage() {
               </CardHeader>
               <CardContent>
                 <div className="space-y-2">
-                  {validateForm().length === 0 ? (
+                  {validateForm().length === 0 && !getChannelSetupIssue() ? (
                     <div className="flex items-center gap-2 text-green-600">
                       <CheckCircle className="h-4 w-4" />
                       <span className="text-sm">Campaña lista para crear</span>
@@ -591,6 +614,9 @@ export default function NuevaCampanaPage() {
                         {validateForm().map((error, index) => (
                           <li key={index}>• {error}</li>
                         ))}
+                        {getChannelSetupIssue() && (
+                          <li>• {getChannelSetupIssue()?.title}</li>
+                        )}
                       </ul>
                     </div>
                   )}
@@ -610,6 +636,42 @@ export default function NuevaCampanaPage() {
           </div>
         </div>
       </form>
+
+      {/* Modal para resolver canales antes de crear campaña */}
+      <Dialog open={showChannelSetupModal} onOpenChange={setShowChannelSetupModal}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <AlertTriangle className="h-5 w-5 text-orange-500" />
+              {getChannelSetupIssue()?.title || "Canales requeridos"}
+            </DialogTitle>
+            <DialogDescription>
+              {getChannelSetupIssue()?.description || "Configura al menos un canal antes de crear una campaña."}
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="rounded-lg border bg-muted/50 p-4 text-sm text-muted-foreground">
+            <div><strong>Canales activos:</strong> {channelSummary.active}</div>
+            <div><strong>Canales validados:</strong> {channelSummary.validated}</div>
+          </div>
+
+          <DialogFooter className="gap-2">
+            <Button
+              type="button"
+              variant="outline"
+              onClick={() => setShowChannelSetupModal(false)}
+            >
+              Cancelar
+            </Button>
+            <Button
+              type="button"
+              onClick={() => router.push("/credenciales")}
+            >
+              Ir a Canales
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       {/* Modal de confirmación */}
       <Dialog open={showConfirmModal} onOpenChange={setShowConfirmModal}>
